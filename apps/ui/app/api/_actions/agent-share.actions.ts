@@ -1,5 +1,6 @@
 'use server'
 
+import { isMachineEntitled } from '@rerun/cloud/billing'
 import { agentShareIncludeSchema, type AgentSharePreview } from '@rerun/contracts'
 import { z } from 'zod'
 import { getAdminEmail } from '@/lib/auth/admin'
@@ -101,8 +102,7 @@ export async function installSharedAgentAction(input: unknown): Promise<InstallS
 
         if ((await getAdminEmail()) === null) {
             const { data: workspace } = await selectMaybeSingle(supabase, 'workspaces', ['subscription_status'] as const, { id: workspace_id })
-            const status = workspace?.subscription_status
-            if (status !== 'active' && status !== 'trialing') throw new Error('This workspace has no active plan.')
+            if (!isMachineEntitled(workspace?.subscription_status)) throw new Error('This workspace has no active plan.')
         }
 
         return { ok: true, ...(await installAgentShare(supabase, token, { workspaceId: workspace_id, spaceId, actor, position })) }

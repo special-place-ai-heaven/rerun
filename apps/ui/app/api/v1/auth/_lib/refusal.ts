@@ -12,6 +12,7 @@ const STATUS_BY_REASON: Partial<Record<PhoneFailure | EmailPreparationFailure, n
     undeliverable: 422,
     blocked: 422,
     blocked_domain: 422,
+    not_allowed: 403,
 }
 
 function refusal(reason: PhoneFailure | EmailPreparationFailure, error: string, retryAfterSeconds?: number): Response {

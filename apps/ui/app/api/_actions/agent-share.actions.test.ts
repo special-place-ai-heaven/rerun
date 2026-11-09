@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { CLOUD_ENTITLEMENTS } from '@/test/cloud-fakes'
 import { fakeSupabase, type FakeSupabase } from '@/test/supabase-fake'
 
 const mocks = vi.hoisted(() => ({
@@ -9,7 +10,10 @@ const mocks = vi.hoisted(() => ({
     installAgentShare: vi.fn(),
     revokeAgentShare: vi.fn(),
     listWorkspaceShares: vi.fn(),
+    isMachineEntitled: vi.fn(),
 }))
+
+vi.mock('@rerun/cloud/billing', async importOriginal => ({ ...(await importOriginal<object>()), isMachineEntitled: mocks.isMachineEntitled }))
 
 vi.mock('@/lib/auth/admin', () => ({ getAdminEmail: mocks.getAdminEmail }))
 vi.mock('@/supabase/session/getServerSession', () => ({ getServerSession: mocks.getServerSession, getSessionWorkspace: mocks.getServerSession }))
@@ -67,6 +71,7 @@ const SESSION = {
 beforeEach(() => {
     vi.clearAllMocks()
     mocks.getAdminEmail.mockResolvedValue(null)
+    mocks.isMachineEntitled.mockImplementation(CLOUD_ENTITLEMENTS.isMachineEntitled)
     mocks.createAgentShare.mockResolvedValue({ url: 'https://app.rerun.build/s/tok', warnings: [], reused: false })
     mocks.installAgentShare.mockResolvedValue({ agentId: 'new-agent' })
 })
@@ -142,6 +147,14 @@ describe('installSharedAgentAction', () => {
 
         await expect(installSharedAgentAction({ token: 'tok', spaceId: SPACE_ID })).resolves.toEqual({ ok: false, error: 'This workspace has no active plan.' })
         expect(mocks.installAgentShare).not.toHaveBeenCalled()
+    })
+
+    it('installs without a plan where the edition sells none', async () => {
+        mocks.isMachineEntitled.mockReturnValue(true)
+        database({ subscriptionStatus: null })
+
+        await expect(installSharedAgentAction({ token: 'tok', spaceId: SPACE_ID })).resolves.toMatchObject({ ok: true })
+        expect(mocks.installAgentShare).toHaveBeenCalled()
     })
 
     it('lets an admin install without a plan', async () => {

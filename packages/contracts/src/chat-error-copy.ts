@@ -128,7 +128,7 @@ export function subscriptionLimitTitle(limit: SubscriptionLimit): string {
 }
 
 const KIND_TITLES: Record<Exclude<ChatErrorKind, 'generic' | 'usage_limit'>, string> = {
-    budget: 'Rerun credits used up',
+    budget: 'Out of balance',
     unauthorized: 'Connection signed out',
     overloaded: 'Provider overloaded',
     context_window: 'Conversation too long',
@@ -154,7 +154,7 @@ export function chatErrorTitle(kind: ChatErrorKind, message: string): string | n
 }
 
 const KIND_MESSAGES: Partial<Record<ChatErrorKind, string>> = {
-    budget: 'Rerun credits used up for this period. Add credits or wait for the monthly reset.',
+    budget: 'The account behind Rerun models has no balance left. Top it up, or switch to another model.',
     unauthorized: 'This connection needs to be signed in again before the coworker can run.',
     overloaded: 'The provider is overloaded right now. Try again in a moment.',
     context_window: 'This conversation no longer fits the model, and sending it again will hit the same wall. Switch to a model with a larger context window, or start a new conversation.',

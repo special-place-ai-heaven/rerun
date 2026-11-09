@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CUSTOM_DEFAULT_CONTEXT_WINDOW, connectionConfigSchema } from '@rerun/contracts'
 import { candidateBaseUrls, customContextWindow, customDiscoveredModels, parseModelList, probeCustomEndpoint, refreshCustomCatalog, resetCustomCatalogForTests } from './custom-catalog.js'
 import { isConnected, toSummary } from './loader.js'
@@ -115,7 +115,15 @@ describe('probeCustomEndpoint', () => {
 
     it('calls a closed port unreachable and names why', async () => {
         await new Promise<void>(done => server.close(() => done()))
+        // The probe goes on to host.docker.internal, which resolves on some CI machines to a host that
+        // never answers; it stands here for the plain PC, where that name does not exist.
+        const realFetch = globalThis.fetch
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) =>
+            new URL(String(input)).hostname === 'host.docker.internal'
+                ? Promise.reject(new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } }))
+                : realFetch(input, init))
         const result = await probeCustomEndpoint({ baseUrl })
+        fetchSpy.mockRestore()
         expect(result).toMatchObject({ baseUrl, models: [], problem: 'unreachable', detail: 'ECONNREFUSED' })
         server = createServer()
         await new Promise<void>(done => server.listen(0, '127.0.0.1', done))

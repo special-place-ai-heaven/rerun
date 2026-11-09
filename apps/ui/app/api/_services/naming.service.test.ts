@@ -12,6 +12,8 @@ let service: FakeSupabase
 vi.mock('@/supabase/serviceRole', () => ({ createServiceRoleClient: () => service.client }))
 vi.mock('@/supabase/session/getServerSession', () => ({ getServerSession: async () => ({ session: null }) }))
 vi.mock('@/app/api/_auth/ownership', () => ({ workspaceFounderUserId: async () => FOUNDER }))
+const findSiteIcon = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/onboarding/site-icon.server', () => ({ findSiteIcon }))
 
 const { ensureWorkspaceNamed } = await import('./naming.service')
 
@@ -26,10 +28,8 @@ function workspaceWithIcon(iconUrl: string | null) {
 const iconWritten = () => (service.writes('workspaces')[0]?.payload as { icon_url?: string } | undefined)?.icon_url
 
 beforeEach(() => {
-    vi.stubGlobal(
-        'fetch',
-        vi.fn(async () => new Response(null, { status: 200 }))
-    )
+    findSiteIcon.mockReset()
+    findSiteIcon.mockResolvedValue({ bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), contentType: 'image/png' })
 })
 
 describe('ensureWorkspaceNamed and the company favicon', () => {
@@ -47,6 +47,16 @@ describe('ensureWorkspaceNamed and the company favicon', () => {
         await ensureWorkspaceNamed({ workspaceId: WORKSPACE_ID, userId: FOUNDER })
 
         expect(iconWritten()).toBe(faviconUrl('acme.com'))
+    })
+
+    it('leaves the icon alone when the site has none', async () => {
+        workspaceWithIcon(null)
+        findSiteIcon.mockResolvedValue(null)
+
+        await ensureWorkspaceNamed({ workspaceId: WORKSPACE_ID, userId: FOUNDER })
+
+        expect(findSiteIcon).toHaveBeenCalledWith('acme.com')
+        expect(iconWritten()).toBeUndefined()
     })
 
     it('keeps a logo picked by hand', async () => {

@@ -4,10 +4,13 @@
 //
 // Client side, so nothing here can reach for the brand-icon pipeline (lib/services/brand-icon.ts is
 // server only, and its Simple Icons / logo.dev / FAL round trip costs seconds we do not have while
-// someone is still typing). The favicon service answers in one cached request instead, and answers
-// 404 for a domain it has never seen, which is what lets a typo show nothing rather than a globe.
+// someone is still typing). The app's own /api/favicon answers in one cached request instead, read
+// from the site itself, and answers 404 for a site with no icon, which is what lets a typo show
+// nothing rather than a globe.
 
-const FAVICON_SERVICE = 'https://www.google.com/s2/favicons'
+import { APP_URL } from '@/lib/app-url'
+
+const FAVICON_SERVICE = `${APP_URL}/api/favicon`
 
 // A hostname worth asking a favicon for: labels, then a letters-only TLD of at least two. This is
 // deliberately stricter than the browser's own parser, which happily accepts "acme" or "localhost".

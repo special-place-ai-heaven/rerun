@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { notificationUrl, redirectDelivery } from './client'
 
+const sendMail = vi.fn()
+const createTransport = vi.fn((_options: unknown) => ({ sendMail }))
+vi.mock('nodemailer', () => ({ default: { createTransport: (options: unknown) => createTransport(options) } }))
+
 afterEach(() => {
     vi.unstubAllEnvs()
 })
@@ -51,5 +55,65 @@ describe('getResendClient', () => {
         vi.stubEnv('RESEND_API_KEY', 're_test')
         expect(first.getResendClient()).toBe(first.getResendClient())
         expect(first.getResendClient()).not.toBeNull()
+    })
+})
+
+describe('getResendClient through SMTP', () => {
+    const mail = { from: 'Me <me@example.com>', to: 'me@example.com', subject: 'Your code', html: '<p>1</p>', text: '1' }
+
+    async function smtpClient() {
+        vi.resetModules()
+        vi.stubEnv('SMTP_HOST', 'smtp.example.com')
+        vi.stubEnv('SMTP_PORT', '465')
+        vi.stubEnv('SMTP_USER', 'me@example.com')
+        vi.stubEnv('SMTP_PASS', 'secret')
+        vi.stubEnv('RESEND_API_KEY', '')
+        return (await import('./client')).getResendClient()!
+    }
+
+    it('sends through the mailbox over TLS and answers like Resend', async () => {
+        sendMail.mockResolvedValueOnce({ messageId: '<m1@example.com>' })
+        const result = await (await smtpClient()).emails.send(mail)
+
+        expect(createTransport).toHaveBeenLastCalledWith({ host: 'smtp.example.com', port: 465, secure: true, auth: { user: 'me@example.com', pass: 'secret' } })
+        expect(sendMail).toHaveBeenLastCalledWith(expect.objectContaining(mail))
+        expect(result).toEqual({ data: { id: '<m1@example.com>' }, error: null })
+    })
+
+    it('hands a refused send back as an error the throttle does not retry', async () => {
+        sendMail.mockRejectedValueOnce(new Error('535 authentication failed'))
+        const result = await (await smtpClient()).emails.send(mail)
+
+        expect(result).toEqual({ data: null, error: { name: 'application_error', message: '535 authentication failed' } })
+    })
+})
+
+describe('getResendClient through SMTP', () => {
+    const mail = { from: 'Me <me@example.com>', to: 'me@example.com', subject: 'Your code', html: '<p>1</p>', text: '1' }
+
+    async function smtpClient() {
+        vi.resetModules()
+        vi.stubEnv('SMTP_HOST', 'smtp.example.com')
+        vi.stubEnv('SMTP_PORT', '465')
+        vi.stubEnv('SMTP_USER', 'me@example.com')
+        vi.stubEnv('SMTP_PASS', 'secret')
+        vi.stubEnv('RESEND_API_KEY', '')
+        return (await import('./client')).getResendClient()!
+    }
+
+    it('sends through the mailbox over TLS and answers like Resend', async () => {
+        sendMail.mockResolvedValueOnce({ messageId: '<m1@example.com>' })
+        const result = await (await smtpClient()).emails.send(mail)
+
+        expect(createTransport).toHaveBeenLastCalledWith({ host: 'smtp.example.com', port: 465, secure: true, auth: { user: 'me@example.com', pass: 'secret' } })
+        expect(sendMail).toHaveBeenLastCalledWith(expect.objectContaining(mail))
+        expect(result).toEqual({ data: { id: '<m1@example.com>' }, error: null })
+    })
+
+    it('hands a refused send back as an error the throttle does not retry', async () => {
+        sendMail.mockRejectedValueOnce(new Error('535 authentication failed'))
+        const result = await (await smtpClient()).emails.send(mail)
+
+        expect(result).toEqual({ data: null, error: { name: 'application_error', message: '535 authentication failed' } })
     })
 })

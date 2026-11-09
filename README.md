@@ -302,7 +302,5 @@ If Rerun saves you a few hours, a ⭐ helps a lot.
 publish your changes under the same license. The name and logo are not covered: see
 [TRADEMARK.md](TRADEMARK.md).
 
-Directories named `ee` or `(ee)` (billing and plans, the Rerun credit and its managed models, the
-template marketplace) are source-available under the [Rerun Commercial License](apps/ui/ee/LICENSE):
-read and modify them freely, run them in production with an agreement. The open source build never
-switches them on.
+This fork carries no billing code: the `ee` and `(ee)` directories of upstream (billing and plans,
+the Rerun credit, the template marketplace) are removed.

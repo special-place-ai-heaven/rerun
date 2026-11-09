@@ -20,7 +20,10 @@ export type Capture = { body: Buffer; contentType: string }
 // `requestUrl` is what the render page is reached on in dev, where the port is whatever `next dev`
 // settled for and rarely matches NEXT_PUBLIC_APP_URL. In production the request may arrive on an
 // internal host of the reverse proxy, so the configured public origin wins.
+// RERUN_SHOT_RENDER_ORIGIN is where the capturing browser reaches this app when that is not the
+// public address: a self-hosted engine next to it on the compose network.
 function renderOrigin(requestUrl: string): string {
+    if (process.env.RERUN_SHOT_RENDER_ORIGIN) return process.env.RERUN_SHOT_RENDER_ORIGIN
     if (DEV) return new URL(requestUrl).origin
     return process.env.NEXT_PUBLIC_APP_URL ?? site.url
 }

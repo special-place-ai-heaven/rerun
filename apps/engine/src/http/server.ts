@@ -24,6 +24,7 @@ import { doctorRoutes } from './routes/doctor.js'
 import { createFilesRouter } from './routes/files.js'
 import { brainRoutes } from './routes/brain.js'
 import { agentDesktopRoutes, desktopRoutes } from './routes/desktop.js'
+import { createScreenshotRoutes } from './routes/screenshot.js'
 import { HttpError, notFound } from '../lib/errors.js'
 import { agentExists, listAgentIdsOnDisk } from '../agents/loader.js'
 import { workspaceDir, sharedDir } from '../config/paths.js'
@@ -84,6 +85,7 @@ export function createServer(): Hono {
     api.route('/shared/files', createFilesRouter(() => sharedDir()))
     api.route('/shared/data', createDataRouter(() => getSharedDb(), SHARED_HIDDEN_TABLES, () => listAgentIdsOnDisk()))
     api.route('/brain', brainRoutes)
+    api.route('/screenshot', createScreenshotRoutes())
     api.route('/desktop', desktopRoutes)
     api.route('/agents/:id/desktop', agentDesktopRoutes)
     api.route('/agents/:id', chatRoutes)

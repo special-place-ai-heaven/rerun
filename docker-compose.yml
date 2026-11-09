@@ -34,6 +34,11 @@ services:
       RERUN_ENGINE_API_KEY: ${RERUN_ENGINE_API_KEY}
       # Where a browser reaches the engine below, to watch a coworker's screen.
       RERUN_ENGINE_BROWSER_URL: ${RERUN_ENGINE_BROWSER_URL:-http://localhost:3001}
+      # Share cards and board pictures are shot by the engine's own Chromium, which opens the app
+      # here on the compose network.
+      RERUN_SHOT_URL: ${RERUN_SHOT_URL:-http://engine:3000}
+      RERUN_SHOT_API_KEY: ${RERUN_ENGINE_API_KEY}
+      RERUN_SHOT_RENDER_ORIGIN: ${RERUN_SHOT_RENDER_ORIGIN:-http://app:3000}
     ports:
       - "${RERUN_APP_PORT:-3000}:3000"
     extra_hosts:

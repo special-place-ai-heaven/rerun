@@ -11,10 +11,15 @@ concurrency:
 
 jobs:
   check:
-    # Runs in the open source repository only, not in a private clone of it.
-    if: github.repository == 'rerun-build/rerun'
+    # Runs in the open source repository and the special-place-ai-heaven fork, not in a private clone.
+    # The fork runs it on the org's self-hosted heavy pool, and only for its own branches: code from
+    # someone else's pull request never runs on a self-hosted runner.
+    if: >-
+      github.repository == 'rerun-build/rerun' ||
+      (github.repository == 'special-place-ai-heaven/rerun' &&
+       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository))
     name: Typecheck, lint, tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository == 'special-place-ai-heaven/rerun' && fromJSON('{"group":"aap-crrr","labels":["self-hosted","linux","heavy"]}') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -26,12 +31,14 @@ jobs:
       - run: pnpm --filter @rerun/contracts build
       - run: pnpm -r --if-present ts-check
       - run: pnpm --filter rerun lint
-      - run: pnpm --filter rerun test
-      - run: pnpm --filter rerun-engine test
+      # Capped: the self-hosted host is shared, and one worker per core starves the other jobs on it.
+      - run: pnpm --filter rerun run test --maxWorkers=8
+      - run: pnpm --filter rerun-engine run test --maxWorkers=8
 
   migrations:
-    # Runs in the open source repository only, not in a private clone of it.
-    if: github.repository == 'rerun-build/rerun'
+    # Runs in the open source repository and its fork, not in a private clone of it. Hosted: it
+    # needs Docker, which the fork's self-hosted pool (runners inside a container) does not offer.
+    if: github.repository == 'rerun-build/rerun' || github.repository == 'special-place-ai-heaven/rerun'
     name: Migrations and seed on a fresh database
     runs-on: ubuntu-latest
     steps:
@@ -46,7 +53,7 @@ jobs:
   # goes into them beyond the code the other jobs already check, and every push to master and
   # staging builds them anyway before anything ships.
   docker-inputs:
-    if: github.repository == 'rerun-build/rerun' && github.event_name == 'pull_request'
+    if: (github.repository == 'rerun-build/rerun' || github.repository == 'special-place-ai-heaven/rerun') && github.event_name == 'pull_request'
     name: Docker inputs changed
     runs-on: ubuntu-latest
     outputs:
@@ -67,7 +74,7 @@ jobs:
     # Runs in the open source repository only, not in a private clone of it.
     needs: docker-inputs
     if: >-
-      always() && github.repository == 'rerun-build/rerun' &&
+      always() && (github.repository == 'rerun-build/rerun' || github.repository == 'special-place-ai-heaven/rerun') &&
       ((github.event_name == 'push' && github.ref != 'refs/heads/dev') || needs.docker-inputs.outputs.changed == 'true')
     name: Docker images build
     runs-on: ubuntu-latest

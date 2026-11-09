@@ -32,8 +32,8 @@ jobs:
       - run: pnpm -r --if-present ts-check
       - run: pnpm --filter rerun lint
       # Capped: the self-hosted host is shared, and one worker per core starves the other jobs on it.
-      - run: pnpm --filter rerun test --maxWorkers=8
-      - run: pnpm --filter rerun-engine test --maxWorkers=8
+      - run: pnpm --filter rerun run test --maxWorkers=8
+      - run: pnpm --filter rerun-engine run test --maxWorkers=8
 
   migrations:
     # Runs in the open source repository and its fork, not in a private clone of it. Hosted: it

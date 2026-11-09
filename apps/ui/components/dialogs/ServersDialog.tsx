@@ -15,7 +15,8 @@ import { Badge, ScrollFade } from '@rerun/ui/primitives'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
-const ENGINE_IMAGE = 'ghcr.io/rerun-build/rerun-engine:latest'
+// The engine image this fork publishes (.github/workflows/images.yml), the one docker-compose.yml runs.
+const ENGINE_IMAGE = 'ghcr.io/special-place-ai-heaven/rerun-engine:dev'
 const POLL_MS = 3000
 
 function SectionTitle({ children }: { children: string }) {

@@ -115,6 +115,10 @@ describe('CODEX_HARNESS_OVERRIDES', () => {
         expect(CODEX_HARNESS_OVERRIDES.project_doc_max_bytes).toBe(0)
     })
 
+    it('reports no usage back to OpenAI', () => {
+        expect(CODEX_HARNESS_OVERRIDES['analytics.enabled']).toBe(false)
+    })
+
     it('keeps the web search off for the one-shot calls, a run reopens it', () => {
         expect(CODEX_HARNESS_OVERRIDES.web_search).toBe('disabled')
     })

@@ -1,7 +1,12 @@
 # Rerun on one machine: the web app and the engine of your first workspace.
 #
 #   cp .env.example .env && node scripts/self-host-check.mjs   # fills the secrets, checks the rest
-#   docker compose up -d --build
+#   docker compose pull && docker compose up -d                 # the images the fork's CI built
+#   docker compose up -d --build                                # or build them on this machine
+#
+# The pulled images come from .github/workflows/images.yml. RERUN_IMAGE_TAG in .env picks them:
+# dev (default, the latest of the dev branch) or sha-<7 chars> for one exact commit. The app image
+# carries the NEXT_PUBLIC_* values of the repository variables it was built with.
 #
 # Supabase runs outside this file: a free project on supabase.com, or `npx supabase start` on this
 # machine (then add `--profile local-supabase`). See https://docs.rerun.build/self-host.
@@ -9,6 +14,7 @@ name: rerun
 
 services:
   app:
+    image: ghcr.io/special-place-ai-heaven/rerun-app:${RERUN_IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: apps/ui/Dockerfile
@@ -35,6 +41,7 @@ services:
     restart: unless-stopped
 
   engine:
+    image: ghcr.io/special-place-ai-heaven/rerun-engine:${RERUN_IMAGE_TAG:-dev}
     build:
       context: .
       dockerfile: apps/engine/Dockerfile

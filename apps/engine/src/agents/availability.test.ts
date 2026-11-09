@@ -187,6 +187,9 @@ describe('resolveConfiguredModel', () => {
 
     it('still maps a bare provider onto the oldest connection of that provider', async () => {
         const first = await connect('anthropic', { ANTHROPIC_API_KEY: 'k1' })
+        // Age is the creation time to the millisecond, then the random id: two connections opened in
+        // the same millisecond, as a fast machine does here, would be ordered by chance.
+        await new Promise(resolve => setTimeout(resolve, 2))
         await connect('anthropic', { ANTHROPIC_API_KEY: 'k2' })
         const resolved = await resolveConfiguredModel(agentConfigSchema.parse({ name: 'a1', provider: 'anthropic', model: 'claude-opus-4-8' }))
         expect(resolved.connection?.id).toBe(first.id)

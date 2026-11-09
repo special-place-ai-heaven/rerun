@@ -30,7 +30,16 @@ export async function claimAuthEmailSend(email: string): Promise<boolean> {
     return data === true
 }
 
-export type EmailAccountFailure = 'blocked_domain' | 'too_many' | 'unavailable'
+export type EmailAccountFailure = 'blocked_domain' | 'not_allowed' | 'too_many' | 'unavailable'
+
+// Who may open an account: `SIGN_UP_EMAILS`, comma-separated addresses or `@domain` entries. Unset,
+// anyone may. An account that exists signs in either way.
+export function signUpAllowed(email: string): boolean {
+    const entries = (process.env.SIGN_UP_EMAILS ?? '').split(',').map(entry => entry.trim().toLowerCase()).filter(Boolean)
+    if (entries.length === 0) return true
+    const address = email.toLowerCase()
+    return entries.some(entry => (entry.startsWith('@') ? address.endsWith(entry) : entry === address))
+}
 // `created` is whether this call opened the account: the address is new, and the sign-in about to
 // follow is a signup.
 export type EmailAccountResult = { ok: true; created: boolean } | { ok: false; error: EmailAccountFailure }
@@ -50,6 +59,7 @@ export async function lookupEmailForSignUp(email: string): Promise<EmailLookupRe
         return refused('unavailable')
     }
     if (exists) return { ok: true, exists: true }
+    if (!signUpAllowed(email)) return refused('not_allowed')
 
     const { data: blocked, error: blockedError } = await admin.rpc('email_domain_is_blocked', { p_email: email })
     if (blockedError) {

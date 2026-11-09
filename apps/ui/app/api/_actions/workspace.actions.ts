@@ -11,6 +11,7 @@ import { createServiceRoleClient } from '@/supabase/serviceRole'
 import { enterSandbox, ensureSandboxSpace } from '@/app/api/_services/sandbox.service'
 import { readFirstName } from '@/lib/naming/first-name'
 import { WORKSPACE_NAME_MAX, workspaceNameFrom } from '@/lib/naming/workspace-name'
+import { findSiteIcon } from '@/lib/onboarding/site-icon.server'
 import { fetchLogoBytes, rasterizeVectorLogo } from '@/lib/workspace/fetch-logo'
 import { LOGO_MAX_BYTES, LOGO_TOO_LARGE, logoLinkImageUrl, NO_LOGO_FOUND, readLogoLink } from '@/lib/workspace/logo-input'
 import { getServerSession } from '@/supabase/session/getServerSession'
@@ -89,6 +90,10 @@ async function readLogo(formData: FormData, workspaceId: number): Promise<Action
     if (typeof logoLink === 'string' && logoLink.trim()) {
         const link = readLogoLink(logoLink)
         if (!link) return { ok: false, error: NO_LOGO_FOUND }
+        if (link.kind === 'site') {
+            const icon = await findSiteIcon(link.domain)
+            return icon ? rehostLogo(icon.bytes, workspaceId) : { ok: false, error: NO_LOGO_FOUND }
+        }
         const fetched = await fetchLogoBytes(logoLinkImageUrl(link))
         if (!fetched.ok) return fetched
         return rehostLogo(fetched.bytes, workspaceId)

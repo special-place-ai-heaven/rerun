@@ -34,7 +34,7 @@ describe('siteDomain', () => {
 })
 
 describe('faviconUrl', () => {
-    it('asks for a size the tile can downscale', () => {
-        expect(faviconUrl('acme.com')).toBe('https://www.google.com/s2/favicons?sz=128&domain=acme.com')
+    it('points at the icon route of this app, at a size the tile can downscale', () => {
+        expect(faviconUrl('acme.com')).toMatch(/\/api\/favicon\?sz=128&domain=acme\.com$/)
     })
 })

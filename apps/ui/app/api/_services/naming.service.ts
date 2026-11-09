@@ -5,6 +5,7 @@ import { readFirstName } from '@/lib/naming/first-name'
 import { DEFAULT_WORKSPACE_NAME, workspaceNameFrom } from '@/lib/naming/workspace-name'
 import { boxNameFrom, companyNameFromAnswers, industryFromAnswers } from '@/lib/onboarding/box-name'
 import { faviconUrl, siteDomain } from '@/lib/onboarding/site-favicon'
+import { findSiteIcon } from '@/lib/onboarding/site-icon.server'
 import { createServiceRoleClient } from '@/supabase/serviceRole'
 import { getServerSession } from '@/supabase/session/getServerSession'
 import { selectMaybeSingle, selectSingle } from '@/supabase/supabase-helpers'
@@ -40,18 +41,10 @@ export async function resolveBoxName(params: { workspaceId: number; taken: strin
     return boxNameFrom({ ...profile, taken: params.taken })
 }
 
-// Google's favicon service answers a generic globe for a domain it has never seen, and answers it
-// with a 404 that only shows up once the redirect is followed. A browser paints that body regardless,
-// so the status is checked here: `icon_url` is rendered as a bare <img src> down to the anonymous
+// Only a site that has an icon gets the link to it, read from the site itself: `icon_url` is rendered as a bare <img src> down to the anonymous
 // public site, and a grey globe there is strictly worse than the blob it replaced.
 async function faviconIfServed(domain: string): Promise<string | null> {
-    const url = faviconUrl(domain)
-    try {
-        const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(2500) })
-        return res.ok ? url : null
-    } catch {
-        return null
-    }
+    return (await findSiteIcon(domain)) ? faviconUrl(domain) : null
 }
 
 // Names the workspace once, from whatever the onboarding learned. Silent on every failure: it is

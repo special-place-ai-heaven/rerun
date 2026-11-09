@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { BLOB_ILLUSTRATIONS, blobUrl } from '@/lib/blobs/catalog'
-import { faviconUrl } from '@/lib/onboarding/site-favicon'
 import { WORKSPACE_NAME_MAX } from '@/lib/naming/workspace-name'
 import { fakeSupabase, writeMethodOf, type FakeSupabase, type SupabaseCall } from '@/test/supabase-fake'
 
@@ -13,6 +12,8 @@ vi.mock('@/app/api/_auth/expert', () => ({ hasPendingCreatorTerms: vi.fn(), isEx
 vi.mock('@/app/api/_services/sandbox.service', () => ({ enterSandbox: vi.fn(), ensureSandboxSpace: vi.fn() }))
 vi.mock('@/lib/images/upload', () => ({ uploadPublicImage: mocks.uploadPublicImage }))
 vi.mock('node:dns/promises', () => ({ lookup: mocks.lookup }))
+const findSiteIcon = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/onboarding/site-icon.server', () => ({ findSiteIcon }))
 vi.mock('@rerun/cloud/billing.server', () => ({ grantRerunTopup: mocks.grantRerunTopup }))
 // The public build stubs `@rerun/cloud/billing` with no signup allowance, so the test pins one of its own.
 const SIGNUP_ALLOWANCE_MICROS = vi.hoisted(() => 5_000_000)
@@ -217,15 +218,11 @@ describe('updateWorkspaceAction', () => {
 
     it('stores the favicon of a site, re-hosted, never the URL that was typed', async () => {
         const db = memberDatabase()
-        const fetch = vi
-            .fn()
-            .mockResolvedValueOnce(new Response(null, { status: 301, headers: { location: 'https://t1.gstatic.com/faviconV2?url=https://acme.com' } }))
-            .mockResolvedValueOnce(imageResponse())
-        vi.stubGlobal('fetch', fetch)
+        findSiteIcon.mockResolvedValueOnce({ bytes: new Uint8Array(PNG), contentType: 'image/png' })
 
         await expect(updateWorkspaceAction(formOf({ name: 'Acme', logoLink: 'https://www.acme.com/pricing' }))).resolves.toEqual({ ok: true })
 
-        expect(fetch.mock.calls[0][0]).toBe(faviconUrl('acme.com'))
+        expect(findSiteIcon).toHaveBeenCalledWith('acme.com')
         expect(db.writes('workspaces')[0].payload).toEqual({ name: 'Acme', icon_url: BUCKET_URL })
     })
 

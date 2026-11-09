@@ -1,0 +1,66 @@
+name: Images
+
+# The images a machine running this fork pulls instead of building them itself:
+#   ghcr.io/special-place-ai-heaven/rerun-app and ghcr.io/special-place-ai-heaven/rerun-engine,
+# tagged with the branch (dev) and the short commit (sha-<7 chars>). docker-compose.yml names them.
+#
+# GitHub-hosted runners: Docker builds need a Docker daemon, which the org's self-hosted pool (runners
+# inside a container) does not offer. The app bakes its browser-visible settings in at build time;
+# they come from the repository variables below. The secret key never goes into an image.
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    if: github.repository == 'special-place-ai-heaven/rerun'
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: rerun-app
+            dockerfile: apps/ui/Dockerfile
+          - name: rerun-engine
+            dockerfile: apps/engine/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Read by apps/ui/Dockerfile only; the engine image takes none. The images are public, so no
+          # admin email goes in: the server reads ADMIN_EMAILS from .env when it runs.
+          build-args: |
+            NEXT_PUBLIC_APP_URL=${{ vars.NEXT_PUBLIC_APP_URL }}
+            NEXT_PUBLIC_SUPABASE_URL=${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

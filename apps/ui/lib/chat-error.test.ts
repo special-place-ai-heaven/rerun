@@ -34,7 +34,7 @@ describe('friendlyError', () => {
     })
 
     it('humanizes the budget marker', () => {
-        expect(friendlyError('rerun_budget_exhausted')).toContain('Rerun credits used up')
+        expect(friendlyError('rerun_budget_exhausted')).toContain('has no balance left')
     })
 
     it('passes any other message through', () => {

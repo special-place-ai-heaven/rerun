@@ -6,6 +6,7 @@ export const EMAIL_PREPARATION_MESSAGES: Record<EmailPreparationFailure, string>
     invalid_email: 'Enter a valid email',
     captcha_failed: 'We could not confirm you are not a robot. Try again.',
     blocked_domain: 'This email domain is not accepted. Use another address.',
+    not_allowed: 'This address cannot open an account here. Ask the owner to add it.',
     too_many: 'Too many accounts were created from your network. Try again later.',
     too_many_codes: 'Too many codes were asked from your network. Try again later.',
     unavailable: 'We could not send your code. Try again.',

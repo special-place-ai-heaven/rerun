@@ -1,0 +1,29 @@
+name: Diag closed port
+on: pull_request
+jobs:
+  diag:
+    if: github.head_ref == 'diag/closed-port'
+    runs-on: {group: aap-crrr, labels: [self-hosted, linux, heavy]}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Connect to a closed loopback port
+        run: |
+          node -e '
+          const net = require("net");
+          const s = net.createServer().listen(0, "127.0.0.1", () => {
+            const port = s.address().port;
+            s.close(() => {
+              const t = Date.now();
+              const c = net.connect(port, "127.0.0.1");
+              c.setTimeout(8000, () => { console.log("NO ANSWER after", Date.now()-t, "ms"); process.exit(0) });
+              c.on("error", e => { console.log("ERROR", e.code, "after", Date.now()-t, "ms"); process.exit(0) });
+              c.on("connect", () => { console.log("CONNECTED?"); process.exit(0) });
+            });
+          });'
+      - name: Environment hints
+        run: |
+          env | grep -i proxy || echo "no proxy vars"
+          ip -o addr 2>/dev/null | head || true
+          (nft list ruleset 2>&1 || sudo -n nft list ruleset 2>&1) | grep -iE "rst|reject|drop|lo|127" | head -20 || true

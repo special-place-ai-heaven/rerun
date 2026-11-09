@@ -3,7 +3,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/app/api/database.types'
 import { selectCount, selectMany } from '@/supabase/supabase-helpers'
-import { loadFirstName } from '@/ee/lib/lifecycle/recipient'
+import { loadFirstName } from '@/lib/auth/recipient'
 import { loadTeam } from '@/lib/og/team-board'
 import { deliverWhatsApp } from './send'
 import { teamBoardUrl } from './team'

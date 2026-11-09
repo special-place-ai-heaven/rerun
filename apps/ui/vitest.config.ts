@@ -24,14 +24,13 @@ export default defineConfig({
         ],
     },
     test: {
-        setupFiles: ['test/setup-env.ts'],
         // The tests of Rerun Cloud's side run with the app's, against the same aliases and setup.
         include: ['**/*.test.?(c|m)[jt]s?(x)', ...(HAS_CLOUD ? [`${CLOUD_SOURCE}/**/*.test.?(c|m)[jt]s?(x)`, `${ADMIN_APP}/{app,lib}/**/*.test.?(c|m)[jt]s?(x)`] : [])],
         coverage: {
             provider: 'v8',
             // React components are left out: the suite runs in a bare Node environment, so a `.tsx`
             // file only ever shows up here as noise.
-            include: ['app/**/*.ts', 'lib/**/*.ts', 'trigger/**/*.ts', 'ee/**/*.ts', 'supabase/**/*.ts', 'stores/**/*.ts', 'hooks/**/*.ts', 'proxy.ts'],
+            include: ['app/**/*.ts', 'lib/**/*.ts', 'trigger/**/*.ts', 'supabase/**/*.ts', 'stores/**/*.ts', 'hooks/**/*.ts', 'proxy.ts'],
             exclude: ['**/*.test.ts', 'app/api/database.types.ts'],
             reporter: ['text-summary', 'html'],
         },

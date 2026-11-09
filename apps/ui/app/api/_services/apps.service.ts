@@ -1,5 +1,4 @@
 import 'server-only'
-import type Stripe from 'stripe'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { PLAN_PRICES_CENTS, TRIAL_DAYS } from '@rerun/contracts'
 import { assertAgentInWorkspace } from '@/app/api/_auth/access'
@@ -18,10 +17,8 @@ import { DAILY_LOGIN_ATTEMPT_LIMIT, dayKey } from '@/lib/apps/quotas'
 import { appDefinition } from '@/lib/apps/registry'
 import { canRemoveSlot, connectAllowance, type ConnectAllowance } from '@/lib/apps/slots'
 import { SLOT_PAUSE_REASONS, subscriberTrialOpen } from '@/lib/apps/slots-sync'
-import { addPaidSlot, addTrialSlot, slotQuantity } from '@/lib/apps/stripe-slots'
 import { APP_CONNECTION_COLUMNS, SLOT_HOLDING_STATUSES, type AppConnectionStatus, type AppSlug } from '@/lib/apps/types'
-import { isMachineEntitled } from '@/ee/lib/billing/entitlement'
-import { intervalOfItems, stripe } from '@/ee/lib/billing/stripe'
+import { isMachineEntitled } from '@rerun/cloud/billing'
 import { createTrigger as engineCreateTrigger } from '@/lib/engine/client'
 import { site } from '@/lib/site'
 import { selectMany, selectMaybeSingle } from '@/supabase/supabase-helpers'
@@ -56,9 +53,10 @@ export class AppActionError extends Error {
 
 // --- Reading the workspace's state ---
 
+// No slot is sold on this install: the slots are the ones the workspace already holds, and no
+// workspace is on a trial.
 type SlotState = {
     workspaceId: number
-    subscription: Stripe.Subscription | null
     stripeSlots: number
     workspaceTrialing: boolean
     app: { slots: number; status: string; trial_ends_at: string | null; trial_settled_at: string | null } | null
@@ -70,17 +68,15 @@ type SlotState = {
 
 async function readSlotState(supabase: Client, workspaceId: number, slug: AppSlug): Promise<SlotState> {
     const [{ data: workspace }, { data: app }, { data: holding }, { data: claim }] = await Promise.all([
-        selectMaybeSingle(supabase, 'workspaces', ['stripe_subscription_id', 'subscription_status', 'boxes_archived_at'] as const, { id: workspaceId }),
+        selectMaybeSingle(supabase, 'workspaces', ['subscription_status', 'boxes_archived_at'] as const, { id: workspaceId }),
         selectMaybeSingle(supabase, 'workspace_apps', ['slots', 'status', 'trial_ends_at', 'trial_settled_at'] as const, { workspace_id: workspaceId, app_slug: slug }),
         selectMany(supabase, 'app_connections', ['id', 'status', 'pause_reason'] as const, { workspace_id: workspaceId, app_slug: slug, status: [...SLOT_HOLDING_STATUSES] }),
         selectMaybeSingle(supabase, 'app_trial_claims', ['id'] as const, { workspace_id: workspaceId, app_slug: slug }),
     ])
-    const subscription = workspace?.stripe_subscription_id ? await stripe.subscriptions.retrieve(workspace.stripe_subscription_id) : null
     return {
         workspaceId,
-        subscription,
-        stripeSlots: subscription ? slotQuantity(subscription, appDefinition(slug).addonKey) : 0,
-        workspaceTrialing: subscription?.status === 'trialing',
+        stripeSlots: app?.slots ?? 0,
+        workspaceTrialing: false,
         app: app ?? null,
         holding: holding ?? [],
         trialClaimed: !!claim,
@@ -136,7 +132,7 @@ export async function getAppsOverview(slug: AppSlug): Promise<AppsOverview> {
     const { data: bindings } = connections.length ? await selectMany(supabase, 'app_connection_agents', ['agent_id', 'connection_id'] as const, { connection_id: connections.map(connection => connection.id) }) : { data: [] }
     const { data: agents } = bindings?.length ? await selectMany(supabase, 'agents', ['id', 'name'] as const, { id: bindings.map(binding => binding.agent_id) }) : { data: [] }
     const nameOf = new Map((agents ?? []).map(agent => [agent.id, agent.name]))
-    const interval = state.subscription ? intervalOfItems(state.subscription.items.data) : 'monthly'
+    const interval = 'monthly'
     const slotsInUse = Math.max(0, state.holding.filter(connection => !(connection.status === 'paused' && (SLOT_PAUSE_REASONS as readonly string[]).includes(connection.pause_reason ?? ''))).length - (subscriberTrialOpen(state.app) ? 1 : 0))
 
     return {
@@ -147,7 +143,7 @@ export async function getAppsOverview(slug: AppSlug): Promise<AppsOverview> {
         slotPriceCents: PLAN_PRICES_CENTS[interval][appDefinition(slug).addonKey],
         interval,
         workspaceTrialing: state.workspaceTrialing,
-        subscribed: !!state.subscription && isMachineEntitled(state.subscriptionStatus),
+        subscribed: isMachineEntitled(state.subscriptionStatus),
         paused: state.boxesArchived || state.app?.status === 'frozen',
         subscriberTrialEndsAt: subscriberTrialOpen(state.app) ? state.app?.trial_ends_at ?? null : null,
         allowance: allowanceOf(state),
@@ -167,24 +163,9 @@ export async function getAppsOverview(slug: AppSlug): Promise<AppsOverview> {
 
 // --- Buying a slot ---
 
-// Through the same terms as the billing dialog: a paid workspace is charged the prorated slot now,
-// a workspace on its trial gets its one slot at $0, billed with the plan.
-export async function addAppSlot(slug: AppSlug, requestId: string): Promise<{ trialSlot: boolean }> {
-    const { workspace, supabase } = await requireWorkspaceContext()
-    const state = await readSlotState(supabase, workspace.id, slug)
-    const app = appDefinition(slug)
-    if (!state.subscription || !isMachineEntitled(state.subscriptionStatus)) throw new AppActionError(`Subscribe to Rerun first, then add a ${app.providerLabel} slot.`, 'not_entitled')
-    if (state.boxesArchived) throw new AppActionError('Your workspace is paused. Bring it back first.', 'paused')
-
-    if (state.workspaceTrialing) {
-        if (state.stripeSlots > 0) throw new AppActionError(`A trial holds one ${app.providerLabel} slot. Upgrade your plan to add more.`, 'needs_slot')
-        await addTrialSlot(state.subscription, app.addonKey, `trial-slot-${requestId}`)
-        await reportWorkspaceEvent(supabase, workspace.id, 'app_slot_added', { app: slug, trial_slot: true })
-        return { trialSlot: true }
-    }
-    await addPaidSlot(state.subscription, app.addonKey, `slot-${requestId}`)
-    await reportWorkspaceEvent(supabase, workspace.id, 'app_slot_added', { app: slug, trial_slot: false })
-    return { trialSlot: false }
+// Kept for the dialogs that still offer it: this install has nothing to sell a slot through.
+export async function addAppSlot(slug: AppSlug, _requestId: string): Promise<{ trialSlot: boolean }> {
+    throw new AppActionError(`${appDefinition(slug).providerLabel} slots are not sold on this install.`, 'not_entitled')
 }
 
 // --- Connecting an account ---
@@ -207,7 +188,7 @@ function refusal(slug: AppSlug, err: unknown): AppActionError {
 
 function assertCanConnect(state: SlotState, slug: AppSlug): void {
     const app = appDefinition(slug)
-    if (!state.subscription || !isMachineEntitled(state.subscriptionStatus)) throw new AppActionError(`Subscribe to Rerun first to connect ${app.providerLabel}.`, 'not_entitled')
+    if (!isMachineEntitled(state.subscriptionStatus)) throw new AppActionError(`Subscribe to Rerun first to connect ${app.providerLabel}.`, 'not_entitled')
     if (state.boxesArchived || state.app?.status === 'frozen') throw new AppActionError('Your workspace is paused. Bring it back first.', 'paused')
 }
 
@@ -345,8 +326,8 @@ async function finishConnection(supabase: Client, slug: AppSlug, workspaceId: nu
     const allowance: ConnectAllowance | 'reconnect' = state ? allowanceOf(state, connectionId) : 'reconnect'
     if (allowance === 'buy_slot') throw new AppActionError(`Every ${app.providerLabel} slot is taken. Add a slot to connect another account.`, 'needs_slot')
 
-    // What can still fail with Linkup goes first: past this point the trial is claimed and the slot
-    // is on Stripe, and nothing left can throw but a write to our own database.
+    // What can still fail with Linkup goes first: past this point the trial is claimed, and nothing
+    // left can throw but a write to our own database.
     if (!webhookKept) {
         const webhook = await createWebhook(accountId, webhookUrl(), app.webhookEvents)
         await updateConnection(supabase, connectionId, { provider_webhook_id: webhook.webhookId, provider_webhook_secret: webhook.secret })
@@ -355,7 +336,6 @@ async function finishConnection(supabase: Client, slug: AppSlug, workspaceId: nu
     let trialEndsAt: string | null = null
     if (state) {
         if (allowance === 'subscriber_trial') trialEndsAt = await claimSubscriberTrial(supabase, slug, workspaceId, memberId)
-        if (allowance === 'workspace_trial_slot' && state.subscription) await addTrialSlot(state.subscription, app.addonKey, `trial-slot-${connectionId}`)
         await ensureWorkspaceApp(supabase, slug, workspaceId, trialEndsAt)
     }
     await updateConnection(supabase, connectionId, { status: 'connected', label, provider_member_id: memberId, connected_by: userId, pause_reason: null, paused_until: null })

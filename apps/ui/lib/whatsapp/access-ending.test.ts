@@ -4,7 +4,7 @@ import { sweepAccessEnding } from './access-ending'
 import { deliverWhatsApp } from './send'
 
 vi.mock('./send', () => ({ deliverWhatsApp: vi.fn() }))
-vi.mock('@/ee/lib/lifecycle/recipient', () => ({ loadFirstName: vi.fn(async () => 'Lucien') }))
+vi.mock('@/lib/auth/recipient', () => ({ loadFirstName: vi.fn(async () => 'Lucien') }))
 vi.mock('@/lib/og/board-image', () => ({ boardImageUrl: vi.fn((scene: unknown) => `https://app.rerun.build/og/board?scene=${JSON.stringify(scene)}`) }))
 
 type Tables = { workspaces?: SupabaseResult; workspace_members?: SupabaseResult; agents?: SupabaseResult; notifications?: SupabaseResult }

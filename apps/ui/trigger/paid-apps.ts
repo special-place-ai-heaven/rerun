@@ -5,18 +5,15 @@ import { deleteAccount, listAccounts } from '@/lib/apps/linkup/client'
 import { linkupNamespace } from '@/lib/apps/linkup/namespace'
 import { LINKUP_ACCOUNT_MONTHLY_USD } from '@rerun/cloud/supplier-costs'
 import { CONNECTING_GRACE_MS, accountsToDelete } from '@/lib/apps/reconcile'
-import { appDefinition, linkupPlatforms } from '@/lib/apps/registry'
-import { slotQuantity } from '@/lib/apps/stripe-slots'
+import { linkupPlatforms } from '@/lib/apps/registry'
 import { sweepSubscriberTrials } from '@/lib/apps/trials'
-import { APP_SLUGS, SLOT_HOLDING_STATUSES, isAppSlug } from '@/lib/apps/types'
-import { stripe } from '@/ee/lib/billing/stripe'
+import { SLOT_HOLDING_STATUSES, isAppSlug } from '@/lib/apps/types'
 import { createServiceRoleClient } from '@/supabase/serviceRole'
 import { selectAll, selectMany } from '@/supabase/supabase-helpers'
 
 const paidAppsQueue = queue({ name: 'paid-apps', concurrencyLimit: 1 })
 
-// The subscriber trial: a reminder two days out, then the slot added to the plan. The one task
-// that writes to Stripe, which is why every STRIPE_PRICE_<APP>_SLOT has to be in the Trigger env.
+// The subscriber trial: a reminder two days out, then the trial settled. Nothing is charged here.
 export const paidAppTrialsSchedule = schedules.task({
     id: 'paid-app-trials-hourly',
     cron: '23 * * * *',
@@ -73,20 +70,6 @@ async function reconcile({ dryRun = false }: ReconcilePayload) {
         for (const row of stuck ?? []) await updateConnection(supabase, row.id, row.label ? { status: 'needs_reconnect' } : { status: 'deleted' })
     }
 
-    // What Stripe bills against what the app counts. Logged for a human, never corrected on an
-    // invoice from here.
-    const drift: string[] = []
-    for (const slug of APP_SLUGS) {
-        const addonKey = appDefinition(slug).addonKey
-        const { data: apps } = await selectMany(supabase, 'workspace_apps', ['workspace_id', 'slots'] as const, { app_slug: slug, status: 'active' })
-        for (const app of apps ?? []) {
-            const { data: workspace } = await selectMany(supabase, 'workspaces', ['stripe_subscription_id'] as const, { id: app.workspace_id }, undefined, 1)
-            const subscriptionId = workspace?.[0]?.stripe_subscription_id
-            const billed = subscriptionId ? slotQuantity(await stripe.subscriptions.retrieve(subscriptionId), addonKey) : 0
-            if (billed > app.slots) drift.push(`workspace ${app.workspace_id}, ${slug}: Stripe bills ${billed}, app holds ${app.slots}`)
-        }
-    }
-
     const live = (connections ?? []).filter(connection => (SLOT_HOLDING_STATUSES as readonly string[]).includes(connection.status)).length
     const report = {
         dryRun,
@@ -94,10 +77,9 @@ async function reconcile({ dryRun = false }: ReconcilePayload) {
         liveConnections: live,
         deleted: verdicts.map(verdict => `${verdict.accountId} (${verdict.reason})`),
         failed,
-        drift,
         estimatedMonthlyUsd: Math.round((accounts.length - (dryRun ? 0 : verdicts.length)) * LINKUP_ACCOUNT_MONTHLY_USD),
     }
-    if (drift.length > 0 || failed.length > 0) logger.error('paid apps reconciliation needs a look', report)
+    if (failed.length > 0) logger.error('paid apps reconciliation needs a look', report)
     else logger.log('paid apps reconciliation', report)
     return report
 }

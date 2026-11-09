@@ -36,7 +36,7 @@ export default defineConfig({
       randomize: true,
     },
   },
-  dirs: ["./trigger", "./ee/trigger"],
+  dirs: ["./trigger"],
   build: {
     // sharp (image rehost in import-expert) is a native module; keep it out of the bundle so
     // Trigger installs the platform binary in the deploy image instead of bundling the host one.

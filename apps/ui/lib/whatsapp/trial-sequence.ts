@@ -7,7 +7,7 @@ import { findWorkspaceEngine } from '@/app/api/_services/workspace-engine.servic
 import { transformEngineMessages } from '@/lib/chat/engine-history'
 import { getSessionMessages } from '@/lib/engine/client'
 import { foremanUseCases, type ForemanAnswers } from '@/lib/foreman/phase'
-import { loadFirstName } from '@/ee/lib/lifecycle/recipient'
+import { loadFirstName } from '@/lib/auth/recipient'
 import type { StoredAgentIdeas } from '@/lib/agent-ideas/stored'
 import { loadTeam, type TeamMember, type TeamStatus } from '@/lib/og/team-board'
 import { companyNameFromAnswers } from '@/lib/onboarding/box-name'

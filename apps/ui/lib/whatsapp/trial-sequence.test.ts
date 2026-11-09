@@ -14,7 +14,7 @@ vi.mock('./trial-phrases', () => ({
     pendingActionPhrase: vi.fn(),
     weeklyIdeaPhrase: vi.fn(),
 }))
-vi.mock('@/ee/lib/lifecycle/recipient', () => ({ loadFirstName: vi.fn(async () => 'Lucien') }))
+vi.mock('@/lib/auth/recipient', () => ({ loadFirstName: vi.fn(async () => 'Lucien') }))
 vi.mock('@/app/api/_services/workspace-engine.service', () => ({ findWorkspaceEngine: vi.fn(async () => null) }))
 vi.mock('@/lib/og/board-image', () => ({ boardImageUrl: vi.fn((scene: unknown) => `https://app.rerun.build/og/board?scene=${JSON.stringify(scene)}`) }))
 

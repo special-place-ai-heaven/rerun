@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const workspace = { id: 7, subscription_status: 'active', is_sandbox: false, rerun_used_micros: 2_000_000, rerun_budget_micros: 10_000_000, rerun_topup_micros: 0, current_period_end: '2026-11-01T00:00:00Z' }
 let signedIn = true
 let role: 'admin' | 'member' = 'admin'
-// The dialog of a workspace on Rerun Cloud's plans: the billing of ee/ is pinned here, whatever the
-// build resolves @rerun/cloud/billing to.
-vi.mock('@rerun/cloud/billing', async () => ({
-    ...(await vi.importActual<typeof import('@/ee/lib/billing/entitlement')>('@/ee/lib/billing/entitlement')),
-    ...(await vi.importActual<typeof import('@/ee/lib/billing/plans')>('@/ee/lib/billing/plans')),
+// The dialog of a workspace on a plan with a Rerun credit, whatever the build resolves
+// @rerun/cloud/billing to: premium models locked during a trial, the credit read off the workspace.
+vi.mock('@rerun/cloud/billing', async importOriginal => ({
+    ...(await importOriginal<typeof import('@rerun/cloud/billing')>()),
     BILLING_ENABLED: true,
+    isPremiumModelEntitled: (plan: { subscription_status: string | null }) => plan.subscription_status !== 'trialing',
+    rerunCreditTotalMicros: (credit: { rerun_budget_micros?: number | null } | null | undefined) => credit?.rerun_budget_micros ?? 0,
 }))
 vi.mock('@/app/api/_auth/ownership', async importOriginal => {
     const actual = await importOriginal<typeof import('@/app/api/_auth/ownership')>()

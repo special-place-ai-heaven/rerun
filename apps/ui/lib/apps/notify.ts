@@ -6,7 +6,7 @@ import type { Database } from '@/app/api/database.types'
 import { APP_URL, REPLY_TO, TRANSACTIONAL_FROM, getResendClient, redirectDelivery } from '@/lib/email/client'
 import { sendThrottled } from '@/lib/email/throttle'
 import { buildUnsubscribeUrl, listUnsubscribeHeaders } from '@/lib/email/unsubscribeToken'
-import { loadRecipient } from '@/ee/lib/lifecycle/recipient'
+import { loadRecipient } from '@/lib/auth/recipient'
 import { wantsCategoryEmail } from '@/lib/notifications/prefs'
 import { selectMany } from '@/supabase/supabase-helpers'
 

@@ -3,6 +3,7 @@
 import { DEFAULT_PRICE_ARM, type PriceArm } from '@rerun/contracts'
 
 import type { SubscriptionProvider } from '@/components/agent/ModelPickerProviders'
+import { ProviderErrorNotice } from '@/components/chat/ProviderErrorNotice'
 import type { TrialStep } from '@/lib/foreman/next-steps'
 
 // Nothing is sold in this build, so every surface that would sell or meter the plan renders
@@ -31,7 +32,11 @@ export function CreditsUsageBar(_props: { usedMicros?: number | null; budgetMicr
     return null
 }
 
-export function BudgetExhaustedNotice(_props: {
+// No credit is sold here, so a refused payment is the install's own OpenRouter key running dry:
+// said plainly, with the way out the caller offers.
+export const OUT_OF_CREDIT_MESSAGE = 'The account behind Rerun models has no balance left. Top up the OpenRouter account of this install, or switch to another model.'
+
+export function BudgetExhaustedNotice({ ownConnection }: {
     onConnectProvider?: (provider: SubscriptionProvider) => void
     ownConnection?: { label: string; provider: string; onUse: () => void }
     preTrial?: boolean
@@ -44,7 +49,7 @@ export function BudgetExhaustedNotice(_props: {
     resuming?: boolean
     onResumeNow?: () => void
 }) {
-    return null
+    return <ProviderErrorNotice kind="generic" message={OUT_OF_CREDIT_MESSAGE} onSwitchModel={ownConnection?.onUse} />
 }
 
 export function ForemanTrialGate(_props: { step: TrialStep }) {

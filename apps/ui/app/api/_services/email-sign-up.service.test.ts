@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { fakeSupabase } from '@/test/supabase-fake'
 
@@ -22,7 +22,7 @@ const stored = (state: { exists?: boolean; blocked?: boolean; claimed?: boolean;
 
 const rpcArgs = (fn: string) => supabase.calls.filter(call => call.method === 'rpc' && call.args[0] === fn).map(call => call.args[1])
 
-const { claimAuthEmailSend, ensureEmailAccount, lookupEmailForSignUp, MAX_AUTH_EMAILS_PER_ADDRESS, MAX_SIGN_UPS_PER_IP } = await import('./email-sign-up.service')
+const { claimAuthEmailSend, ensureEmailAccount, lookupEmailForSignUp, MAX_AUTH_EMAILS_PER_ADDRESS, MAX_SIGN_UPS_PER_IP, signUpAllowed } = await import('./email-sign-up.service')
 
 beforeEach(() => {
     admin.createUser.mockReset()
@@ -94,6 +94,41 @@ describe('ensureEmailAccount', () => {
 
         expect(await ensureEmailAccount(EMAIL, IP)).toEqual({ ok: false, error: 'unavailable' })
         expect(admin.createUser).not.toHaveBeenCalled()
+    })
+})
+
+describe('SIGN_UP_EMAILS', () => {
+    afterEach(() => vi.unstubAllEnvs())
+
+    it('opens an account only for a listed address or domain, in any case', async () => {
+        vi.stubEnv('SIGN_UP_EMAILS', 'Owner@Example.com, @team.example')
+        stored({})
+
+        expect(await ensureEmailAccount('owner@example.com', IP)).toEqual({ ok: true, created: true })
+        expect(await ensureEmailAccount('kim@team.example', IP)).toEqual({ ok: true, created: true })
+        expect(await ensureEmailAccount('stranger@elsewhere.example', IP)).toEqual({ ok: false, error: 'not_allowed' })
+        expect(admin.createUser).toHaveBeenCalledTimes(2)
+    })
+
+    it('refuses an unlisted address before it counts anything', async () => {
+        vi.stubEnv('SIGN_UP_EMAILS', 'owner@example.com')
+        stored({})
+
+        expect(await lookupEmailForSignUp('stranger@example.com')).toEqual({ ok: false, error: 'not_allowed' })
+        expect(rpcArgs('email_domain_is_blocked')).toEqual([])
+        expect(rpcArgs('claim_email_sign_up')).toEqual([])
+    })
+
+    it('still signs an existing account in when it is not listed', async () => {
+        vi.stubEnv('SIGN_UP_EMAILS', 'owner@example.com')
+        stored({ exists: true })
+
+        expect(await ensureEmailAccount('earlier@example.com', IP)).toEqual({ ok: true, created: false })
+    })
+
+    it('lets any address open an account when the list is empty', () => {
+        vi.stubEnv('SIGN_UP_EMAILS', '')
+        expect(signUpAllowed('anyone@example.com')).toBe(true)
     })
 })
 

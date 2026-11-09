@@ -18,7 +18,7 @@ describe('error factories', () => {
         [unauthorized(), 401, 'Unauthorized'],
         [unauthorized('Invalid token'), 401, 'Invalid token'],
         [agentDisabled(), 403, 'This coworker is switched off and cannot run.'],
-        [budgetExhausted(), 402, 'Rerun credits used up; automated runs on Rerun models are paused until they reset or you add credits.'],
+        [budgetExhausted(), 402, 'The account behind Rerun models has no balance left; automated runs on Rerun models pause for ten minutes. Top it up, or switch to another model.'],
     ])('%s has status %i', (err, status, message) => {
         expect(err).toBeInstanceOf(HttpError)
         expect(err.status).toBe(status)

@@ -108,6 +108,9 @@ export const CODEX_HARNESS_OVERRIDES: CodexConfigOverrides = {
     web_search: 'disabled',
     'history.persistence': 'none',
     check_for_update_on_startup: false,
+    // Usage reporting to OpenAI (the `[analytics]` table of the configuration reference): a run of
+    // this engine reports to nobody.
+    'analytics.enabled': false,
     'tools.update_plan.enabled': false,
     'tools.experimental_request_user_input.enabled': false,
     'features.apps': false,

@@ -2,7 +2,8 @@
 # Built from the repository root: docker build -f apps/engine/Dockerfile .
 FROM node:22-bookworm-slim AS base
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable
+# npm 12 for the runtime installs below (npx patchright, npm install -g codex); the image ships npm 10.
+RUN corepack enable && npm install -g npm@12.2.2
 WORKDIR /app
 
 FROM base AS build

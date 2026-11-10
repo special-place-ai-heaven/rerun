@@ -49,6 +49,7 @@ export async function sweepSubscriberTrials(supabase: Client, now: Date): Promis
                 await notifyWorkspace(supabase, row.workspace_id, {
                     appName: app.name,
                     message: `Your free ${app.providerLabel} slot ends on ${dateLabel(row.trial_ends_at as string)}. Disconnect the account from Settings → Apps before then if you do not want to keep it.`,
+                    copy: { key: 'trialEndsSoon', values: { provider: app.providerLabel, endsAt: row.trial_ends_at as string } },
                     email: true,
                 })
                 await settle(supabase, row.workspace_id, row.app_slug, { trial_reminder_sent_at: now.toISOString() })

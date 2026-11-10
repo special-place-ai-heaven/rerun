@@ -1,6 +1,6 @@
 import { fileHeadersFor, isHubFileUrl, mediaUrl, rawFileUrl } from '@/api/files'
 
-import { cardOf, connectCardOf, eventCardOf, formatBytes, toneOf } from './cards'
+import { cardOf, connectCardOf, eventCardOf, sizeParts, toneOf } from './cards'
 
 jest.mock('expo-file-system', () => ({ Directory: class {}, File: class {}, Paths: {} }))
 jest.mock('expo-sharing', () => ({ shareAsync: jest.fn() }))
@@ -18,6 +18,12 @@ describe('cardOf', () => {
 
     it('reads a file card, the single-file shape of older engines included', () => {
         expect(cardOf({ type: 'tool-card_file', state: 'output-available', output: { path: 'out/report.pdf', name: 'report.pdf', size: 2048 } })).toMatchObject({ kind: 'file', card: { files: [{ name: 'report.pdf', scope: 'agent' }] } })
+    })
+
+    it('reads the picture Codex generated on a ChatGPT plan as a file card', () => {
+        const generated = { kind: 'file', files: [{ path: 'generated-images/ig_1.png', name: 'ig_1.png', size: 70, scope: 'agent' }] }
+        expect(cardOf({ type: 'dynamic-tool', toolName: 'image_generation', state: 'output-available', output: generated })).toMatchObject({ kind: 'file', card: { files: [{ name: 'ig_1.png' }] } })
+        expect(cardOf({ type: 'dynamic-tool', toolName: 'image_generation', state: 'output-available', output: { error: 'not on this plan' } })).toBeNull()
     })
 
     it('leaves a call still running, a broken output and any other tool to the steps', () => {
@@ -52,9 +58,9 @@ describe('files', () => {
     })
 
     it('says a size the way a person reads it', () => {
-        expect(formatBytes(900)).toBe('900 B')
-        expect(formatBytes(2048)).toBe('2 KB')
-        expect(formatBytes(3 * 1024 * 1024)).toBe('3.0 MB')
+        expect(sizeParts(900)).toEqual({ unit: 'b', value: 900, fractionDigits: 0 })
+        expect(sizeParts(2048)).toEqual({ unit: 'kb', value: 2, fractionDigits: 0 })
+        expect(sizeParts(3 * 1024 * 1024)).toEqual({ unit: 'mb', value: 3, fractionDigits: 1 })
     })
 
     it('keeps the tone the agent chose, and hashes a stable one otherwise', () => {

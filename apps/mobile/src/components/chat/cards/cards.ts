@@ -4,7 +4,8 @@ type ToolPart = { type: string; toolName?: string; state?: string; output?: unkn
 
 export type ChatCard = { kind: 'table'; card: TableCard } | { kind: 'file'; card: FileCard }
 
-const CARD_TOOLS = { card_table: tableCardSchema, card_file: fileCardSchema } as const
+// A picture Codex generated on a ChatGPT plan comes back shaped like a file card.
+const CARD_TOOLS = { card_table: tableCardSchema, card_file: fileCardSchema, image_generation: fileCardSchema } as const
 
 // The card a tool call drew, once its output is in and parses; anything else stays a step.
 export function cardOf(part: ToolPart): ChatCard | null {
@@ -15,10 +16,13 @@ export function cardOf(part: ToolPart): ChatCard | null {
     return name === 'card_table' ? { kind: 'table', card: parsed.data as TableCard } : { kind: 'file', card: parsed.data as FileCard }
 }
 
-export function formatBytes(size: number): string {
-    if (size < 1024) return `${size} B`
-    if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`
+export type SizeUnit = 'b' | 'kb' | 'mb'
+
+// A file's size as the web card rounds it: whole bytes and kilobytes, megabytes to one decimal.
+export function sizeParts(size: number): { unit: SizeUnit; value: number; fractionDigits: number } {
+    if (size < 1024) return { unit: 'b', value: size, fractionDigits: 0 }
+    if (size < 1024 * 1024) return { unit: 'kb', value: Math.round(size / 1024), fractionDigits: 0 }
+    return { unit: 'mb', value: size / (1024 * 1024), fractionDigits: 1 }
 }
 
 const HASHED_TONES = ['brand', 'cyan', 'green', 'orange', 'yellow', 'neutral'] as const

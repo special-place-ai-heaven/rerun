@@ -8,11 +8,13 @@ const CLOUD_MOBILE = existsSync(CLOUD_SOURCE) ? CLOUD_SOURCE : path.resolve(__di
 
 module.exports = {
     "preset": "jest-expo",
+    "resolver": "./jest.resolver.js",
     "setupFiles": [
+        "react-native-gesture-handler/jestSetup.js",
         "./jest.setup.js"
     ],
     "transformIgnorePatterns": [
-        "node_modules/(?!(.pnpm|(jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|native-base|react-native-svg|marked|remend))"
+        "node_modules/(?!(.pnpm|(jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|native-base|react-native-svg|marked|remend|use-intl|intl-messageformat|@formatjs/.*|icu-minify|@schummar/.*))"
     ],
     "moduleNameMapper": {
         "^@rerun/cloud-mobile/(.*)$": `${CLOUD_MOBILE}/$1`,

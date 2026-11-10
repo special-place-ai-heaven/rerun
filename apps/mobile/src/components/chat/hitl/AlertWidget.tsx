@@ -1,6 +1,8 @@
 import { useState } from 'react'
-import { ScrollView, useWindowDimensions, View } from 'react-native'
+import { ScrollView, View } from 'react-native'
+import { useTranslations } from 'use-intl'
 
+import { usePaneSize } from '@/components/layout/PaneSize'
 import { AppText } from '@/components/ui/AppText'
 
 import { Markdown } from '../Markdown'
@@ -9,7 +11,8 @@ import { HitlAction, HitlCard } from './HitlCard'
 // A notification the coworker raised and the conversation waits on until it is read. Pinned above the
 // composer as on the web, so a long one scrolls inside rather than pushing the composer away.
 export function AlertWidget({ message, onAcknowledge }: { message: string; onAcknowledge: () => Promise<void> }) {
-    const { height } = useWindowDimensions()
+    const t = useTranslations('mobileHitl.alert')
+    const { height } = usePaneSize()
     const [pending, setPending] = useState(false)
     const [failed, setFailed] = useState(false)
     const acknowledge = async () => {
@@ -23,17 +26,17 @@ export function AlertWidget({ message, onAcknowledge }: { message: string; onAck
         }
     }
     return (
-        <HitlCard symbol="bell" label="Notification">
+        <HitlCard symbol="bell" label={t('label')}>
             <ScrollView nestedScrollEnabled style={{ maxHeight: height * 0.22 }}>
                 <Markdown text={message} />
             </ScrollView>
             {failed && (
                 <AppText variant="footnote" tone="destructive">
-                    Could not mark it as read. Try again.
+                    {t('failed')}
                 </AppText>
             )}
             <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
-                <HitlAction label={pending ? 'Marking…' : 'Mark as read'} primary disabled={pending} onPress={acknowledge} />
+                <HitlAction label={pending ? t('marking') : t('markAsRead')} primary disabled={pending} onPress={acknowledge} />
             </View>
         </HitlCard>
     )

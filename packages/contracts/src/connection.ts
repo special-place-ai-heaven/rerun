@@ -179,11 +179,14 @@ export const CONNECTION_TOKEN_KEY: Record<z.infer<typeof providerSchema>, string
 // What is wrong with a value about to be stored as a Claude subscription token, or null when it
 // looks like one. Saved as is, the authorization code Claude shows (`code#state`) or an API key
 // reads as "connected" and fails every run with "401 Invalid bearer token". Claude's tokens all
-// start with `sk-ant-` (`sk-ant-oat…` from the sign-in and from `claude setup-token`).
-export function claudeTokenProblem(value: string): string | null {
+// start with `sk-ant-` (`sk-ant-oat…` from the sign-in and from `claude setup-token`). The issues are
+// named after the `errors` codes the hub answers with, so a client reads them from that pack.
+export type ClaudeTokenIssue = 'claudeTokenIsApiKey' | 'claudeTokenIsCode'
+
+export function claudeTokenIssue(value: string): ClaudeTokenIssue | null {
     const token = value.trim()
-    if (token.startsWith('sk-ant-api')) return 'This is an Anthropic API key. Add it as an Anthropic (API) connection instead.'
-    if (!token.startsWith('sk-ant-') || /[\s#]/.test(token)) return "That's the code from Claude. Click Get token first, then paste the code here."
+    if (token.startsWith('sk-ant-api')) return 'claudeTokenIsApiKey'
+    if (!token.startsWith('sk-ant-') || /[\s#]/.test(token)) return 'claudeTokenIsCode'
     return null
 }
 
@@ -214,6 +217,7 @@ export const DEFAULT_CONNECTION_MODELS: Record<z.infer<typeof providerSchema>, s
     // connect fails its very first run ("Fable 5.1 requires usage credits").
     rerun: [RERUN_MODELS.balanced, RERUN_MODELS.fast, RERUN_MODELS.smart],
     anthropic: [
+        'claude-fable-5-2',
         'claude-fable-5-1',
         'claude-fable-5',
         'claude-opus-5-5',
@@ -230,6 +234,7 @@ export const DEFAULT_CONNECTION_MODELS: Record<z.infer<typeof providerSchema>, s
     // natively and take no suffix.
     claude: [
         'claude-opus-5-5',
+        'claude-fable-5-2',
         'claude-fable-5-1',
         'claude-fable-5',
         'claude-opus-5',
@@ -247,6 +252,7 @@ export const DEFAULT_CONNECTION_MODELS: Record<z.infer<typeof providerSchema>, s
     openai: ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],
     google: ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'],
     openrouter: [
+        'anthropic/claude-fable-5.2',
         'anthropic/claude-fable-5.1',
         'anthropic/claude-opus-5.5',
         'anthropic/claude-sonnet-5.5',

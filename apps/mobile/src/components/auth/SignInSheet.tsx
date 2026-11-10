@@ -3,13 +3,16 @@ import { useState } from 'react'
 import { Pressable, ScrollView, useWindowDimensions, View, type LayoutChangeEvent } from 'react-native'
 import Animated, { FadeInLeft, FadeInRight, FadeOut, useAnimatedKeyboard, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useTranslations } from 'use-intl'
 
 import { AuthBoard } from '@/components/auth/AuthBoard'
 import { useSignInFlow } from '@/components/auth/SignInFlow'
 import { CodeStep } from '@/components/auth/steps/CodeStep'
 import { EmailStep } from '@/components/auth/steps/EmailStep'
 import { PhoneStep } from '@/components/auth/steps/PhoneStep'
+import { ServerStep } from '@/components/auth/steps/ServerStep'
 import { StartStep, type StartLayout } from '@/components/auth/steps/StartStep'
+import { FORM_COLUMN_MAX_WIDTH } from '@/components/layout/split'
 import { ForemanOrb } from '@/components/orb/ForemanOrb'
 import { GlassButton } from '@/components/ui/GlassButton'
 import { EASE_OUT, MOTION } from '@/theme/motion'
@@ -17,7 +20,6 @@ import { useTheme } from '@/theme/theme'
 import { radius, spacing } from '@/theme/tokens'
 
 const FOREMAN_SIZE = 72
-const CONTENT_MAX_WIDTH = 440
 // The sheet runs this far below the screen, so lifting it over the keyboard never uncovers a gap
 // under its bottom edge.
 const SHEET_RUNOFF = 400
@@ -49,6 +51,7 @@ export function SignInSheet({ startLayout = 'phone-first' }: { startLayout?: Sta
     const { height: windowHeight } = useWindowDimensions()
     const { step, direction, back, thinking } = useSignInFlow()
     const keyboard = useAnimatedKeyboard()
+    const t = useTranslations('mobileAuth')
 
     const paddingTop = FOREMAN_SIZE / 2 + spacing.lg
     const paddingBottom = insets.bottom + spacing.lg
@@ -97,7 +100,7 @@ export function SignInSheet({ startLayout = 'phone-first' }: { startLayout?: Sta
                 <Foreman thinking={thinking} />
                 {step.name !== 'start' && (
                     <View style={{ position: 'absolute', top: spacing.lg, left: spacing.lg, zIndex: 1 }}>
-                        <GlassButton symbol="chevron.left" label="Back" onPress={back} />
+                        <GlassButton symbol="chevron.left" label={t('back')} onPress={back} />
                     </View>
                 )}
                 <Animated.View style={[{ overflow: 'hidden' }, frame]}>
@@ -107,11 +110,12 @@ export function SignInSheet({ startLayout = 'phone-first' }: { startLayout?: Sta
                                 key={stepKey}
                                 entering={(direction === 'forward' ? FadeInRight : FadeInLeft).duration(STEP_ENTER_MS)}
                                 exiting={FadeOut.duration(STEP_EXIT_MS)}
-                                style={{ width: '100%', maxWidth: CONTENT_MAX_WIDTH, alignSelf: 'center', gap: spacing.lg, paddingTop: step.name === 'start' ? 0 : spacing.xl }}
+                                style={{ width: '100%', maxWidth: FORM_COLUMN_MAX_WIDTH, alignSelf: 'center', gap: spacing.lg, paddingTop: step.name === 'start' ? 0 : spacing.xl }}
                             >
                                 {step.name === 'start' && <StartStep layout={startLayout} />}
                                 {step.name === 'phone' && <PhoneStep />}
                                 {step.name === 'email' && <EmailStep />}
+                                {step.name === 'server' && <ServerStep />}
                                 {step.name === 'code' && <CodeStep step={step} />}
                             </Animated.View>
                         </View>

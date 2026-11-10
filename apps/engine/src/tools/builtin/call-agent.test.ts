@@ -13,6 +13,8 @@ const { createSession, getSession } = await import('../../db/repos/sessions.js')
 
 type TracedEvent = { event: string; agentId?: string; sessionId?: string | null; title?: string | null; source?: string | null; originAgentId?: string | null; trigger?: unknown }
 const traced: TracedEvent[] = []
+// While set, every mocked run stays open until it resolves: what lets a test count the runs in flight.
+let hold: Promise<void> | null = null
 
 vi.doMock('../../runtime/notify.js', () => ({
     sendNotification: async (input: TracedEvent) => {
@@ -24,7 +26,7 @@ vi.doMock('../../runtime/notify.js', () => ({
 vi.doMock('../../runtime/headless-run.js', () => ({
     startHeadlessRun: async (_callee: unknown, sessionId: string, _prompt: string, _override: unknown, trigger: unknown) => {
         traced.push({ event: 'run.started', sessionId, trigger })
-        return { runId: 'run-1', result: { finishReason: Promise.resolve('stop'), fullStream: (async function* () {})() } }
+        return { runId: 'run-1', result: { finishReason: Promise.resolve('stop'), fullStream: (async function* () { if (hold) await hold })() } }
     },
 }))
 
@@ -32,7 +34,7 @@ vi.doMock('../../agents/registry.js', () => ({
     getAgent: async (id: string) => ({ id, config: { name: 'Bob', enabled: true, tools: { callAgent: true }, selfImprovement: { enabled: true } } }),
 }))
 
-const { resolveTargetAgent, callAgentTools, callTargetsOf } = await import('./call-agent.js')
+const { resolveTargetAgent, callAgentTools, callTargetsOf, MAX_PARALLEL_CALLS } = await import('./call-agent.js')
 const { getSystemDb } = await import('../../db/systemDb.js')
 
 const agents = () => listAgentIndex()
@@ -180,5 +182,38 @@ describe('call_agent progress part', () => {
         expect(answer).toContain('not found')
         expect(written.at(-1)).toMatchObject({ id: '8', data: { agentName: 'ghost', status: 'error' } })
         expect(written.at(-1)?.data.error).toContain('not found')
+    })
+})
+
+// The CLI runs the call_agent calls of one step side by side (providers.ts marks the tool as
+// overlapping), so the tool itself bounds how many coworkers one caller has running.
+describe('call_agent calls made in the same step', () => {
+    const started = () => traced.filter(e => e.event === 'run.started').length
+
+    it('runs four at once and starts the rest as the first ones finish', async () => {
+        traced.length = 0
+        let release!: () => void
+        hold = new Promise<void>(resolve => (release = resolve))
+        const ctx = { agent: { id: 'agent-a', config: { name: 'Alice' } }, sessionId: 'session-1', callTargets: await agents() } as unknown as RunContext
+        const tools = callAgentTools(ctx)
+        const calls = Array.from({ length: MAX_PARALLEL_CALLS + 2 }, (_, i) => (tools.call_agent as any).execute({ agent: 'agent-c', message: 'task ' + i, wait: true }, { toolCallId: String(i) } as any) as Promise<string>)
+
+        await vi.waitFor(() => expect(started()).toBe(MAX_PARALLEL_CALLS))
+        await new Promise(resolve => setTimeout(resolve, 30))
+        expect(started()).toBe(MAX_PARALLEL_CALLS)
+
+        release()
+        hold = null
+        const answers = await Promise.all(calls)
+        expect(started()).toBe(MAX_PARALLEL_CALLS + 2)
+        expect(answers.every(answer => !answer.startsWith('(error'))).toBe(true)
+    })
+
+    it('does not hold a slot for a call that only dispatches', async () => {
+        traced.length = 0
+        const ctx = { agent: { id: 'agent-a', config: { name: 'Alice' } }, sessionId: 'session-1', callTargets: await agents() } as unknown as RunContext
+        const tools = callAgentTools(ctx)
+        for (let i = 0; i < MAX_PARALLEL_CALLS + 2; i++) await (tools.call_agent as any).execute({ agent: 'agent-c', message: 'note ' + i, wait: false }, { toolCallId: String(i) } as any)
+        expect(started()).toBe(MAX_PARALLEL_CALLS + 2)
     })
 })

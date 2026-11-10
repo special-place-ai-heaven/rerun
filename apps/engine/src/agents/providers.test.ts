@@ -67,6 +67,18 @@ describe('claudeMcpConfig', () => {
         expect(allowedTools).toEqual([])
     })
 
+    // What lets the CLI run several call_agent calls of one step at the same time; every other
+    // bridged tool keeps running one after another.
+    it('marks call_agent, and only call_agent, as a tool whose calls may overlap', () => {
+        const tools: ToolSet = {
+            call_agent: tool({ description: 'call', inputSchema: z.object({ agent: z.string() }), execute: async () => 'ok' }),
+            fs_write: tool({ description: 'write', inputSchema: z.object({ path: z.string() }), execute: async () => 'ok' }),
+        }
+        const registered = (claudeMcpConfig(tools, []).mcpServers.rerun as any).instance._registeredTools
+        expect(registered.call_agent.annotations).toEqual({ readOnlyHint: true })
+        expect(registered.fs_write.annotations).toBeUndefined()
+    })
+
     it('bridges ask_user without throwing (schema stays a plain ZodObject)', () => {
         expect(() => claudeMcpConfig(askUserTool(HITL_CTX), [])).not.toThrow()
         const { mcpServers, allowedTools } = claudeMcpConfig(askUserTool(HITL_CTX), [])

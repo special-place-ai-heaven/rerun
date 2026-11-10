@@ -182,6 +182,13 @@ export function claudeBridgeHandler(bridged: BridgedTool, screenshots?: Screensh
     }
 }
 
+// The CLI runs the MCP tool calls of one step one after another unless a tool says it may overlap,
+// and `annotations.readOnlyHint` is the only signal it reads for that. call_agent has to overlap: a
+// coworker that hands work to three others in one step otherwise waits for each in turn (measured:
+// three 20-second calls took 69 seconds). Nothing else reads the hint here, since a run already
+// skips the CLI's permission prompts.
+export const OVERLAPPING_BRIDGED_TOOLS: ReadonlySet<string> = new Set(['call_agent'])
+
 export function claudeMcpConfig(tools?: ToolSet, mcpServers: RunMcpServer[] = [], screenshots?: ScreenshotLookup): { mcpServers: Record<string, McpServerConfig>; allowedTools: string[] } {
     const bridged = tools ? bridgeableTools(tools) : {}
     const names = Object.keys(bridged)
@@ -190,8 +197,18 @@ export function claudeMcpConfig(tools?: ToolSet, mcpServers: RunMcpServer[] = []
     if (names.length) {
         servers[BRIDGE_SERVER_NAME] = createCustomMcpServer({
             name: BRIDGE_SERVER_NAME,
-            tools: Object.fromEntries(names.map(name => [name, { description: bridged[name]!.description ?? '', inputSchema: bridged[name]!.inputSchema as ZodObject<ZodRawShape>, handler: claudeBridgeHandler(bridged[name]!, screenshots) }])),
-        })
+            tools: Object.fromEntries(
+                names.map(name => [
+                    name,
+                    {
+                        description: bridged[name]!.description ?? '',
+                        inputSchema: bridged[name]!.inputSchema as ZodObject<ZodRawShape>,
+                        handler: claudeBridgeHandler(bridged[name]!, screenshots),
+                        ...(OVERLAPPING_BRIDGED_TOOLS.has(name) ? { annotations: { readOnlyHint: true } } : {}),
+                    },
+                ])
+            ),
+        }),
         allowedTools.push(...names.map(n => `mcp__${BRIDGE_SERVER_NAME}__${n}`))
     }
     for (const server of mcpServers) {
@@ -221,7 +238,7 @@ function codexBridgedTools(tools: ToolSet): LocalTool[] {
             description: t.description ?? name,
             parameters: t.inputSchema as ZodType,
             execute: async input => t.execute!(input, { toolCallId: newId(), messages: [] }),
-        }),
+        })
     )
 }
 

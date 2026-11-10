@@ -2,7 +2,7 @@ import { parseServiceRegistryKey } from '@rerun/contracts'
 import { workspaceActor } from '@/app/api/_auth/access'
 import { getCustomMcpServer } from '@/app/api/_services/custom-mcp.service'
 import { getServiceDetails, loadManifest } from '@/app/api/_services/services.service'
-import { composioConfigured, composioUserId, initiateConnectedAccount } from '@/lib/composio/client'
+import { composioConfigured, composioUserId, initiateConnectedAccount, resolveAuthConfigId } from '@/lib/composio/client'
 import { COMPOSIO_COOKIE_PATH, COMPOSIO_COOKIE_PREFIX, type ComposioOAuthContext, composioCallbackUrl, createComposioState, encodeComposioContext } from '@/lib/composio/oauth'
 import { MANAGED_COOKIE_PATH, MANAGED_COOKIE_PREFIX, type ManagedOAuthContext, buildManagedAuthorizeUrl, createPkceState, encodeManagedContext, managedCallbackUrl } from '@/lib/managed/oauth'
 import { getManagedProvider } from '@/lib/managed/registry'
@@ -96,8 +96,9 @@ export async function GET(req: Request) {
 
             const state = createComposioState()
             const userId = composioUserId(agentId, parseServiceRegistryKey(key).instanceId)
-            const { connectedAccountId, redirectUrl } = await initiateConnectedAccount(userId, method.composio.authConfigId, composioCallbackUrl(req, state))
-            const ctx: ComposioOAuthContext = { agentId, key, toolkit: method.composio.toolkit, serverName: details.composio.serverName, connectedAccountId, mobileGrant }
+            const authConfigId = await resolveAuthConfigId(method.composio)
+            const { connectedAccountId, redirectUrl } = await initiateConnectedAccount(userId, authConfigId, composioCallbackUrl(req, state))
+            const ctx: ComposioOAuthContext = { agentId, key, toolkit: method.composio.toolkit, serverName: details.composio.serverName, connectedAccountId, authConfigId, mobileGrant }
             return redirect(redirectUrl, { name: COMPOSIO_COOKIE_PREFIX + state, value: encodeComposioContext(ctx), path: COMPOSIO_COOKIE_PATH })
         }
 

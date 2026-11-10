@@ -67,7 +67,7 @@ The usual messages, and the fix for each:
 
 A refused pairing is final: the engine stops trying. A pairing that failed before the app attached the server did not spend the token, so within the 15 minutes you can fix the cause and run the command again, after `docker rm -f rerun-engine`.
 
-The server also needs to reach the app. `RERUN_HUB_URL` is your `NEXT_PUBLIC_APP_URL`: when it is `http://localhost:3000`, only a server on the same machine can pair, and even then `localhost` inside the container is the container itself. Give the app an address the server can reach first.
+The server also needs to reach the app. `RERUN_HUB_URL` is your `NEXT_PUBLIC_APP_URL`: when it is `http://localhost:3000`, only a server on the same machine can pair, and even then `localhost` inside the container is the container itself. Give the app an address the server can reach first. Docker compose publishes the app on `127.0.0.1` by default: set `RERUN_BIND_ADDRESS=0.0.0.0`, or put a reverse proxy in front, so another machine can reach it.
 
 ### Enter a server by hand
 

@@ -15,6 +15,7 @@ Rerun reads its settings from `.env` at the root of your clone. `.env.example` l
 | --- | --- | --- |
 | `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | **Required.** The address people open in their browser, without a trailing slash. Sign-in links, invitations and the servers you pair all point there. |
 | `RERUN_APP_PORT` | `3000` | The port of this machine docker compose publishes the app on. |
+| `RERUN_BIND_ADDRESS` | `127.0.0.1` | Which network the app and engine ports answer on. `127.0.0.1` keeps them on this machine. Set `0.0.0.0` when a reverse proxy on another machine, or another device, has to reach them. |
 
 ## Supabase
 

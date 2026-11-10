@@ -40,7 +40,7 @@ services:
       RERUN_SHOT_API_KEY: ${RERUN_ENGINE_API_KEY}
       RERUN_SHOT_RENDER_ORIGIN: ${RERUN_SHOT_RENDER_ORIGIN:-http://app:3000}
     ports:
-      - "${RERUN_APP_PORT:-3000}:3000"
+      - "${RERUN_BIND_ADDRESS:-127.0.0.1}:${RERUN_APP_PORT:-3000}:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -55,7 +55,7 @@ services:
       RERUN_HUB_BASE_URL: http://app:3000
       RERUN_LOG_LEVEL: ${RERUN_LOG_LEVEL:-info}
     ports:
-      - "${RERUN_ENGINE_PORT:-3001}:3000"
+      - "${RERUN_BIND_ADDRESS:-127.0.0.1}:${RERUN_ENGINE_PORT:-3001}:3000"
     volumes:
       - engine-data:/data
     # The engine calls your own model when you connect one: Ollama or LM Studio on this machine

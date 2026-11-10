@@ -212,6 +212,13 @@ describe('phase specs', () => {
         expect(pinnedPlanBoxes(stateOf('plan', { intent, answers: { industry: 'agencies' } }))).toEqual(intakeBoxes('agencies'))
         expect(pinnedPlanBoxes(stateOf('plan', { intent: { kind: 'share', token: 'abc' } }))).toEqual(intakeBoxes(null))
     })
+
+    // A studio is stored as saas, and teams proposed for their own words belong to no industry: the
+    // plan lays out the Boxes the card wrote, never those of the stored industry.
+    it('pins the Boxes the card wrote over those of the stored industry', () => {
+        expect(pinnedPlanBoxes(stateOf('plan', { answers: { industry: 'saas', boxes: ['Prototypes', 'Products', 'Tools', 'Infra', 'Research'] } }))).toEqual(['Prototypes', 'Products', 'Tools', 'Infra', 'Research'])
+        expect(pinnedPlanBoxes(stateOf('plan', { answers: { industry: 'creators', boxes: ['Workshop', 'Shop', 'Classes', 'Admin'] } }))).toEqual(['Workshop', 'Shop', 'Classes', 'Admin'])
+    })
 })
 
 // The discovery card hands back a list, and the profiles already written hold a single string. Both

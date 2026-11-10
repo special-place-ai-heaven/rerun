@@ -10,7 +10,7 @@ import { readArrivingIntent } from '@/lib/foreman/arriving-intent'
 import { buildKickoffMarker, buildOwnKickoff, encodeIntent, type KickoffIntent } from '@/lib/foreman/kickoff-marker'
 import { type ForemanArrival, type ForemanPhase } from '@/lib/foreman/phase'
 import type { ForemanSurface } from '@/lib/foreman/surface'
-import { arrivalPreviewPlan, intakePreviewPlan } from '@/lib/onboarding/intake'
+import { arrivalPreviewPlan, boxesOfIntake, intakePreviewPlan } from '@/lib/onboarding/intake'
 import { useForemanStore } from '@/stores/foreman.store'
 import { useOnboardingStore } from '@/stores/onboarding.store'
 import { useSession } from '@/supabase/session/SessionProvider'
@@ -152,8 +152,7 @@ export function useForemanKickoff({ send, messageCount, restoreDone }: { send: (
                     // Déjà répondu, compte pas encore créé : on redessine ce que la carte dessinait et
                     // on laisse le mur de compte faire son travail.
                     if (isAnonymous) {
-                        const industry = parked.industry ?? parked.decidedIndustry
-                        if (industry) store.setIntakePreview(intakePreviewPlan(industry))
+                        if (parked.industry ?? parked.decidedIndustry ?? parked.industryLabel) store.setIntakePreview(intakePreviewPlan(null, boxesOfIntake(parked)))
                         store.startFunnel(false)
                         return
                     }

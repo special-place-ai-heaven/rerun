@@ -1,12 +1,12 @@
 'use client'
 
-import type { TemplateCategory } from '@rerun/contracts'
+import type { IntakeKind, TemplateCategory } from '@rerun/contracts'
 import { useTranslations } from 'next-intl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { intakePreviewPlan, looksLikeSite, type ForemanIntake } from '@/lib/onboarding/intake'
 import { useForemanStore } from '@/stores/foreman.store'
-import { EMPTY_DRAFT, furthestReachable, industryHint, intakeSteps, stepAnswered, toIntake, type IntakeDraft, type IntakeStep } from './steps'
+import { EMPTY_DRAFT, furthestReachable, intakeSteps, stepAnswered, toIntake, type IntakeDraft, type IntakeStep } from './steps'
 
 // The card, wired: which question is on screen, what the board is drawing behind it, and the one
 // write at the end.
@@ -21,8 +21,10 @@ const TYPING_PAUSE_MS = 350
 export type ForemanIntakeHandlers = {
     /** The fast industry decision, off a site or off their own words. `null` = we could not tell. */
     onDecideIndustry: (input: string) => Promise<TemplateCategory | null>
-    /** Reads the site and lays what it finds on the board, started early and awaited by nobody. */
-    onAnalyzeSite: (url: string) => void
+    /** The teams for the kind of company they described under "Other". `null` = none could be proposed. */
+    onProposeTeams: (words: string) => Promise<string[] | null>
+    /** Reads the site and lays what it finds on the board, started early. Settles once the read is done. */
+    onAnalyzeSite: (url: string) => Promise<unknown>
     /** `ownAsk`: the line written in the composer under the card, which cuts the questions short. */
     onSubmit: (intake: ForemanIntake, ownAsk?: string) => Promise<void>
 }
@@ -39,18 +41,18 @@ export type ForemanIntakeController = {
     canAdvance: boolean
     draft: IntakeDraft
     /** The industry the board is drawing, picked or decided. */
-    industry: TemplateCategory | null
+    industry: IntakeKind | null
     deciding: boolean
-    /** Where the read of the typed site stands. `null` when there is no site to read, or an industry was picked over it. */
+    /** Where the read of the typed site stands. `null` when there is no site to read. */
     siteRead: 'reading' | 'ready' | null
     submitting: boolean
     error: string | null
     set: (patch: Partial<IntakeDraft>) => void
     /** Picks an industry off the list and moves on, the way a single choice answers itself. */
-    chooseIndustry: (industry: TemplateCategory) => void
+    chooseIndustry: (industry: IntakeKind) => void
     /** Picks a role off the list and moves on, or sends the card when the role is its last question. */
     chooseRole: (position: string) => void
-    /** Passes on the site and opens the industry question instead. */
+    /** Passes on the site and moves on. */
     skipWebsite: () => void
     goTo: (index: number) => void
     back: () => void
@@ -66,8 +68,11 @@ export function useForemanIntake({ firstName, handlers }: { firstName: string | 
     const t = useTranslations('foreman.intake')
     const [index, setIndex] = useState(0)
     const [draft, setDraft] = useState<IntakeDraft>(EMPTY_DRAFT)
-    const steps = useMemo(() => intakeSteps(firstName, draft.websiteSkipped), [firstName, draft.websiteSkipped])
+    const steps = useMemo(() => intakeSteps(firstName), [firstName])
     const [decided, setDecided] = useState<TemplateCategory | null>(null)
+    // The teams proposed for the words they wrote under "Other", and for which words: an answer that
+    // came back for words they have since rewritten is not theirs anymore.
+    const [proposal, setProposal] = useState<{ words: string; boxes: string[] | null } | null>(null)
     const [deciding, setDeciding] = useState(false)
     const [readFor, setReadFor] = useState<string | null>(null)
     const [submitting, setSubmitting] = useState(false)
@@ -79,6 +84,8 @@ export function useForemanIntake({ firstName, handlers }: { firstName: string | 
     // What has already been sent, so the debounce, the Next button and a step revisited on the way
     // back do not pay for the same address three times.
     const sent = useRef<string | null>(null)
+    const proposing = useRef(0)
+    const proposed = useRef<string | null>(null)
     // Kept in a ref rather than read from the closures below: the callbacks are rebuilt on every
     // render of the column, and a `useCallback` that depended on them would rebuild with them, which
     // the step machine has no reason to do. Same reasoning as the gates of useForemanChat.
@@ -90,19 +97,30 @@ export function useForemanIntake({ firstName, handlers }: { firstName: string | 
     const industry = draft.industry ?? decided
     const reachable = furthestReachable(steps, draft)
     const canAdvance = reachable > index || steps.every(step => stepAnswered(step, draft))
+    // Their own words under "Other", the one answer whose teams no list holds.
+    const words = draft.industry ? '' : draft.industryLabel.trim()
+    const teamsSettled = !!words && proposal?.words === words
+    const teams = teamsSettled ? (proposal?.boxes ?? null) : null
+    // Said what kind of company it is, picked or in their own words: the site is then only read.
+    const kindGiven = !!draft.industry || !!words
 
-    // The divisions on the board follow the industry and nothing else, so picking one repaints
-    // immediately and a decision landing repaints once.
+    // The divisions on the board follow the kind and nothing else, so picking one repaints
+    // immediately and a decision landing repaints once. Their own words wait for their teams, and
+    // fall back on the universal divisions when none came.
     const setIntakePreview = useForemanStore(state => state.setIntakePreview)
     useEffect(() => {
+        if (words) {
+            if (teamsSettled) setIntakePreview(intakePreviewPlan(null, teams))
+            return
+        }
         if (!industry) return
         setIntakePreview(intakePreviewPlan(industry))
-    }, [industry, setIntakePreview])
+    }, [industry, words, teamsSettled, teams, setIntakePreview])
 
-    // Un site tapé reprend la réponse : le métier choisi après un skip tombe, et sa question avec.
+    // Typing a site answers the site question only: the kind they chose stays theirs.
     const set = useCallback((patch: Partial<IntakeDraft>) => {
         setError(null)
-        const bySite = patch.companyUrl?.trim() ? { websiteSkipped: false, industry: null, industryLabel: '' } : null
+        const bySite = patch.companyUrl?.trim() ? { websiteSkipped: false } : null
         setDraft(current => ({ ...current, ...patch, ...bySite }))
     }, [])
 
@@ -121,34 +139,47 @@ export function useForemanIntake({ firstName, handlers }: { firstName: string | 
             .finally(() => {
                 if (race.current !== token) return
                 setDeciding(false)
-                setReadFor(input)
             })
+    }, [])
+
+    const propose = useCallback((input: string) => {
+        if (proposed.current === input) return
+        proposed.current = input
+        const token = (proposing.current += 1)
+        void handlersRef.current
+            .onProposeTeams(input)
+            .catch(() => null)
+            .then(boxes => {
+                if (proposing.current === token) setProposal({ words: input, boxes })
+            })
+    }, [])
+
+    const analyze = useCallback((url: string) => {
+        void handlersRef.current
+            .onAnalyzeSite(url)
+            .catch(() => {})
+            .finally(() => setReadFor(url))
     }, [])
 
     // Une adresse est lisible bien avant qu'on ait fini de répondre, et l'industrie décide de ce que
     // le board dessine : attendre le bouton Next, c'est perdre la seule seconde où l'aperçu pouvait
     // arriver avant la question suivante. On part dès que la frappe s'arrête et que ce qui est écrit
     // ressemble à un site, puis Next ne renvoie que ce qui n'est pas déjà parti.
+    // Le métier, lui, n'est décidé sur le site que si rien n'a été dit du genre d'entreprise.
     const site = draft.companyUrl.trim()
     const readable = looksLikeSite(site) ? site : null
-    const picked = !!draft.industry
     useEffect(() => {
-        if (!readable || picked) return
+        if (!readable) return
         const timer = setTimeout(() => {
-            handlersRef.current.onAnalyzeSite(readable)
-            decide(readable)
+            analyze(readable)
+            if (!kindGiven) decide(readable)
         }, TYPING_PAUSE_MS)
         return () => clearTimeout(timer)
-    }, [readable, picked, decide])
+    }, [readable, kindGiven, analyze, decide])
 
-    // Passer sur le site jette aussi ce qu'un site tapé puis effacé avait décidé : le board ne doit
-    // pas garder les Box d'une adresse qu'on vient de refuser de donner.
+    // Passer sur le site ne touche pas au genre d'entreprise déjà répondu, ni à ce qui en a été décidé.
     const skipWebsite = useCallback(() => {
         if (submitting) return
-        race.current += 1
-        sent.current = null
-        setDecided(null)
-        setDeciding(false)
         setError(null)
         setDraft(current => ({ ...current, companyUrl: '', websiteSkipped: true }))
         setIndex(index + 1)
@@ -157,7 +188,7 @@ export function useForemanIntake({ firstName, handlers }: { firstName: string | 
     // Écrit le choix et avance dans le même geste : un `next()` appelé derrière verrait encore le
     // draft d'avant, où la question n'a pas de réponse.
     const chooseIndustry = useCallback(
-        (picked: TemplateCategory) => {
+        (picked: IntakeKind) => {
             if (submitting) return
             setError(null)
             setDraft(current => ({ ...current, industry: picked, industryLabel: '' }))
@@ -171,11 +202,11 @@ export function useForemanIntake({ firstName, handlers }: { firstName: string | 
             setSubmitting(true)
             setError(null)
             void handlersRef.current
-                .onSubmit(toIntake(value, firstName, decidedIndustry), ownAsk)
+                .onSubmit(toIntake(value, firstName, decidedIndustry, teams), ownAsk)
                 .catch(() => setError(t('saveFailed')))
                 .finally(() => setSubmitting(false))
         },
-        [firstName, t]
+        [firstName, t, teams]
     )
 
     const chooseRole = useCallback(
@@ -203,21 +234,22 @@ export function useForemanIntake({ firstName, handlers }: { firstName: string | 
 
     const next = useCallback(() => {
         if (submitting || !canAdvance) return
-        // Ce que la pause de frappe n'a pas pu envoyer : une adresse validée à la dernière seconde,
-        // et la ligne de métier tapée sous « Other », qui n'a aucune forme à reconnaître.
-        if ((steps[index] === 'company' || steps[index] === 'industry') && !draft.industry) {
-            const hint = industryHint(draft)
-            if (hint) {
-                if (looksLikeSite(hint)) handlersRef.current.onAnalyzeSite(hint)
-                decide(hint)
-            }
+        // Ce que la pause de frappe n'a pas pu envoyer : la ligne tapée sous « Other », qui n'a
+        // aucune forme à reconnaître, et une adresse validée à la dernière seconde.
+        if (steps[index] === 'industry' && words) {
+            decide(words)
+            propose(words)
+        }
+        if (steps[index] === 'company' && readable) {
+            analyze(readable)
+            if (!kindGiven) decide(readable)
         }
         if (index < steps.length - 1) {
             setIndex(index + 1)
             return
         }
         submit(draft, decided)
-    }, [canAdvance, decide, decided, draft, index, steps, submit, submitting])
+    }, [analyze, canAdvance, decide, decided, draft, index, kindGiven, propose, readable, steps, submit, submitting, words])
 
     // Le site déjà tapé est gardé : c'est lui qui décrit l'entreprise au coworker écrit d'après la
     // phrase. Il part ici s'il n'était pas encore parti, comme au Next.
@@ -225,15 +257,14 @@ export function useForemanIntake({ firstName, handlers }: { firstName: string | 
         (ownAsk: string) => {
             const asked = ownAsk.trim()
             if (submitting || !asked) return false
-            const hint = draft.industry ? null : industryHint(draft)
-            if (hint && looksLikeSite(hint) && sent.current !== hint) {
-                handlersRef.current.onAnalyzeSite(hint)
-                decide(hint)
+            if (readable) {
+                analyze(readable)
+                if (!kindGiven) decide(readable)
             }
             submit(draft, decided, asked)
             return true
         },
-        [decide, decided, draft, submit, submitting]
+        [analyze, decide, decided, draft, kindGiven, readable, submit, submitting]
     )
 
     return {
@@ -247,7 +278,7 @@ export function useForemanIntake({ firstName, handlers }: { firstName: string | 
         draft,
         industry,
         deciding,
-        siteRead: !readable || picked ? null : readFor === readable ? 'ready' : 'reading',
+        siteRead: !readable ? null : readFor === readable ? 'ready' : 'reading',
         submitting,
         error,
         set,

@@ -15,15 +15,15 @@ import { palette, type ColorScheme } from '@/theme/tokens'
 // Dev only: the onboarding of a new account, each step on mock data. Answering a card moves the mock
 // conversation on, so the flow can be clicked through.
 //   /lab-onboarding?step=company&scheme=dark
-//   step: company | company-filled | industry | role | name | pack | choice | input | either | typed | plan | trial | failed | blocked | building | built | waitlist
-type IntakeLabStep = 'company' | 'company-filled' | 'industry' | 'role' | 'name'
+//   step: industry | company | company-filled | role | name | pack | choice | input | either | typed | plan | trial | failed | blocked | building | built | waitlist
+type IntakeLabStep = 'industry' | 'company' | 'company-filled' | 'role' | 'name'
 
 const INTAKE: Record<IntakeLabStep, { initial: Parameters<typeof useIntake>[0]['initial']; index: number; knownFirstName: string | null }> = {
-    company: { initial: {}, index: 0, knownFirstName: null },
-    'company-filled': { initial: { companyUrl: 'ateliernord.fr' }, index: 0, knownFirstName: null },
-    industry: { initial: { websiteSkipped: true }, index: 1, knownFirstName: null },
-    role: { initial: { companyUrl: 'ateliernord.fr', industry: 'agencies' }, index: 1, knownFirstName: null },
-    name: { initial: { companyUrl: 'ateliernord.fr', position: 'Founder / Agency owner' }, index: 2, knownFirstName: null },
+    industry: { initial: {}, index: 0, knownFirstName: null },
+    company: { initial: { industry: 'agencies' }, index: 1, knownFirstName: null },
+    'company-filled': { initial: { industry: 'agencies', companyUrl: 'ateliernord.fr' }, index: 1, knownFirstName: null },
+    role: { initial: { industry: 'agencies', companyUrl: 'ateliernord.fr' }, index: 2, knownFirstName: null },
+    name: { initial: { industry: 'agencies', companyUrl: 'ateliernord.fr', position: 'Founder / Agency owner' }, index: 3, knownFirstName: null },
 }
 
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
@@ -50,7 +50,7 @@ export default function OnboardingLab() {
     const params = useLocalSearchParams<{ step?: string; scheme?: ColorScheme }>()
     const system = useColorSchemeName()
     const scheme = params.scheme === 'dark' || params.scheme === 'light' ? params.scheme : system
-    const step = params.step ?? 'company'
+    const step = params.step ?? 'industry'
     const conversation = (TEAM_START[step] ? 'trial' : step) as OnboardingLabStep
 
     return (

@@ -4,28 +4,29 @@ import { EMPTY_DRAFT, furthestReachable, industryHint, intakeSteps, stepAnswered
 
 describe('intakeSteps', () => {
     it('asks for a name only when nothing holds one', () => {
-        expect(intakeSteps(null)).toEqual(['company', 'role', 'name'])
-        expect(intakeSteps('  ')).toEqual(['company', 'role', 'name'])
-        expect(intakeSteps('Clément')).toEqual(['company', 'role'])
+        expect(intakeSteps(null)).toEqual(['industry', 'company', 'role', 'name'])
+        expect(intakeSteps('  ')).toEqual(['industry', 'company', 'role', 'name'])
+        expect(intakeSteps('Clément')).toEqual(['industry', 'company', 'role'])
     })
 
-    it('asks for the industry only when the site was skipped', () => {
-        expect(intakeSteps(null, true)).toEqual(['company', 'industry', 'role', 'name'])
-        expect(intakeSteps('Clément', true)).toEqual(['company', 'industry', 'role'])
+    it('asks the kind of company first, whether a site follows or not', () => {
+        expect(intakeSteps(null)[0]).toBe('industry')
+        expect(intakeSteps('Clément').indexOf('company')).toBe(1)
     })
 })
 
 describe('stepAnswered', () => {
-    it('counts a site, or passing on it, as an answer to the first question', () => {
+    it('counts a site, or passing on it, as an answer to the site question', () => {
         expect(stepAnswered('company', EMPTY_DRAFT)).toBe(false)
         expect(stepAnswered('company', { ...EMPTY_DRAFT, companyUrl: 'rerun.build' })).toBe(true)
         expect(stepAnswered('company', { ...EMPTY_DRAFT, websiteSkipped: true })).toBe(true)
         expect(stepAnswered('company', { ...EMPTY_DRAFT, industry: 'saas' })).toBe(false)
     })
 
-    it('counts a picked industry or their own words as an answer to the second', () => {
+    it('counts a picked kind or their own words as an answer to the first', () => {
         expect(stepAnswered('industry', { ...EMPTY_DRAFT, websiteSkipped: true })).toBe(false)
         expect(stepAnswered('industry', { ...EMPTY_DRAFT, industry: 'saas' })).toBe(true)
+        expect(stepAnswered('industry', { ...EMPTY_DRAFT, industry: 'studio' })).toBe(true)
         expect(stepAnswered('industry', { ...EMPTY_DRAFT, industryLabel: 'bakery' })).toBe(true)
     })
 })
@@ -35,15 +36,15 @@ describe('furthestReachable', () => {
 
     it('stops at the first step left empty', () => {
         expect(furthestReachable(steps, EMPTY_DRAFT)).toBe(0)
-        expect(furthestReachable(steps, { ...EMPTY_DRAFT, companyUrl: 'rerun.build' })).toBe(1)
-        expect(furthestReachable(steps, { ...EMPTY_DRAFT, companyUrl: 'rerun.build', position: 'Founder' })).toBe(2)
-        expect(furthestReachable(steps, { ...EMPTY_DRAFT, companyUrl: 'rerun.build', position: 'Founder', firstName: 'Théo' })).toBe(2)
+        expect(furthestReachable(steps, { ...EMPTY_DRAFT, industry: 'saas' })).toBe(1)
+        expect(furthestReachable(steps, { ...EMPTY_DRAFT, industry: 'saas', companyUrl: 'rerun.build' })).toBe(2)
+        expect(furthestReachable(steps, { ...EMPTY_DRAFT, industry: 'saas', companyUrl: 'rerun.build', position: 'Founder' })).toBe(3)
+        expect(furthestReachable(steps, { ...EMPTY_DRAFT, industry: 'saas', companyUrl: 'rerun.build', position: 'Founder', firstName: 'Théo' })).toBe(3)
     })
 
-    it('holds a skipped site on the industry until one is given', () => {
-        const skipped = intakeSteps(null, true)
-        expect(furthestReachable(skipped, { ...EMPTY_DRAFT, websiteSkipped: true })).toBe(1)
-        expect(furthestReachable(skipped, { ...EMPTY_DRAFT, websiteSkipped: true, industry: 'saas' })).toBe(2)
+    it('holds the card on the kind until one is given, a site or not', () => {
+        expect(furthestReachable(steps, { ...EMPTY_DRAFT, companyUrl: 'rerun.build' })).toBe(0)
+        expect(furthestReachable(steps, { ...EMPTY_DRAFT, industryLabel: 'bakery', websiteSkipped: true })).toBe(2)
     })
 
     it('does not let a later answer jump over an empty step', () => {
@@ -53,7 +54,12 @@ describe('furthestReachable', () => {
 
 describe('toIntake', () => {
     it('trims everything away and keeps null rather than empty strings', () => {
-        expect(toIntake({ ...EMPTY_DRAFT, companyUrl: '  ', position: ' Founder ' }, null)).toEqual({ companyUrl: null, industry: null, decidedIndustry: null, industryLabel: null, position: 'Founder', firstName: null })
+        expect(toIntake({ ...EMPTY_DRAFT, companyUrl: '  ', position: ' Founder ' }, null)).toEqual({ companyUrl: null, industry: null, decidedIndustry: null, industryLabel: null, position: 'Founder', firstName: null, boxes: null })
+    })
+
+    it('hands over the teams proposed for their own words, and the studio as picked', () => {
+        expect(toIntake({ ...EMPTY_DRAFT, industryLabel: 'Pottery studio' }, null, 'creators', ['Workshop', 'Shop', 'Classes', 'Admin']).boxes).toEqual(['Workshop', 'Shop', 'Classes', 'Admin'])
+        expect(toIntake({ ...EMPTY_DRAFT, industry: 'studio' }, null).industry).toBe('studio')
     })
 
     // Ce que la décision rapide a trouvé voyage à part de ce qu'ils ont coché : c'est ce que le
@@ -71,9 +77,15 @@ describe('toIntake', () => {
 })
 
 describe('industryHint', () => {
-    it('classifies the site when there is one, their own words otherwise', () => {
-        expect(industryHint({ ...EMPTY_DRAFT, companyUrl: 'rerun.build', industryLabel: 'bakery' })).toBe('rerun.build')
+    it('classifies their own words over the site, and the site only when they said nothing of the kind', () => {
+        expect(industryHint({ ...EMPTY_DRAFT, companyUrl: 'rerun.build', industryLabel: 'bakery' })).toBe('bakery')
         expect(industryHint({ ...EMPTY_DRAFT, industryLabel: 'bakery' })).toBe('bakery')
+        expect(industryHint({ ...EMPTY_DRAFT, companyUrl: 'rerun.build' })).toBe('rerun.build')
         expect(industryHint(EMPTY_DRAFT)).toBeNull()
+    })
+
+    it('never lets a site override a kind they picked', () => {
+        expect(industryHint({ ...EMPTY_DRAFT, industry: 'legal', companyUrl: 'rerun.build' })).toBeNull()
+        expect(industryHint({ ...EMPTY_DRAFT, industry: 'studio', companyUrl: 'rerun.build' })).toBeNull()
     })
 })

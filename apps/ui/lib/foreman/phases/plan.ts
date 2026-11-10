@@ -37,7 +37,7 @@ export function planKinds(state: ForemanState): readonly PlanItemKind[] {
 // someone who has not agreed to anything yet. A link lands in one of them and leaves the others
 // standing.
 export function pinnedPlanBoxes(state: ForemanState): string[] {
-    return intakeBoxes(state.answers.industry)
+    return intakeBoxes(state.answers.industry, state.answers.boxes)
 }
 
 // A self-hosted install has no template library, so no starter pack opens this step and the model

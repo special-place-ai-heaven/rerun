@@ -6,8 +6,8 @@
                 "description": "We read it to learn what you sell and who you sell to."
             },
             "industry": {
-                "title": "What line of work are you in?",
-                "description": "It decides which teams we draw on your board."
+                "title": "What kind of company are you building?",
+                "description": "It decides which teams we put on your board."
             },
             "role": {
                 "title": "And what do you do there?",
@@ -28,6 +28,7 @@
             "placeholder": "Your line of work"
         },
         "industries": {
+            "studio": "Software studio",
             "agencies": "Agencies",
             "ecommerce": "E-commerce",
             "saas": "SaaS",

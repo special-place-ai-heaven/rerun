@@ -1,5 +1,5 @@
 import { isTemplateCategory } from '@/lib/onboarding/industries'
-import type { TemplateCategory } from '@rerun/contracts'
+import { SOFTWARE_STUDIO, type TemplateCategory } from '@rerun/contracts'
 
 // Names offered under the Box name field, so the field is not an empty page.
 //
@@ -25,6 +25,10 @@ export const INDUSTRY_BOX_NAMES: Record<TemplateCategory, string[]> = {
     other: [],
 }
 
+// A software studio is filed under `saas` for the catalogue, but a studio building products of every
+// sort runs no sales desk and no support queue: its divisions are what it builds and what it builds on.
+export const STUDIO_BOX_NAMES = ['Prototypes', 'Products', 'Tools', 'Infra', 'Research', 'Personal']
+
 // Someone whose site told us nothing we can bucket, or who skipped the question, gets the divisions
 // that read as separate whatever the business. These are the Boxes the illustration beside the field
 // already draws, so the suggestion and the picture say the same thing.
@@ -40,6 +44,7 @@ const MAX_SUGGESTIONS = 4
 // Takes a plain string, not a `TemplateCategory`: the stored answer comes back out of a jsonb
 // column, so it is whatever was written there once, including a label a later revision drops.
 export function divisionExamples(industry: string | null | undefined): string[] | null {
+    if (industry === SOFTWARE_STUDIO) return STUDIO_BOX_NAMES
     return industry && isTemplateCategory(industry) && INDUSTRY_BOX_NAMES[industry].length > 0 ? INDUSTRY_BOX_NAMES[industry] : null
 }
 

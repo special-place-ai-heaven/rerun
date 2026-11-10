@@ -1,4 +1,4 @@
-import type { TemplateCategory } from '@rerun/contracts'
+import type { IntakeKind, TemplateCategory } from '@rerun/contracts'
 
 import type { ShownPlan } from '@/components/foreman/widgets/plan-card'
 import { DEFAULT_BOX_NAMES, divisionExamples } from '@/lib/onboarding/box-name-suggestions'
@@ -12,7 +12,7 @@ export { DEFAULT_ROLES, INDUSTRY_ROLES, INTAKE_INDUSTRIES, looksLikeSite, rolesF
 export type ForemanIntake = {
     companyUrl: string | null
     /** Picked by hand from the list. The only one of the three that is not a guess. */
-    industry: TemplateCategory | null
+    industry: IntakeKind | null
     /**
      * What the fast decision made of their address while they were still answering, and therefore
      * what the board drew. Carried so a site the full read could not reach (no key, a crawler
@@ -24,15 +24,50 @@ export type ForemanIntake = {
     industryLabel: string | null
     position: string | null
     firstName: string | null
+    /** The teams proposed for what they typed under "Other", once the model answered. */
+    boxes?: string[] | null
 }
 
 // Five is the ceiling rather than the count: `INDUSTRY_BOX_NAMES` is ordered most universal first,
 // so cutting from the end drops the division someone is least likely to run.
 const MAX_BOXES = 5
 
-/** The divisions drawn on the board the moment the industry is known. Never empty. */
-export function intakeBoxes(industry: string | null | undefined): string[] {
-    return (divisionExamples(industry) ?? DEFAULT_BOX_NAMES).slice(0, MAX_BOXES)
+/**
+ * The divisions drawn on the board the moment the industry is known. Never empty. `own`: the teams
+ * proposed for their own words under "Other", which win over any industry's when there are some.
+ */
+export function intakeBoxes(industry: string | null | undefined, own?: string[] | null): string[] {
+    return (own?.length ? own : (divisionExamples(industry) ?? DEFAULT_BOX_NAMES)).slice(0, MAX_BOXES)
+}
+
+/**
+ * The divisions an answered card lays out: the teams proposed for their own words, the universal
+ * ones when what they wrote got none, else those of the kind they picked or the site was filed under.
+ */
+export function boxesOfIntake(intake: Pick<ForemanIntake, 'industry' | 'decidedIndustry' | 'industryLabel' | 'boxes'>): string[] {
+    if (!intake.industry && intake.industryLabel?.trim()) return intakeBoxes(null, intake.boxes)
+    return intakeBoxes(intake.industry ?? intake.decidedIndustry, intake.boxes)
+}
+
+// What a proposed team may be named: one to three plain words a person would give a division, in
+// any script. Nothing else gets through, since the names end up in the foreman's own instructions.
+const TEAM_NAME = /^[\p{L}\p{N}][\p{L}\p{N}&' -]*$/u
+const TEAM_NAME_MAX = 24
+const TEAM_WORDS_MAX = 3
+const MIN_TEAMS = 4
+const MAX_TEAMS = 6
+
+/**
+ * The proposed teams that can go on a board, or null when fewer than four survive: a model answer
+ * or a client list is read the same way. Duplicates are matched as the build matches Boxes.
+ */
+export function clampBoxNames(names: unknown): string[] | null {
+    if (!Array.isArray(names)) return null
+    const clean = names
+        .map(name => (typeof name === 'string' ? name.replace(/\s+/g, ' ').trim() : ''))
+        .filter(name => name.length > 0 && name.length <= TEAM_NAME_MAX && name.split(' ').length <= TEAM_WORDS_MAX && TEAM_NAME.test(name))
+    const unique = clean.filter((name, index) => clean.findIndex(other => other.toLowerCase() === name.toLowerCase()) === index).slice(0, MAX_TEAMS)
+    return unique.length >= MIN_TEAMS ? unique : null
 }
 
 /**
@@ -51,9 +86,9 @@ export function arrivalPreviewPlan(title: string): ShownPlan {
     }
 }
 
-export function intakePreviewPlan(industry: string | null | undefined, companyName?: string | null): ShownPlan {
+export function intakePreviewPlan(industry: string | null | undefined, own?: string[] | null, companyName?: string | null): ShownPlan {
     return {
         title: companyName?.trim() || 'Your company',
-        groups: intakeBoxes(industry).map((name, index) => ({ key: `intake-${index}-${name}`, name, role: '', items: [] })),
+        groups: intakeBoxes(industry, own).map((name, index) => ({ key: `intake-${index}-${name}`, name, role: '', items: [] })),
     }
 }

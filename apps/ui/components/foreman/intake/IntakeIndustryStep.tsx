@@ -1,7 +1,7 @@
 'use client'
 
 import { CustomOptionRow, OptionRow } from '@rerun/ui/chat'
-import type { TemplateCategory } from '@rerun/contracts'
+import type { IntakeKind } from '@rerun/contracts'
 import { useTranslations } from 'next-intl'
 import { useState } from 'react'
 
@@ -10,14 +10,15 @@ import { INTAKE_INDUSTRIES } from '@/lib/onboarding/intake'
 import { IntakeField } from './IntakeField'
 import type { IntakeDraft } from './steps'
 
-// Asked only of someone who gave no site. It buys the one thing the board needs from them, the
-// divisions to draw, and "Other" keeps their own words for a line of business we had no bucket for.
+// Asked first, of everyone. It buys the one thing the board needs from them, the divisions to draw,
+// and "Other" keeps their own words for a kind of company we had no list for: its teams are proposed
+// from those words.
 
 type IntakeIndustryStepProps = {
     draft: IntakeDraft
     disabled?: boolean
     onChange: (patch: Partial<IntakeDraft>) => void
-    onChoose: (industry: TemplateCategory) => void
+    onChoose: (industry: IntakeKind) => void
     onEnter: () => void
 }
 

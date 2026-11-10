@@ -6,17 +6,17 @@
     {{ if eq .Data.locale "fr" }}
     <p>Votre code Rerun :</p>
     <p style="font-size: 28px; font-weight: 600; letter-spacing: 6px">{{ .Token }}</p>
-    <p>Il est valable 15 minutes. Vous pouvez aussi ouvrir ce lien sur le même appareil : <a href="{{ .ConfirmationURL }}">se connecter à Rerun</a>.</p>
+    <p>Il est valable 15 minutes. Vous pouvez aussi ouvrir ce lien sur le même appareil : <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=email_change">se connecter à Rerun</a>.</p>
     <p style="color: #666; font-size: 13px">Si vous ne l'avez pas demandé, ignorez cet email.</p>
     {{ else if eq .Data.locale "es" }}
     <p>Tu código de Rerun:</p>
     <p style="font-size: 28px; font-weight: 600; letter-spacing: 6px">{{ .Token }}</p>
-    <p>Es válido durante 15 minutos. También puedes abrir este enlace en el mismo dispositivo: <a href="{{ .ConfirmationURL }}">iniciar sesión en Rerun</a>.</p>
+    <p>Es válido durante 15 minutos. También puedes abrir este enlace en el mismo dispositivo: <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=email_change">iniciar sesión en Rerun</a>.</p>
     <p style="color: #666; font-size: 13px">Si no lo pediste, ignora este correo.</p>
     {{ else }}
     <p>Your Rerun code:</p>
     <p style="font-size: 28px; font-weight: 600; letter-spacing: 6px">{{ .Token }}</p>
-    <p>It works for 15 minutes. Or open this link on the same device: <a href="{{ .ConfirmationURL }}">sign in to Rerun</a>.</p>
+    <p>It works for 15 minutes. Or open this link on the same device: <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=email_change">sign in to Rerun</a>.</p>
     <p style="color: #666; font-size: 13px">If you did not ask for it, ignore this email.</p>
     {{ end }}
   </body>

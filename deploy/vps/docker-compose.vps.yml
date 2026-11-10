@@ -1,0 +1,29 @@
+# Rerun on a server whose Traefik (docker provider, `websecure` entrypoint, `letsencrypt` resolver)
+# already serves HTTPS for other projects. The app and the engine get one address each and publish no
+# port of their own: Traefik reaches them directly, and nothing else is opened.
+#
+# From the clone on the server, once:
+#   sh deploy/vps/make-env.sh      # writes .env, COMPOSE_FILE included, so plain `docker compose` uses this file
+# then, to start or update:
+#   git pull && docker compose up -d --build
+#
+# The build bakes NEXT_PUBLIC_APP_URL and the admin emails from .env into the app image, so the image is
+# built here rather than pulled.
+services:
+  app:
+    ports: !reset []
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.rerun-app.rule=Host(`${RERUN_APP_HOST:?set RERUN_APP_HOST in .env}`)"
+      - traefik.http.routers.rerun-app.entrypoints=websecure
+      - traefik.http.routers.rerun-app.tls.certresolver=letsencrypt
+      - traefik.http.services.rerun-app.loadbalancer.server.port=3000
+
+  engine:
+    ports: !reset []
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.rerun-engine.rule=Host(`${RERUN_ENGINE_HOST:?set RERUN_ENGINE_HOST in .env}`)"
+      - traefik.http.routers.rerun-engine.entrypoints=websecure
+      - traefik.http.routers.rerun-engine.tls.certresolver=letsencrypt
+      - traefik.http.services.rerun-engine.loadbalancer.server.port=3000

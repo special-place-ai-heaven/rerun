@@ -1,4 +1,3 @@
-const BRAVE_SEARCH_URL = 'https://api.search.brave.com/res/v1/web/search'
 const TIMEOUT_MS = 10_000
 // The most results Brave returns in one request, billed the same as a single result.
 export const BRAVE_MAX_COUNT = 20
@@ -16,7 +15,9 @@ export async function searchBrave(query: string, count: number): Promise<BraveSe
     if (!apiKey) return null
 
     try {
-        const res = await fetch(`${BRAVE_SEARCH_URL}?q=${encodeURIComponent(query)}&count=${count}`, {
+        // Read at call time like the key; a self-hosted stand-in answers the same request elsewhere.
+        const searchUrl = process.env.RERUN_BRAVE_SEARCH_URL ?? 'https://api.search.brave.com/res/v1/web/search'
+        const res = await fetch(`${searchUrl}?q=${encodeURIComponent(query)}&count=${count}`, {
             headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey },
             signal: AbortSignal.timeout(TIMEOUT_MS),
         })

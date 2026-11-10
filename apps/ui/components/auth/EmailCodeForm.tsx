@@ -1,5 +1,6 @@
 'use client'
 
+import { isSlowSend, SLOW_SEND_MESSAGE } from '@/components/auth/email-send'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Form, FormControl, FormField, FormItem, FormMessage } from '@/components/ui/form'
@@ -91,15 +92,23 @@ export function EmailCodeForm({
         async values => {
             if (signingIn) track('signup_method_selected', { method: 'email' })
             const normalized = normalizeEmail(values.email)
-            try {
-                await sendCode(normalized)
-                if (signingIn) markVerificationSent()
+            const toCodeStep = () => {
                 setEmail(normalized)
                 codeForm.reset({ code: '' })
                 setCooldown(RESEND_COOLDOWN_SECONDS)
                 goTo('code')
+            }
+            try {
+                await sendCode(normalized)
+                if (signingIn) markVerificationSent()
+                toCodeStep()
             } catch (error) {
-                toast.error(errorMessage(error))
+                if (isSlowSend(error)) {
+                    toast.info(SLOW_SEND_MESSAGE)
+                    toCodeStep()
+                } else {
+                    toast.error(errorMessage(error))
+                }
             }
         },
         errors => {
@@ -126,7 +135,12 @@ export function EmailCodeForm({
             setCooldown(RESEND_COOLDOWN_SECONDS)
             toast.success(outcome === 'held' ? 'Your last code left less than a minute ago. Check your inbox and spam folder.' : 'We sent the code again')
         } catch (error) {
-            toast.error(errorMessage(error))
+            if (isSlowSend(error)) {
+                setCooldown(RESEND_COOLDOWN_SECONDS)
+                toast.info(SLOW_SEND_MESSAGE)
+            } else {
+                toast.error(errorMessage(error))
+            }
         } finally {
             setResending(false)
         }

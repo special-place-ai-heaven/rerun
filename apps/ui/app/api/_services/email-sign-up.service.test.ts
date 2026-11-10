@@ -11,8 +11,9 @@ vi.mock('@/supabase/serviceRole', () => ({ createServiceRoleClient: () => Object
 const EMAIL = 'ada@example.com'
 const IP = '203.0.113.7'
 
-const stored = (state: { exists?: boolean; blocked?: boolean; claimed?: boolean; existsError?: boolean; claimError?: boolean }) => {
+const stored = (state: { exists?: boolean; blocked?: boolean; claimed?: boolean; existsError?: boolean; claimError?: boolean; invited?: boolean }) => {
     supabase = fakeSupabase(table => {
+        if (table === 'workspace_invitations') return { data: state.invited ? [{ id: 'invite-1' }] : [] }
         if (table === 'rpc:check_email_exists') return state.existsError ? { error: { message: 'down' } } : { data: state.exists ?? false }
         if (table === 'rpc:email_domain_is_blocked') return { data: state.blocked ?? false }
         if (table === 'rpc:claim_email_sign_up') return state.claimError ? { error: { message: 'down' } } : { data: state.claimed ?? true }
@@ -30,12 +31,12 @@ beforeEach(() => {
 })
 
 describe('ensureEmailAccount', () => {
-    it('creates an unconfirmed account with no password for an address never seen', async () => {
+    it('creates a confirmed account with no password for an address never seen', async () => {
         stored({})
 
         expect(await ensureEmailAccount(EMAIL, IP)).toEqual({ ok: true, created: true })
 
-        expect(admin.createUser).toHaveBeenCalledWith({ email: EMAIL })
+        expect(admin.createUser).toHaveBeenCalledWith({ email: EMAIL, email_confirm: true })
         expect(rpcArgs('email_domain_is_blocked')).toEqual([{ p_email: EMAIL }])
         expect(rpcArgs('claim_email_sign_up')).toEqual([{ p_ip: IP, p_ip_max: MAX_SIGN_UPS_PER_IP, p_window_seconds: 3600 }])
     })
@@ -124,6 +125,30 @@ describe('SIGN_UP_EMAILS', () => {
         stored({ exists: true })
 
         expect(await ensureEmailAccount('earlier@example.com', IP)).toEqual({ ok: true, created: false })
+    })
+
+    it('opens an account for an unlisted address that holds an open invitation', async () => {
+        vi.stubEnv('SIGN_UP_EMAILS', 'owner@example.com')
+        stored({ invited: true })
+
+        expect(await ensureEmailAccount('Colleague@Example.com', IP)).toEqual({ ok: true, created: true })
+
+        const [invitationQuery] = supabase.chainsOn('workspace_invitations')
+        expect(invitationQuery).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ method: 'eq', args: ['email', 'colleague@example.com'] }),
+                expect.objectContaining({ method: 'eq', args: ['status', 'pending'] }),
+                expect.objectContaining({ method: 'gt', args: ['expires_at', expect.any(String)] }),
+            ]),
+        )
+    })
+
+    it('refuses an unlisted address whose invitation is gone or never existed', async () => {
+        vi.stubEnv('SIGN_UP_EMAILS', 'owner@example.com')
+        stored({ invited: false })
+
+        expect(await ensureEmailAccount('colleague@example.com', IP)).toEqual({ ok: false, error: 'not_allowed' })
+        expect(admin.createUser).not.toHaveBeenCalled()
     })
 
     it('lets any address open an account when the list is empty', () => {

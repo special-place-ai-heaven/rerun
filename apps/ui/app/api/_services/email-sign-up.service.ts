@@ -48,6 +48,17 @@ const refused = (error: EmailAccountFailure) => ({ ok: false as const, error })
 
 export type EmailLookupResult = { ok: true; exists: boolean } | { ok: false; error: EmailAccountFailure }
 
+// An open invitation lets its address open an account even when SIGN_UP_EMAILS does not list it:
+// whoever invited them already vouched for it. Invitations are stored lowercase.
+async function hasPendingInvitation(admin: ReturnType<typeof createServiceRoleClient>, email: string): Promise<boolean> {
+    const { data, error } = await admin.from('workspace_invitations').select('id').eq('email', email.toLowerCase()).eq('status', 'pending').gt('expires_at', new Date().toISOString()).limit(1)
+    if (error) {
+        console.error('[email-sign-up] workspace_invitations lookup failed', error.message)
+        return false
+    }
+    return (data?.length ?? 0) > 0
+}
+
 // Whether the address has an account, and when it has none, whether one may open on its domain.
 // The domain rule lives here as well as in `before_user_created`: that hook only sees a creation,
 // never an anonymous visitor claiming the address on an account that already exists.
@@ -59,7 +70,7 @@ export async function lookupEmailForSignUp(email: string): Promise<EmailLookupRe
         return refused('unavailable')
     }
     if (exists) return { ok: true, exists: true }
-    if (!signUpAllowed(email)) return refused('not_allowed')
+    if (!signUpAllowed(email) && !(await hasPendingInvitation(admin, email))) return refused('not_allowed')
 
     const { data: blocked, error: blockedError } = await admin.rpc('email_domain_is_blocked', { p_email: email })
     if (blockedError) {
@@ -87,8 +98,9 @@ export async function ensureEmailAccount(email: string, ip: string): Promise<Ema
     }
     if (!claimed) return refused('too_many')
 
-    // Left unconfirmed: the code mailed next is what proves the address.
-    const { error } = await admin.auth.admin.createUser({ email })
+    // Created confirmed: with signups off in Supabase, a code for an unconfirmed account counts as a
+    // signup and is refused. Only the code mailed next signs anyone in, so nothing is given away.
+    const { error } = await admin.auth.admin.createUser({ email, email_confirm: true })
     // Another tab of the same visitor may have created it a moment earlier, and counts it there.
     if (error && error.code !== 'email_exists') {
         console.error('[email-sign-up] account creation failed', error.message)

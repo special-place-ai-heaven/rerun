@@ -77,6 +77,7 @@ import { COWORKER_STARTER_SUGGESTIONS, paidDataSourcesByTurn, RERUN_CONNECTION_I
 import { track } from '@rerun/analytics/client'
 import { AnimatePresence, motion } from 'motion/react'
 import { DefaultChatTransport } from 'ai'
+import { useTranslations } from 'next-intl'
 import type { ReactNode } from 'react'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { scrollFadeMask, useScrollEdges } from '@rerun/ui/primitives'
@@ -129,6 +130,8 @@ type AgentChatProps = {
 }
 
 export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessionCreated, initialRunId, arrival = 0, mentionAgents = [], mentionSkills = [], sessionWorking = false, sessionIdle = false, alertPending = false, body, header, suppressEmptyState = false, setup, onSetupSkipped, onOpenInstall, onRunFinished, onSessionInserted, onSessionStatusChange, onMessageSent, onNewConversation, threads, onOpenThread, composerPlaceholder }: AgentChatProps) {
+    const t = useTranslations('chat.agentChat')
+    const tHitlCue = useTranslations('chat.hitlCue')
     const { workspace, user } = useSession()
     const userId = user?.id
     const onSessionCreatedRef = useRef(onSessionCreated)
@@ -361,7 +364,7 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
         conversationRef.current?.scrollToBottom('instant')
     }, [active, arrival])
     const pendingHitlRef = useArriveByTop(conversationRef, pendingHitl ? `${pendingHitl.toolCallId}:${arrival}` : null)
-    const pendingCue = useMemo(() => (pendingHitl ? { key: pendingHitl.toolCallId, summary: summarizePendingHitl(pendingHitl.kind, pendingHitl.input), blockRef: pendingHitlRef } : null), [pendingHitl, pendingHitlRef])
+    const pendingCue = useMemo(() => (pendingHitl ? { key: pendingHitl.toolCallId, summary: summarizePendingHitl(pendingHitl.kind, pendingHitl.input, tHitlCue), blockRef: pendingHitlRef } : null), [pendingHitl, pendingHitlRef, tHitlCue])
 
     // An alert never stopped the run, so it is the session status, not the shape of the transcript,
     // that says whether one is still unread. It stays pinned while the agent keeps working.
@@ -570,28 +573,37 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
         }
     }, [])
 
+    // `stopping` is true from the click to the engine's answer, whichever button asked: the queued
+    // message waits behind it.
+    const [stopping, setStopping] = useState(false)
+
     // Reachable whenever the conversation reads as busy, including after a reload where this tab
     // never streamed anything: without that, a run the provider wedged had no way out at all.
     // Awaited rather than fired and forgotten because `abortRun` frees the engine's session claim
     // before it answers, so this return is what says the next message may go out.
     const stopRun = useCallback(async (): Promise<boolean> => {
-        stopStream()
-        const runId = activeRunIdRef.current
-        const sid = sessionIdRef.current
-        activeRunIdRef.current = null
-        clearError()
-        if (sid) {
-            onSessionStatusChange?.(sid, 'idle')
-            finalizeSessionAction(sid, 'idle').catch(() => {})
+        setStopping(true)
+        try {
+            stopStream()
+            const runId = activeRunIdRef.current
+            const sid = sessionIdRef.current
+            activeRunIdRef.current = null
+            clearError()
+            if (sid) {
+                onSessionStatusChange?.(sid, 'idle')
+                finalizeSessionAction(sid, 'idle').catch(() => {})
+            }
+            if (runId) {
+                // Covers a run this tab never held the id of: only the engine knows the full list. Awaited
+                // with the stop itself: left running, it lands after a queued message has started its own
+                // run and cancels that one too, so the message never gets an answer.
+                const [, stopped] = await Promise.all([sid ? cancelSessionRunsAction(sid).catch(() => false) : false, cancelRunAction(agentId, runId)])
+                return stopped
+            }
+            return sid ? cancelSessionRunsAction(sid) : false
+        } finally {
+            setStopping(false)
         }
-        if (runId) {
-            // Covers a run this tab never held the id of: only the engine knows the full list. Awaited
-            // with the stop itself: left running, it lands after a queued message has started its own
-            // run and cancels that one too, so the message never gets an answer.
-            const [, stopped] = await Promise.all([sid ? cancelSessionRunsAction(sid).catch(() => false) : false, cancelRunAction(agentId, runId)])
-            return stopped
-        }
-        return sid ? cancelSessionRunsAction(sid) : false
     }, [stopStream, agentId, onSessionStatusChange, clearError])
 
     const handleStop = useCallback(() => {
@@ -606,21 +618,17 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
         [stopRun]
     )
 
-    const [stopping, setStopping] = useState(false)
-
     // Sending a queued message right away means ending the run holding the conversation. The send
     // itself is left to the flush effect: starting a request in the same tick as `stopStream()`
     // would leave two streams writing into the same transcript.
     const sendQueuedNow = useCallback(async () => {
         if (!queued) return
-        setStopping(true)
         // The banner of a run that already failed would otherwise keep the flush from firing, and
         // this click is the user saying they want the message out regardless.
         setRunError(null)
         const stopped = await stopRun()
-        setStopping(false)
-        if (!stopped) toast.error('Could not stop the current run. Your message will be sent when it ends.')
-    }, [queued, stopRun, setRunError, setStopping])
+        if (!stopped) toast.error(t('stopFailed'))
+    }, [queued, stopRun, setRunError, t])
 
     // The install this tab just asked for already runs in another conversation, started from a tab
     // or a device this one had not heard of yet. Nothing was sent: the tab goes back to blank and
@@ -696,18 +704,19 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
         return own.find(connection => connection.id === boxDefault?.connectionId) ?? own[0] ?? null
     }, [connections, boxDefault])
     const premiumAllowed = !workspace || isPremiumModelEntitled(workspace)
+    const tConnections = useTranslations('connections')
     const runOnOwnConnection = useMemo(() => {
         if (!ownConnection) return undefined
         const onUse = () => {
             track('connection_cta_clicked', { source: 'budget_notice_use_connection' })
             // The Box default is resolved by the engine on every run, so following it beats freezing it.
             if (boxDefault?.connectionId === ownConnection.id) selectModel({})
-            else selectModel({ connectionId: ownConnection.id, model: toGroup(ownConnection, premiumAllowed).defaultModel })
+            else selectModel({ connectionId: ownConnection.id, model: toGroup(ownConnection, premiumAllowed, tConnections).defaultModel })
             setRunError(null)
             clearError()
         }
         return { label: ownConnection.name, provider: ownConnection.provider, onUse }
-    }, [ownConnection, boxDefault, premiumAllowed, selectModel, clearError])
+    }, [ownConnection, boxDefault, premiumAllowed, tConnections, selectModel, clearError])
     const connectProvider = useCallback(
         (provider: 'claude' | 'codex') => {
             track('connection_cta_clicked', { source: `budget_notice_${provider}` })
@@ -719,7 +728,7 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
     // Only surface the hint while it's both armed (a blocked send) and still no model.
     const showModelHint = hintArmed && !modelReady
     // Shared by the composer and the install gate, which both refuse to run without a model.
-    const modelHint = showModelHint ? <p className="text-xs text-destructive">{refusedModel ?? 'Select a model to start — open the model menu below.'}</p> : null
+    const modelHint = showModelHint ? <p className="text-xs text-destructive">{refusedModel ?? t('selectModel')}</p> : null
     // A model the plan refuses has served models next to it: the picker opens on them right away.
     const blockSend = useCallback(() => {
         setHintArmed(true)
@@ -815,7 +824,7 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
     // for every message of the conversation.
     const handleRegenerate = useCallback((messageId: string) => regenerate({ messageId }), [regenerate])
     const messageFeedback = useMessageFeedback(sessionId)
-    const continueInterruptedRun = useCallback(() => sendMessage({ text: 'Continue where you left off.' }), [sendMessage])
+    const continueInterruptedRun = useCallback(() => sendMessage({ text: t('continueWhereLeftOff') }), [sendMessage, t])
 
     // Paid from the trial's notice. The plan lands through Stripe's webhook, not the payment itself, so
     // the stopped task waits for the credit to have room before it picks back up.
@@ -890,7 +899,10 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
     // its session claim once the run has torn its provider down, well after this stream closed, so
     // the send often lands on a 409 first: the route retries, and the effect above puts the message
     // back in the queue if it never got through.
-    const canFlush = shouldFlush({ queued, busy: showLoader, uploading, status, hasError: displayedError !== null })
+    // `stopping` holds it until the stop has answered, whichever button asked for it: `stopStream()`
+    // frees this tab at once, while the engine is still cancelling the session's runs, the one this
+    // message would start included.
+    const canFlush = shouldFlush({ queued, busy: showLoader || stopping, uploading, status, hasError: displayedError !== null })
     useEffect(() => {
         if (!canFlush || !queued || flushingRef.current) return
         flushingRef.current = queued.id
@@ -938,8 +950,8 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
                             <ConversationEmptyState>
                                 <AgentBuddy agentId={agentId} mood={buddyMood} size={96} />
                                 <div className="space-y-1">
-                                    <h3 className="font-medium text-sm">Start a conversation</h3>
-                                    <p className="text-muted-foreground text-sm">Send a message to this coworker</p>
+                                    <h3 className="font-medium text-sm">{t('emptyTitle')}</h3>
+                                    <p className="text-muted-foreground text-sm">{t('emptyDescription')}</p>
                                 </div>
                                 <Suggestions className="mt-2 justify-center">
                                     {COWORKER_STARTER_SUGGESTIONS.map(s => (

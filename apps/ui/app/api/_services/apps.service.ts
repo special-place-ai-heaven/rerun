@@ -21,6 +21,7 @@ import { APP_CONNECTION_COLUMNS, SLOT_HOLDING_STATUSES, type AppConnectionStatus
 import { isMachineEntitled } from '@rerun/cloud/billing'
 import { createTrigger as engineCreateTrigger } from '@/lib/engine/client'
 import { site } from '@/lib/site'
+import { AppError, type ErrorCode, type ErrorParams } from '@/lib/i18n/action-error'
 import { selectMany, selectMaybeSingle } from '@/supabase/supabase-helpers'
 
 type Client = SupabaseClient<Database>
@@ -41,12 +42,16 @@ function webhookUrl(): string {
     return `${(process.env.NEXT_PUBLIC_APP_URL ?? site.url).replace(/\/$/, '')}/api/webhooks/linkup`
 }
 
-export class AppActionError extends Error {
+export type AppRefusalReason = 'needs_slot' | 'not_entitled' | 'paused' | 'too_many_attempts' | 'refused' | 'trial_used' | 'duplicate' | 'unknown'
+
+// `reason` is what the dialog acts on (back to the accounts, stop polling), `code` what it reads out.
+export class AppActionError extends AppError {
     constructor(
-        message: string,
-        readonly code: 'needs_slot' | 'not_entitled' | 'paused' | 'too_many_attempts' | 'refused' | 'trial_used' | 'duplicate' | 'unknown',
+        readonly reason: AppRefusalReason,
+        code: ErrorCode,
+        params?: ErrorParams,
     ) {
-        super(message)
+        super(code, params)
         this.name = 'AppActionError'
     }
 }
@@ -165,7 +170,7 @@ export async function getAppsOverview(slug: AppSlug): Promise<AppsOverview> {
 
 // Kept for the dialogs that still offer it: this install has nothing to sell a slot through.
 export async function addAppSlot(slug: AppSlug, _requestId: string): Promise<{ trialSlot: boolean }> {
-    throw new AppActionError(`${appDefinition(slug).providerLabel} slots are not sold on this install.`, 'not_entitled')
+    throw new AppActionError('not_entitled', 'appSlotsNotSold', { provider: appDefinition(slug).providerLabel })
 }
 
 // --- Connecting an account ---
@@ -178,18 +183,21 @@ function refusal(slug: AppSlug, err: unknown): AppActionError {
     if (err instanceof AppActionError) return err
     const app = appDefinition(slug)
     if (err instanceof LinkupError) {
-        if (err.code === 'CHANNEL_ERROR' || err.code === 'INVALID_PARAMS') return new AppActionError(app.signInRefusal(err.message), 'refused')
+        if (err.code === 'CHANNEL_ERROR' || err.code === 'INVALID_PARAMS') {
+            const signIn = app.signInRefusal(err.message)
+            return new AppActionError('refused', signIn.code, signIn.params)
+        }
         console.error(`[apps:${slug}] Linkup refused`, err.code, err.message)
-        return new AppActionError(`${app.providerLabel} is unavailable right now. Try again in a few minutes.`, 'unknown')
+        return new AppActionError('unknown', 'appUnavailable', { provider: app.providerLabel })
     }
     console.error(`[apps:${slug}] connect failed`, err)
-    return new AppActionError('The connection failed. Try again in a few minutes.', 'unknown')
+    return new AppActionError('unknown', 'connectionFailedRetry')
 }
 
 function assertCanConnect(state: SlotState, slug: AppSlug): void {
     const app = appDefinition(slug)
-    if (!isMachineEntitled(state.subscriptionStatus)) throw new AppActionError(`Subscribe to Rerun first to connect ${app.providerLabel}.`, 'not_entitled')
-    if (state.boxesArchived || state.app?.status === 'frozen') throw new AppActionError('Your workspace is paused. Bring it back first.', 'paused')
+    if (!isMachineEntitled(state.subscriptionStatus)) throw new AppActionError('not_entitled', 'appSubscribeToConnect', { provider: app.providerLabel })
+    if (state.boxesArchived || state.app?.status === 'frozen') throw new AppActionError('paused', 'workspacePaused')
 }
 
 async function openConnection(supabase: Client, workspaceId: number, userId: string, slug: AppSlug): Promise<string> {
@@ -202,7 +210,7 @@ async function openConnection(supabase: Client, workspaceId: number, userId: str
 // form must not become a way to test a list of them.
 async function claimLoginAttempt(supabase: Client, workspaceId: number, slug: AppSlug): Promise<void> {
     if (!(await claimQuota(supabase, workspaceScope(workspaceId), `login_attempt:${slug}`, [dayKey(new Date())], [DAILY_LOGIN_ATTEMPT_LIMIT]))) {
-        throw new AppActionError('Too many sign-in attempts today. Try again tomorrow.', 'too_many_attempts')
+        throw new AppActionError('too_many_attempts', 'tooManySignInAttempts')
     }
 }
 
@@ -214,11 +222,11 @@ async function startConnection(slug: AppSlug, reconnectId: string | undefined, s
     assertCanConnect(state, slug)
 
     const reconnecting = reconnectId ? state.holding.find(connection => connection.id === reconnectId) : undefined
-    if (reconnectId && !reconnecting) throw new AuthorizationError('Account not found')
+    if (reconnectId && !reconnecting) throw new AuthorizationError('accountNotFound')
     // Only a signed-out account is reconnected in place. One paused for want of a paid slot gets its
     // slot back through Billing, never through a new sign-in.
-    if (reconnecting && reconnecting.status !== 'needs_reconnect') throw new AppActionError('This account is waiting for a paid slot. Add a slot to bring it back.', 'needs_slot')
-    if (!reconnecting && allowanceOf(state) === 'buy_slot') throw new AppActionError(`Every ${appDefinition(slug).providerLabel} slot is taken. Add a slot to connect another account.`, 'needs_slot')
+    if (reconnecting && reconnecting.status !== 'needs_reconnect') throw new AppActionError('needs_slot', 'appAccountAwaitingSlot')
+    if (!reconnecting && allowanceOf(state) === 'buy_slot') throw new AppActionError('needs_slot', 'appSlotsTaken', { provider: appDefinition(slug).providerLabel })
     await claimLoginAttempt(supabase, workspace.id, slug)
 
     const connectionId = reconnecting?.id ?? (await openConnection(supabase, workspace.id, userId, slug))
@@ -251,7 +259,7 @@ type ConnectingRow = { slug: AppSlug; providerAccountId: string; label: string |
 
 async function connectingRow(supabase: Client, workspaceId: number, slug: AppSlug, connectionId: string): Promise<ConnectingRow> {
     const { data: connection } = await selectMaybeSingle(supabase, 'app_connections', ['provider_account_id', 'status', 'label'] as const, { id: connectionId, workspace_id: workspaceId, app_slug: slug })
-    if (!connection?.provider_account_id || connection.status !== 'connecting') throw new AuthorizationError('Account not found')
+    if (!connection?.provider_account_id || connection.status !== 'connecting') throw new AuthorizationError('accountNotFound')
     return { slug, providerAccountId: connection.provider_account_id, label: connection.label }
 }
 
@@ -297,7 +305,7 @@ async function advance(supabase: Client, slug: AppSlug, workspaceId: number, use
         const { error } = await supabase.from('app_connections').update<Database['public']['Tables']['app_connections']['Update']>({ provider_account_id: result.accountId, provider_webhook_id: null, provider_webhook_secret: null }).eq('id', connectionId)
         if (error?.code === '23505') {
             await updateConnection(supabase, connectionId, { status: reconnecting ? 'needs_reconnect' : 'deleted' })
-            throw new AppActionError(`This ${appDefinition(slug).providerLabel} account is already connected to Rerun.`, 'duplicate')
+            throw new AppActionError('duplicate', 'appAccountAlreadyConnected', { provider: appDefinition(slug).providerLabel })
         }
         if (error) throw new Error(error.message)
         // A reconnect that came back as a new account leaves the old one billed at Linkup.
@@ -320,11 +328,11 @@ async function finishConnection(supabase: Client, slug: AppSlug, workspaceId: nu
     const { label, memberId } = await app.profile(accountId)
 
     const { data: twin } = await selectMany(supabase, 'app_connections', ['id'] as const, { workspace_id: workspaceId, app_slug: slug, provider_member_id: memberId, status: [...SLOT_HOLDING_STATUSES], id: { neq: connectionId } }, undefined, 1)
-    if (twin?.length) throw new AppActionError(`${label} is already connected to this workspace.`, 'duplicate')
+    if (twin?.length) throw new AppActionError('duplicate', 'appLabelAlreadyConnected', { label })
 
     const state = reconnecting ? null : await readSlotState(supabase, workspaceId, slug)
     const allowance: ConnectAllowance | 'reconnect' = state ? allowanceOf(state, connectionId) : 'reconnect'
-    if (allowance === 'buy_slot') throw new AppActionError(`Every ${app.providerLabel} slot is taken. Add a slot to connect another account.`, 'needs_slot')
+    if (allowance === 'buy_slot') throw new AppActionError('needs_slot', 'appSlotsTaken', { provider: app.providerLabel })
 
     // What can still fail with Linkup goes first: past this point the trial is claimed, and nothing
     // left can throw but a write to our own database.
@@ -346,7 +354,7 @@ async function finishConnection(supabase: Client, slug: AppSlug, workspaceId: nu
 
 async function claimSubscriberTrial(supabase: Client, slug: AppSlug, workspaceId: number, memberId: string): Promise<string> {
     const { error } = await supabase.from('app_trial_claims').insert<TrialClaimInsert>({ app_slug: slug, workspace_id: workspaceId, provider_member_id: memberId })
-    if (error?.code === '23505') throw new AppActionError(`This ${appDefinition(slug).providerLabel} account already had its free trial. Add a slot to connect it.`, 'trial_used')
+    if (error?.code === '23505') throw new AppActionError('trial_used', 'appTrialUsed', { provider: appDefinition(slug).providerLabel })
     if (error) throw new Error(error.message)
     return new Date(Date.now() + TRIAL_DAYS * 86_400_000).toISOString()
 }
@@ -374,7 +382,7 @@ async function ensureWorkspaceApp(supabase: Client, slug: AppSlug, workspaceId: 
 export async function disconnectConnection(slug: AppSlug, connectionId: string): Promise<void> {
     const { workspace, supabase } = await requireWorkspaceContext()
     const { data: connection } = await selectMaybeSingle(supabase, 'app_connections', ['provider_account_id', 'status'] as const, { id: connectionId, workspace_id: workspace.id, app_slug: slug })
-    if (!connection || connection.status === 'deleted') throw new AuthorizationError('Account not found')
+    if (!connection || connection.status === 'deleted') throw new AuthorizationError('accountNotFound')
     if (connection.provider_account_id) await deleteAccount(connection.provider_account_id)
     await removeBindingsOf(supabase, workspace.id, slug, [connectionId])
     await updateConnection(supabase, connectionId, { status: 'deleted', pause_reason: null, paused_until: null })
@@ -405,7 +413,7 @@ export async function attachAgentToConnection(slug: AppSlug, agentId: string, co
     await assertAgentInWorkspace(agentId, 'manage')
     const { workspace, supabase } = await requireWorkspaceContext()
     const { data: connection } = await selectMaybeSingle(supabase, 'app_connections', ['status'] as const, { id: connectionId, workspace_id: workspace.id, app_slug: slug })
-    if (!connection || connection.status === 'deleted') throw new AuthorizationError('Account not found')
+    if (!connection || connection.status === 'deleted') throw new AuthorizationError('accountNotFound')
 
     const { data: existing } = await selectMaybeSingle(supabase, 'app_connection_agents', ['connection_id'] as const, { agent_id: agentId, app_slug: slug })
     if (existing?.connection_id === connectionId) return
@@ -432,14 +440,14 @@ export async function setAgentWakeEvents(slug: AppSlug, agentId: string, events:
     const app = appDefinition(slug)
     const wanted = [...new Set(events.filter(event => isWakeEventOf(slug, event)))]
     const { data: binding } = await selectMaybeSingle(supabase, 'app_connection_agents', ['trigger_slug'] as const, { agent_id: agentId, app_slug: slug })
-    if (!binding) throw new AppActionError(`Pick the ${app.providerLabel} account this coworker uses first.`, 'unknown')
+    if (!binding) throw new AppActionError('unknown', 'appPickAccountFirst', { provider: app.providerLabel })
 
     if (wanted.length === 0) return dropWakeTrigger(supabase, workspace.id, agentId, slug)
 
     let trigger = binding.trigger_slug ? { slug: binding.trigger_slug } : null
     let token: string | null = null
     if (!trigger) {
-        if (!owned.engine_agent_id) throw new AppActionError('This coworker is not running yet. Try again in a minute.', 'unknown')
+        if (!owned.engine_agent_id) throw new AppActionError('unknown', 'coworkerNotRunning')
         const conn = await getWorkspaceConnection(workspace.id)
         const created = await engineCreateTrigger(conn, owned.engine_agent_id, { name: app.wakeTrigger.name, description: app.wakeTrigger.description, body: app.wakeTrigger.prompt(wanted), methods: ['POST'] })
         trigger = { slug: created.slug }

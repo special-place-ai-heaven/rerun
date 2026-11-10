@@ -18,6 +18,9 @@
         "dev:ui:full": "concurrently -k -n next,engine -c cyan,green \"pnpm --filter rerun dev\" \"pnpm --filter rerun-engine dev\"",
         "dev:mobile": "node scripts/dev-mobile.mjs",
         "verify:ui": "node scripts/verify-ui.mjs",
+        "i18n:check": "node scripts/i18n-check.mjs",
+        "i18n:index": "node scripts/i18n-index.mjs",
+        "i18n:translate": "node scripts/i18n-translate.mjs",
         "security:start": "node scripts/security-start.mjs",
         "dev:landing": "pnpm --dir cloud/apps/landing dev",
         "dev:emails": "pnpm --filter @rerun/emails dev",
@@ -31,8 +34,11 @@
         "db:fresh:local": "supabase start && supabase db reset"
     },
     "devDependencies": {
+        "@anthropic-ai/sdk": "^1.6.0",
         "@react-email/preview-server": "5.2.10",
         "concurrently": "^10.0.4",
+        "react": "19.2.4",
+        "react-dom": "19.2.4",
         "react-email": "6.11.6",
         "supabase": "^2.113.0",
         "typescript": "^5.8.3"
@@ -70,7 +76,7 @@
             "basic-ftp": "^6.2.5",
             "deepmerge-ts": "^8.0.2",
             "vite": "^8.3.5",
-            "@anthropic-ai/claude-agent-sdk": "0.3.317"
+            "@anthropic-ai/claude-agent-sdk": "0.3.322"
         }
     }
 }

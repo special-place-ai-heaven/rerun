@@ -7,7 +7,7 @@ import { cancelSubRunAction } from '@/app/api/_actions/agent.actions'
 import { readFileAction } from '@/app/api/_actions/file.actions'
 import { readWorkspaceFileAction } from '@/app/api/_actions/workspace-file.actions'
 import { foremanEngineFilesAction, readForemanFileAction } from '@/app/api/_actions/foreman-file.actions'
-import { decideIndustryAction, saveForemanIntakeAction } from '@/app/api/_actions/foreman-intake.actions'
+import { decideIndustryAction, proposeBoxesAction, saveForemanIntakeAction } from '@/app/api/_actions/foreman-intake.actions'
 import { streamLiveDiscoveries } from '@/components/builder/discoveries/useCompanyDiscoveries'
 import type { ChatComposerHandle } from '@/components/chat/ChatComposer'
 import { MessageFeedbackDialog } from '@/components/chat/MessageFeedbackDialog'
@@ -135,7 +135,8 @@ export function ForemanColumn({ open, placement }: { open: boolean | null; place
     const intakeHandlers = useMemo(
         () => ({
             onDecideIndustry: (input: string) => decideIndustryAction(input),
-            onAnalyzeSite: (url: string) => void streamLiveDiscoveries(url).then(ok => track('onboarding_company_analyzed', { ok })),
+            onProposeTeams: (words: string) => proposeBoxesAction(words),
+            onAnalyzeSite: (url: string) => streamLiveDiscoveries(url).then(ok => track('onboarding_company_analyzed', { ok })),
             onSubmit: async (intake: ForemanIntake, ownAsk?: string) => {
                 const industry = intake.industry ?? intake.decidedIndustry
                 track('onboarding_website_submitted', industry ? { provided: !!intake.companyUrl, industry } : { provided: !!intake.companyUrl })
@@ -152,7 +153,7 @@ export function ForemanColumn({ open, placement }: { open: boolean | null; place
                     if (ownAsk) composerRef.current?.restore(ownAsk)
                     throw err
                 })
-                useForemanStore.getState().setIntakePreview(intakePreviewPlan(saved.industry))
+                useForemanStore.getState().setIntakePreview(intakePreviewPlan(saved.industry, saved.boxes))
                 useForemanStore.getState().closeIntake()
                 track('onboarding_step_viewed', { step: 'plan' })
                 // A line written under the card is the plan: the funnel counts it off the kickoff that

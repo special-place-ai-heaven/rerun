@@ -1,4 +1,4 @@
-import { EMPTY_DRAFT, industryHint, intakeSteps, looksLikeSite, stepAnswered, toIntake, type ForemanIntakeRequest, type IntakeDraft, type TemplateCategory } from '@rerun/contracts'
+import { EMPTY_DRAFT, industryHint, intakeSteps, stepAnswered, toIntake, type ForemanIntakeRequest, type IntakeDraft, type TemplateCategory } from '@rerun/contracts'
 import { useRef, useState } from 'react'
 
 const INDUSTRY_WAIT_MS = 2500
@@ -12,8 +12,9 @@ type IntakeOptions = {
     initialIndex?: number
 }
 
-// The welcome card's state, the web card's order: the site, the line of work only when there is no site,
-// the role, then the first name only when nobody gave it yet.
+// The welcome card's state, the web card's order: the kind of company, the site, the role, then the
+// first name only when nobody gave it yet. The teams of a kind typed under "Other" are proposed by the
+// server when the card is saved: the app draws no board while it asks.
 export function useIntake({ knownFirstName, decideIndustry, submit, initial, initialIndex = 0 }: IntakeOptions) {
     const [draft, setDraft] = useState<IntakeDraft>({ ...EMPTY_DRAFT, ...initial })
     const [index, setIndex] = useState(initialIndex)
@@ -23,16 +24,16 @@ export function useIntake({ knownFirstName, decideIndustry, submit, initial, ini
     const [deciding, setDeciding] = useState(false)
     const asked = useRef(0)
 
-    const steps = intakeSteps(knownFirstName, draft.websiteSkipped)
+    const steps = intakeSteps(knownFirstName)
     const step = steps[Math.min(index, steps.length - 1)]
     const last = index >= steps.length - 1
 
-    // Asked as the site or the typed line of work is left behind, so the role question offers the roles of
-    // its industry rather than swapping its options under the finger. It waits a moment for the guess, then
-    // falls back on the roles every business has.
+    // Asked as the kind typed under "Other" is left behind, so the role question offers the roles of its
+    // industry rather than swapping its options under the finger. It waits a moment for the guess, then
+    // falls back on the roles every business has. A site is never guessed from: the kind is asked first.
     const guessIndustry = (final: IntakeDraft) => {
         const hint = industryHint(final)
-        if (!hint || final.industry || (step === 'company' && !looksLikeSite(hint))) return
+        if (!hint) return
         const ask = ++asked.current
         const settle = (industry: TemplateCategory | null) => {
             if (ask !== asked.current) return
@@ -63,7 +64,7 @@ export function useIntake({ knownFirstName, decideIndustry, submit, initial, ini
 
     const next = (final: IntakeDraft = draft) => {
         if (!stepAnswered(step, final) || submitting) return
-        if (step === 'company' || step === 'industry') guessIndustry(final)
+        if (step === 'industry') guessIndustry(final)
         if (last) return void finish(final)
         setIndex(current => current + 1)
     }
@@ -78,14 +79,12 @@ export function useIntake({ knownFirstName, decideIndustry, submit, initial, ini
     const skipWebsite = () => {
         const final = { ...draft, companyUrl: '', websiteSkipped: true }
         setDraft(final)
-        setIndex(1)
+        setIndex(steps.indexOf('company') + 1)
     }
 
     const back = () => {
         setSaveFailed(false)
         if (index === 0) return
-        // Back on the site question, the line of work is asked again only if they pass on it again.
-        if (index === 1 && draft.websiteSkipped) set({ websiteSkipped: false })
         setIndex(current => current - 1)
     }
 

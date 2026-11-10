@@ -1,6 +1,6 @@
 'use server'
 
-import type { TemplateCategory } from '@rerun/contracts'
+import { SOFTWARE_STUDIO, type TemplateCategory } from '@rerun/contracts'
 
 import { requireWorkspaceContext } from '@/app/api/_auth/ownership'
 import { decideIndustry } from '@/lib/company/decide-industry'
@@ -8,8 +8,10 @@ import { companySiteUrl } from '@/lib/company/firecrawl'
 import { analyzeCompanyProfile } from '@/lib/company/profile'
 import { mergeForeman, readAnswers, saveForemanProfile, stampWorkspaceOnboarded } from '@/lib/foreman/profile'
 import { takeIntakeCall } from '@/lib/onboarding/anonymous-intake-quota'
+import { DEFAULT_BOX_NAMES } from '@/lib/onboarding/box-name-suggestions'
 import { isTemplateCategory } from '@/lib/onboarding/industries'
-import type { ForemanIntake } from '@/lib/onboarding/intake'
+import { clampBoxNames, intakeBoxes, intakeIndustry, type ForemanIntake } from '@/lib/onboarding/intake'
+import { proposeBoxNames } from '@/lib/onboarding/propose-boxes'
 
 // The welcome card's half of the onboarding: everything it needs that cannot happen in the browser.
 // No model in the loop writes anything here, the card asked the four questions itself.
@@ -32,11 +34,34 @@ export async function decideIndustryAction(input: string): Promise<TemplateCateg
 }
 
 /**
+ * The teams for the kind of company they described under "Other", drawn on the board while they
+ * answer the next question. Same quota as the decision: it is a paid model call of the same card.
+ * `null` means none could be proposed, which the card reads as the universal divisions.
+ */
+export async function proposeBoxesAction(words: string): Promise<string[] | null> {
+    const ctx = await requireWorkspaceContext()
+    if (!takeIntakeCall(ctx.workspace.id, 'decide')) return null
+    return proposeBoxNames(words)
+}
+
+/**
+ * The Boxes to write beside the industry, when they are not that industry's own: a studio's, or the
+ * ones proposed for their own words. The card sends the ones the board drew, read again here since
+ * they end up in the foreman's instructions; an app build that drew none gets them proposed now.
+ */
+async function boxesToWrite(intake: ForemanIntake): Promise<string[] | undefined> {
+    if (intake.industry === SOFTWARE_STUDIO) return intakeBoxes(SOFTWARE_STUDIO)
+    const words = intake.industry ? null : intake.industryLabel?.trim()
+    if (!words) return undefined
+    return clampBoxNames(intake.boxes) ?? (await proposeBoxNames(words)) ?? DEFAULT_BOX_NAMES
+}
+
+/**
  * Writes the profile and closes discovery. What comes back is the industry that was actually
  * stored, so the board keeps drawing the divisions the foreman is about to be told about, even when
  * the full analysis disagreed with the fast decision at the last second.
  */
-export async function saveForemanIntakeAction(intake: ForemanIntake): Promise<{ industry: TemplateCategory | null }> {
+export async function saveForemanIntakeAction(intake: ForemanIntake): Promise<{ industry: TemplateCategory | null; boxes: string[] | null }> {
     const ctx = await requireWorkspaceContext()
     if (ctx.authUser.is_anonymous) throw new Error('Create your account first.')
 
@@ -46,10 +71,9 @@ export async function saveForemanIntakeAction(intake: ForemanIntake): Promise<{ 
     const analysis = url ? await analyzeCompanyProfile(url) : null
     const profile = analysis?.ok ? analysis.analysis.profile : null
 
-    // An industry they picked themselves always wins: it is the only one of the three that is not a
-    // guess. Then the full read, which saw the page, then the fast decision, which only saw the
-    // address but is what the board has been drawing for the last two questions.
-    const industry = intake.industry ?? profile?.industry ?? intake.decidedIndustry ?? null
+    // A kind they picked themselves always wins, a site never overrides it (intakeIndustry).
+    const industry = intakeIndustry(intake, profile?.industry)
+    const boxes = await boxesToWrite(intake)
 
     await saveForemanProfile(ctx, {
         company_url: analysis?.ok ? analysis.analysis.url : (url ?? undefined),
@@ -60,11 +84,12 @@ export async function saveForemanIntakeAction(intake: ForemanIntake): Promise<{ 
         company_offering: profile?.offering ?? intake.industryLabel ?? undefined,
         company_audience: profile?.audience,
         industry: industry ?? undefined,
+        boxes,
         position: intake.position ?? undefined,
         first_name: intake.firstName ?? undefined,
     })
 
-    return { industry: industry && isTemplateCategory(industry) ? industry : null }
+    return { industry: industry && isTemplateCategory(industry) ? industry : null, boxes: boxes ?? null }
 }
 
 /**

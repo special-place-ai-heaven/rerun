@@ -16,6 +16,9 @@ export type OnboardingAnswers = {
     company_offering?: string
     company_audience?: string
     industry?: TemplateCategory
+    // The Boxes the welcome card laid out when they are not their industry's own: a software studio's,
+    // or the ones proposed for the kind of company they described under "Other".
+    boxes?: string[]
     // Service slugs, in the order they were picked.
     tools?: string[]
     // Answered "later" rather than answered: kept so the survey never asks twice, and so the

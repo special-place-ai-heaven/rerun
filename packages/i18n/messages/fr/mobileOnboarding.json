@@ -6,8 +6,8 @@
                 "description": "Nous le lisons pour savoir ce que vous vendez et à qui."
             },
             "industry": {
-                "title": "Dans quel secteur travaillez-vous ?",
-                "description": "Il décide des équipes que nous dessinons sur votre board."
+                "title": "Quel genre d'entreprise construisez-vous ?",
+                "description": "Il décide des équipes que nous mettons sur votre board."
             },
             "role": {
                 "title": "Et quel est votre rôle ?",
@@ -28,6 +28,7 @@
             "placeholder": "Votre secteur d'activité"
         },
         "industries": {
+            "studio": "Studio logiciel",
             "agencies": "Agences",
             "ecommerce": "E-commerce",
             "saas": "SaaS",

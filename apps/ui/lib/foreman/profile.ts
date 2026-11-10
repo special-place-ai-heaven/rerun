@@ -64,6 +64,7 @@ export async function saveForemanProfile(ctx: WorkspaceContext, args: Record<str
     const answers = await readAnswers(ctx)
     const industry = asString(args.industry)
     const tools = asStringArray(args.tools)
+    const boxes = asStringArray(args.boxes)
 
     // A second save_profile, the catch-up one the model sometimes sends with a subset of arguments,
     // must not empty the list: an absent use_cases falls back on what was already written, where an
@@ -81,6 +82,8 @@ export async function saveForemanProfile(ctx: WorkspaceContext, args: Record<str
         industry: industry && isTemplateCategory(industry) ? industry : answers.industry,
         position: asString(args.position) ?? answers.position,
         tools: tools.length ? tools : answers.tools,
+        // Only the welcome card writes them; a save_profile without any keeps the ones on the board.
+        boxes: boxes.length ? boxes : answers.boxes,
         foreman: {
             ...answers.foreman,
             useCases: picked.length ? picked : undefined,

@@ -10,7 +10,7 @@ import { ForemanSignInLink } from '@/components/foreman/ForemanSignInLink'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
 import { Check, Users } from '@/lib/icons'
-import { intakeBoxes } from '@/lib/onboarding/intake'
+import { boxesOfIntake, intakeBoxes } from '@/lib/onboarding/intake'
 import { siteDomain } from '@/lib/onboarding/site-favicon'
 import { useOnboardingStore } from '@/stores/onboarding.store'
 
@@ -22,7 +22,7 @@ export function ForemanSignupGate() {
     const [open, setOpen] = useState(false)
     const pendingIntake = useOnboardingStore(state => state.pendingIntake)
     const domain = pendingIntake?.companyUrl ? siteDomain(pendingIntake.companyUrl) : null
-    const boxes = intakeBoxes(pendingIntake?.industry ?? pendingIntake?.decidedIndustry)
+    const boxes = pendingIntake ? boxesOfIntake(pendingIntake) : intakeBoxes(null)
     const perks = [t('perks.trial', { days: TRIAL_DAYS }), t('perks.cancel'), t('perks.kept')]
 
     useEffect(() => {

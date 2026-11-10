@@ -13,10 +13,10 @@ import { intakeFieldHandlers } from './IntakeField'
 import type { ForemanIntakeController } from './useForemanIntake'
 import type { IntakeDraft } from './steps'
 
-// The first question. The site is the good answer: it is the only input that tells us what this
-// company sells and to whom, which is what the foreman writes agents out of. Someone who does not
-// want to hand over their address, or does not have a site at all, skips it from the card's footer
-// and is asked their industry instead (IntakeIndustryStep).
+// The question after the kind of company. The site is the good answer: it is the only input that
+// tells us what this company sells and to whom, which is what the foreman writes agents out of.
+// Someone who does not want to hand over their address, or does not have a site at all, skips it
+// from the card's footer. It never changes the kind they picked (IntakeIndustryStep).
 
 type IntakeCompanyStepProps = {
     draft: IntakeDraft

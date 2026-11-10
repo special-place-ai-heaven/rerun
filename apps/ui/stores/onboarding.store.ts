@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { TEMPLATE_CATEGORIES } from '@rerun/contracts'
+import { INTAKE_KINDS, TEMPLATE_CATEGORIES } from '@rerun/contracts'
 import { z } from 'zod'
 import type { ForemanIntake } from '@/lib/onboarding/intake'
 import type { PendingAgentDraft } from './board.store'
@@ -46,11 +46,12 @@ const templateCategorySchema = z.enum(TEMPLATE_CATEGORIES)
 
 const pendingIntakeSchema = z.object({
     companyUrl: z.string().nullable(),
-    industry: templateCategorySchema.nullable(),
+    industry: z.enum(INTAKE_KINDS).nullable(),
     decidedIndustry: templateCategorySchema.nullable(),
     industryLabel: z.string().nullable(),
     position: z.string().nullable(),
     firstName: z.string().nullable(),
+    boxes: z.array(z.string()).nullable().optional(),
 }) satisfies z.ZodType<ForemanIntake>
 
 const pendingTemplateLinkSchema = z.string().min(1)

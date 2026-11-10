@@ -6,8 +6,8 @@
                 "description": "Lo leemos para saber qué vendes y a quién."
             },
             "industry": {
-                "title": "¿A qué te dedicas?",
-                "description": "Decide qué equipos dibujamos en tu board."
+                "title": "¿Qué tipo de empresa estás creando?",
+                "description": "Decide qué equipos ponemos en tu board."
             },
             "role": {
                 "title": "¿Y cuál es tu rol ahí?",
@@ -28,6 +28,7 @@
             "placeholder": "Tu sector"
         },
         "industries": {
+            "studio": "Estudio de software",
             "agencies": "Agencias",
             "ecommerce": "E-commerce",
             "saas": "SaaS",

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { conversationMessageSchema } from './conversation.js'
+import { INTAKE_KINDS } from './onboarding-intake.js'
 import { TEMPLATE_CATEGORIES } from './template-display.js'
 
 // The foreman lives on every engine under this fixed id, outside the agent index: the board, the
@@ -66,13 +67,16 @@ const templateCategorySchema = z.enum(TEMPLATE_CATEGORIES)
 
 // POST /api/v1/foreman/intake: the welcome card's answers, the same four the web card hands over.
 // `decidedIndustry` is what POST /api/v1/foreman/industry made of the site while they kept answering.
+// `boxes`: the teams the board drew for the words written under "Other". Optional, so an app build
+// from before it still posts; the server proposes them itself when they are missing.
 export const foremanIntakeSchema = z.object({
     companyUrl: z.string().trim().max(500).nullable(),
-    industry: templateCategorySchema.nullable(),
+    industry: z.enum(INTAKE_KINDS).nullable(),
     decidedIndustry: templateCategorySchema.nullable(),
     industryLabel: z.string().trim().max(200).nullable(),
     position: z.string().trim().max(200).nullable(),
     firstName: z.string().trim().max(100).nullable(),
+    boxes: z.array(z.string().trim().max(60)).max(6).nullable().optional(),
 })
 export type ForemanIntakeRequest = z.infer<typeof foremanIntakeSchema>
 export const foremanIndustryRequestSchema = z.object({ input: z.string().trim().min(1).max(500) })

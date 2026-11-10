@@ -5,7 +5,7 @@
 # From the clone on the server, once:
 #   sh deploy/vps/make-env.sh      # writes .env, COMPOSE_FILE included, so plain `docker compose` uses this file
 # then, to start or update:
-#   git pull && docker compose pull && docker compose up -d
+#   sudo sh deploy/vps/update.sh      # git pull, docker compose pull, database migrations, restart
 #
 # The images come from GitHub (.github/workflows/images.yml), never built here: the app image bakes
 # NEXT_PUBLIC_APP_URL from the repository variable, which must match RERUN_APP_HOST. The server logs in

@@ -18,7 +18,7 @@ Each service declares how it connects:
 | **API key** | Nothing. You paste the key in a masked form when you install it |
 | **OAuth** | Nothing. You sign in to the service in a browser window, and the token is stored on your server |
 | **Command** | Nothing. The engine runs the MCP command on your server |
-| **Composio** | A Composio key and an auth config per service. See [Composio](#composio) |
+| **Composio** | A Composio key. See [Composio](#composio) |
 | **Managed** | An OAuth app of your own with the service. See [Managed sign-in](#managed-sign-in) |
 
 Search uses embeddings when `RERUN_EMBED_API_KEY` is set, and keywords otherwise. The catalog lives in the `services` table: an admin can turn a service off by setting `enabled` to false in Supabase Studio.
@@ -41,13 +41,11 @@ To turn it on:
   <Step title="Set the key">
     Create a Composio project, copy its API key into `COMPOSIO_API_KEY` in `.env`, and run `docker compose up -d`.
   </Step>
-  <Step title="Create an auth config per service">
-    The auth config ids in the seed are empty: the ones Rerun Cloud uses belong to its own Composio project. In your Composio dashboard, create an auth config for each toolkit you want, for example `gmail`, and copy its id (`ac_...`).
-  </Step>
-  <Step title="Write the id on the service">
-    In Supabase Studio, open the `services` table and the row of the service. In its `manifest`, find the auth method whose `kind` is `composio`, and set `composio.authConfigId` to the id you copied.
-  </Step>
 </Steps>
+
+The auth config ids in the seed are empty: the ones Rerun Cloud uses belong to its own Composio project. On the first connect of a service, Rerun reuses an enabled auth config for its toolkit in your Composio project, or creates one on Composio-managed auth.
+
+A toolkit Composio offers no managed auth for needs your own OAuth app or credentials. Connect then says so, naming the toolkit. In your Composio dashboard, create an auth config for it and copy its id (`ac_...`). Then, in Supabase Studio, open the `services` table and the row of the service. In its `manifest`, find the auth method whose `kind` is `composio`, and set `composio.authConfigId` to the id you copied. An id set on the service always wins.
 
 The service now connects like any other: the person signs in on Composio's page, and lands back in Rerun at `NEXT_PUBLIC_APP_URL/api/oauth/composio/callback`.
 

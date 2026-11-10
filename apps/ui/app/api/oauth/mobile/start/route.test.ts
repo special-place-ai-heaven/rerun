@@ -83,4 +83,17 @@ describe('GET /api/oauth/mobile/start, for an extra account of a Composio app', 
         expect(ctx).toMatchObject({ agentId: 'agent-1', key: KEY, serverName: 'gmail-k3x9ab' })
         expect(ctx).not.toHaveProperty('userId')
     })
+
+    it('links with the auth config found in Composio when the service names none, and carries it to the callback', async () => {
+        vi.mocked(loadManifest).mockResolvedValue({ authMethods: [{ kind: 'composio', composio: { toolkit: 'gmail', authConfigId: '' } }] } as unknown as Awaited<ReturnType<typeof loadManifest>>)
+        vi.stubEnv('COMPOSIO_API_KEY', 'test-key')
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ items: [{ id: 'ac_found', status: 'ENABLED', toolkit: { slug: 'gmail' } }] })))
+
+        const res = await open(mintConnectTicket({ agentId: 'agent-1', key: KEY, workspaceId: 7, userId: 'user-1' }))
+        vi.unstubAllGlobals()
+
+        expect(initiateConnectedAccount).toHaveBeenCalledWith(composioUserId('agent-1', 'k3x9ab'), 'ac_found', expect.any(String))
+        const [cookie] = res.cookies.getAll()
+        expect(decodeComposioContext(cookie.value)).toMatchObject({ key: KEY, authConfigId: 'ac_found' })
+    })
 })

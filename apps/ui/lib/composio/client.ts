@@ -58,6 +58,49 @@ export async function initiateConnectedAccount(userId: string, authConfigId: str
     return { connectedAccountId: data.connected_account_id, redirectUrl: data.redirect_url }
 }
 
+type ComposioAuthConfigRow = { id?: string; status?: string; toolkit?: { slug?: string } }
+
+// Keyed by toolkit. The promise itself is cached so two first connects at once create one config.
+const authConfigCache = new Map<string, Promise<string>>()
+
+// A self-hosted catalog ships without Rerun Cloud's auth config ids. An empty one is resolved in this
+// server's own Composio project: an enabled config for the toolkit is reused, otherwise one on
+// Composio-managed auth is created. An id set on the service always wins.
+export async function resolveAuthConfigId(composio: { toolkit: string; authConfigId: string }): Promise<string> {
+    if (composio.authConfigId) return composio.authConfigId
+    const { toolkit } = composio
+    let pending = authConfigCache.get(toolkit)
+    if (!pending) {
+        pending = findOrCreateAuthConfig(toolkit)
+        authConfigCache.set(toolkit, pending)
+        pending.catch(() => authConfigCache.delete(toolkit))
+    }
+    return pending
+}
+
+async function findOrCreateAuthConfig(toolkit: string): Promise<string> {
+    // shortcut: reads only the first page (up to 200 configs of this toolkit), page on if a project ever holds more.
+    const page = await composioFetch<{ items?: ComposioAuthConfigRow[] }>(`/auth_configs?${new URLSearchParams({ toolkit_slug: toolkit, limit: '200' }).toString()}`)
+    const existing = page.items?.find(c => c.id && c.status === 'ENABLED' && c.toolkit?.slug?.toLowerCase() === toolkit.toLowerCase())
+    if (existing?.id) return existing.id
+
+    let created: { auth_config?: { id?: string } }
+    try {
+        created = await composioFetch('/auth_configs', {
+            method: 'POST',
+            body: JSON.stringify({ toolkit: { slug: toolkit }, auth_config: { type: 'use_composio_managed_auth', name: `Rerun ${toolkit}` } }),
+        })
+    } catch (err) {
+        // A toolkit without a Composio-managed app is refused with a 400; a bad key or an outage is not that.
+        if (err instanceof ComposioApiError && err.status === 400) {
+            throw new ComposioApiError(400, `${toolkit} has no Composio-managed sign-in, so it needs its own OAuth app or credentials: create an auth config for ${toolkit} in Composio and set its id on the service. ${err.message}`)
+        }
+        throw err
+    }
+    if (!created.auth_config?.id) throw new ComposioApiError(502, 'Composio auth config response is missing the id')
+    return created.auth_config.id
+}
+
 export type ComposioConnectedAccount = {
     id: string
     userId: string

@@ -21,6 +21,8 @@ export type ComposioOAuthContext = {
     // Known at initiate time: Composio creates the (INITIALIZING) account when the link is
     // issued. The callback re-fetches it and only trusts a verified ACTIVE account.
     connectedAccountId: string
+    // The auth config the account was linked with, which /start resolves when the service names none.
+    authConfigId?: string
     // Started from the iOS app: the callback redirects back into it instead of answering with the
     // popup page, and reads the workspace from this signed grant since that browser has no session.
     mobileGrant?: string

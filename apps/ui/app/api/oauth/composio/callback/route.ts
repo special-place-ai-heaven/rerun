@@ -79,7 +79,8 @@ export async function GET(req: Request) {
         const userId = composioUserId(ctx.agentId, parseServiceRegistryKey(ctx.key).instanceId)
         const method = (await loadManifest(ctx.key))?.authMethods.find(m => m.kind === 'composio' && m.composio)
         if (!method?.composio) return finish({ ok: false, error: `${ctx.key} has no Composio connection to set up.` })
-        const authConfigId = method.composio.authConfigId
+        // Not re-resolved here: another server instance could pick or create a different config.
+        const authConfigId = method.composio.authConfigId || ctx.authConfigId
         let account = await getConnectedAccount(ctx.connectedAccountId)
         for (let attempt = 1; account.status !== 'ACTIVE' && account.status !== 'FAILED' && attempt < ACTIVE_POLL_ATTEMPTS; attempt++) {
             await sleep(ACTIVE_POLL_DELAY_MS)

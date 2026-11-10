@@ -31,6 +31,9 @@ const MANIFEST = serviceManifestSchema.parse({
     authMethods: [{ id: 'composio', kind: 'composio', composio: { toolkit: 'gmail', authConfigId: 'ac_gmail' }, mcpServers: [{ name: 'gmail', transport: 'http', url: 'https://rerun.test/api/mcp/composio/gmail' }] }],
 })
 
+// A self-hosted catalog row: the id is resolved at /start and carried in the sealed context.
+const UNSET_MANIFEST = { ...MANIFEST, authMethods: [{ ...MANIFEST.authMethods[0], composio: { toolkit: 'gmail', authConfigId: '' } }] }
+
 const ACTIVE: ComposioConnectedAccount = { id: 'ca_1', userId: 'local_agent_agent-1', authConfigId: 'ac_gmail', status: 'ACTIVE', toolkit: 'gmail' }
 
 let jar: Record<string, string> = {}
@@ -162,6 +165,26 @@ describe('GET /api/oauth/composio/callback', () => {
     it('marks nothing when the account was made with another auth config', async () => {
         vi.mocked(getConnectedAccount).mockResolvedValue({ ...ACTIVE, authConfigId: 'ac_other' })
         withContext(CONTEXT)
+
+        const res = await callback({ state: STATE, status: 'success' })
+
+        expect(await res.text()).toContain('Connection mismatch, please retry')
+        expect(markComposioAuthorized).not.toHaveBeenCalled()
+    })
+
+    it('checks the account against the auth config /start resolved when the service names none', async () => {
+        vi.mocked(loadManifest).mockResolvedValue(UNSET_MANIFEST)
+        withContext({ ...CONTEXT, authConfigId: 'ac_gmail' })
+
+        const res = await callback({ state: STATE, status: 'success' })
+
+        expect(await res.text()).toContain('composio-oauth-success')
+        expect(markComposioAuthorized).toHaveBeenCalledOnce()
+    })
+
+    it('marks nothing when the account differs from the auth config /start resolved', async () => {
+        vi.mocked(loadManifest).mockResolvedValue(UNSET_MANIFEST)
+        withContext({ ...CONTEXT, authConfigId: 'ac_other' })
 
         const res = await callback({ state: STATE, status: 'success' })
 

@@ -9,6 +9,13 @@
 #
 # The build bakes NEXT_PUBLIC_APP_URL and the admin emails from .env into the app image, so the image is
 # built here rather than pulled.
+#
+# Web reading and search without paid services: `webgate` answers the app exactly as Firecrawl
+# (/v2/scrape, /v2/map, /v2/search) and Brave Search (/res/v1/web/search) would, and does the work with
+# the self-hosted crawl4ai (CRAWL4AI_URL, CRAWL4AI_TOKEN) and with `searxng` below. Both are reached
+# only by name on the compose network: no port, no Traefik route. The app's own .env keys for Firecrawl
+# and Brave are overridden below, so pages and searches go through webgate with WEBGATE_KEY.
+# Add the keys to an existing .env once with: sudo sh deploy/vps/add-web.sh
 services:
   app:
     ports: !reset []
@@ -18,6 +25,12 @@ services:
       - traefik.http.routers.rerun-app.entrypoints=websecure
       - traefik.http.routers.rerun-app.tls.certresolver=letsencrypt
       - traefik.http.services.rerun-app.loadbalancer.server.port=3000
+    # `environment` wins over env_file, so these replace any Firecrawl or Brave key in .env.
+    environment:
+      RERUN_FIRECRAWL_BASE_URL: http://webgate:8080
+      FIRECRAWL_API_KEY: ${WEBGATE_KEY}
+      BRAVE_SEARCH_API_KEY: ${WEBGATE_KEY}
+      RERUN_BRAVE_SEARCH_URL: http://webgate:8080/res/v1/web/search
 
   engine:
     ports: !reset []
@@ -27,3 +40,23 @@ services:
       - traefik.http.routers.rerun-engine.entrypoints=websecure
       - traefik.http.routers.rerun-engine.tls.certresolver=letsencrypt
       - traefik.http.services.rerun-engine.loadbalancer.server.port=3000
+
+  webgate:
+    image: node:22-alpine
+    command: node /srv/webgate/server.mjs
+    volumes:
+      - ./deploy/vps/webgate:/srv/webgate:ro
+    environment:
+      WEBGATE_KEY: ${WEBGATE_KEY:?set WEBGATE_KEY in .env (sudo sh deploy/vps/add-web.sh)}
+      CRAWL4AI_URL: ${CRAWL4AI_URL:-https://crawl4ai.robagentic.tech}
+      CRAWL4AI_TOKEN: ${CRAWL4AI_TOKEN:?set CRAWL4AI_TOKEN in .env (sudo sh deploy/vps/add-web.sh)}
+      SEARXNG_URL: http://searxng:8080
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    volumes:
+      - ./deploy/vps/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env (sudo sh deploy/vps/add-web.sh)}
+    restart: unless-stopped

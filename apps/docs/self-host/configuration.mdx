@@ -64,6 +64,7 @@ Each one switches a feature on. Empty means the feature is off, and the rest of 
 | --- | --- | --- |
 | `COMPOSIO_API_KEY` | empty | Connects 2,000+ apps by OAuth through [Composio](https://composio.dev). See [Composio](/self-host/services#composio). |
 | `BRAVE_SEARCH_API_KEY` | empty | Web search for the coworkers, through the [Brave Search API](https://brave.com/search/api). |
+| `RERUN_BRAVE_SEARCH_URL` | `https://api.search.brave.com/res/v1/web/search` | Where the web search is sent. Point it at a service that answers like Brave's API, such as a self-hosted stand-in; `BRAVE_SEARCH_API_KEY` is still sent as its key. |
 | `FIRECRAWL_API_KEY` | empty | Reading websites through [Firecrawl](https://firecrawl.dev), including your company site when the Foreman builds the Brain. |
 | `APIFY_TOKEN` | empty | LinkedIn and Google Maps research during onboarding, through [Apify](https://apify.com). |
 | `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` | empty | Product analytics with [PostHog](https://posthog.com). Off when empty, and the cookie banner only shows when it is set. |

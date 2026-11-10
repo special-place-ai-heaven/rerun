@@ -54,6 +54,18 @@ describe('searchBrave', () => {
         expect((init.headers as Record<string, string>)['X-Subscription-Token']).toBe('brave-key')
     })
 
+    it('sends the request to RERUN_BRAVE_SEARCH_URL when it is set', async () => {
+        process.env.RERUN_BRAVE_SEARCH_URL = 'http://webgate:8080/res/v1/web/search'
+        const fetchMock = mockFetch(() => Response.json({ web: { results: [] } }))
+
+        try {
+            await searchBrave('rerun', 3)
+        } finally {
+            delete process.env.RERUN_BRAVE_SEARCH_URL
+        }
+        expect(fetchMock.mock.calls[0][0]).toBe('http://webgate:8080/res/v1/web/search?q=rerun&count=3')
+    })
+
     it('answers an empty list when Brave found nothing', async () => {
         mockFetch(() => Response.json({ web: {} }))
 

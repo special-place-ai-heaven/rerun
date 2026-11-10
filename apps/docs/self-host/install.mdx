@@ -201,7 +201,7 @@ ADMIN_EMAILS=you@example.com
 node scripts/self-host-check.mjs
 ```
 
-It generates the three secrets left empty (`RERUN_ENGINE_API_KEY`, `FOREMAN_HUB_TOKEN_SECRET`, `BOARD_IMAGE_SECRET`), checks the required values, then asks Supabase whether the schema is in place and `SUPABASE_SECRET_KEY` is the secret key. It stops with a plain message on anything only you can fix, warns when `OPENROUTER_API_KEY` is empty, and prints the exact command to start.
+It generates the secrets left empty (`RERUN_ENGINE_API_KEY`, `FOREMAN_HUB_TOKEN_SECRET`, `BOARD_IMAGE_SECRET`, `MOBILE_OAUTH_TICKET_SECRET`, `PUBLISHED_ACCESS_SECRET`, `UNSUBSCRIBE_SECRET`), checks the required values, then asks Supabase whether the schema is in place and `SUPABASE_SECRET_KEY` is the secret key. It stops with a plain message on anything only you can fix, warns when `OPENROUTER_API_KEY` is empty, and prints the exact command to start.
 
 ## 5. Start Rerun
 

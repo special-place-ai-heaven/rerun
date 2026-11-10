@@ -62,6 +62,7 @@ put RERUN_ENGINE_BROWSER_URL "https://$ENGINE_HOST"
 hex() { if command -v openssl >/dev/null 2>&1; then openssl rand -hex "$1"; else od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; fi; }
 put WEBGATE_KEY "$(hex 32)"
 put SEARXNG_SECRET "$(hex 32)"
+for key in MOBILE_OAUTH_TICKET_SECRET PUBLISHED_ACCESS_SECRET UNSUBSCRIBE_SECRET; do put "$key" "$(hex 32)"; done
 put CRAWL4AI_URL "${CRAWL4AI_URL:-https://crawl4ai.robagentic.tech}"
 
 missing=''

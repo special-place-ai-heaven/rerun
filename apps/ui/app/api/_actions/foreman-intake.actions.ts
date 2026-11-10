@@ -1,6 +1,6 @@
 'use server'
 
-import { kindCategory, SOFTWARE_STUDIO, type TemplateCategory } from '@rerun/contracts'
+import { SOFTWARE_STUDIO, type TemplateCategory } from '@rerun/contracts'
 
 import { requireWorkspaceContext } from '@/app/api/_auth/ownership'
 import { decideIndustry } from '@/lib/company/decide-industry'
@@ -10,7 +10,7 @@ import { mergeForeman, readAnswers, saveForemanProfile, stampWorkspaceOnboarded 
 import { takeIntakeCall } from '@/lib/onboarding/anonymous-intake-quota'
 import { DEFAULT_BOX_NAMES } from '@/lib/onboarding/box-name-suggestions'
 import { isTemplateCategory } from '@/lib/onboarding/industries'
-import { clampBoxNames, intakeBoxes, type ForemanIntake } from '@/lib/onboarding/intake'
+import { clampBoxNames, intakeBoxes, intakeIndustry, type ForemanIntake } from '@/lib/onboarding/intake'
 import { proposeBoxNames } from '@/lib/onboarding/propose-boxes'
 
 // The welcome card's half of the onboarding: everything it needs that cannot happen in the browser.
@@ -71,12 +71,8 @@ export async function saveForemanIntakeAction(intake: ForemanIntake): Promise<{ 
     const analysis = url ? await analyzeCompanyProfile(url) : null
     const profile = analysis?.ok ? analysis.analysis.profile : null
 
-    // A kind they picked themselves always wins: it is the only one of the three that is not a
-    // guess, and a site never overrides it. Their own words under "Other" come next, through the
-    // fast decision made of them. Only when they said nothing of the kind does the full read of the
-    // site decide, then the fast decision made of the address.
-    const guessed = intake.industryLabel ? (intake.decidedIndustry ?? profile?.industry) : (profile?.industry ?? intake.decidedIndustry)
-    const industry = (intake.industry ? kindCategory(intake.industry) : guessed) ?? null
+    // A kind they picked themselves always wins, a site never overrides it (intakeIndustry).
+    const industry = intakeIndustry(intake, profile?.industry)
     const boxes = await boxesToWrite(intake)
 
     await saveForemanProfile(ctx, {

@@ -2,7 +2,7 @@ import { kindCategory, TEMPLATE_CATEGORIES } from '@rerun/contracts'
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_BOX_NAMES, STUDIO_BOX_NAMES } from './box-name-suggestions'
-import { boxesOfIntake, clampBoxNames, DEFAULT_ROLES, INTAKE_INDUSTRIES, intakeBoxes, intakePreviewPlan, rolesForIndustry } from './intake'
+import { boxesOfIntake, clampBoxNames, DEFAULT_ROLES, INTAKE_INDUSTRIES, intakeBoxes, intakeIndustry, intakePreviewPlan, rolesForIndustry } from './intake'
 
 describe('INTAKE_INDUSTRIES', () => {
     it('offers the software studio first, then every bucket but the one nobody recognises themselves in', () => {
@@ -54,6 +54,26 @@ describe('boxesOfIntake', () => {
     it('lays out the picked kind, else the decided industry', () => {
         expect(boxesOfIntake({ ...intake, industry: 'studio' })).toEqual(intakeBoxes('studio'))
         expect(boxesOfIntake({ ...intake, decidedIndustry: 'legal' })).toEqual(intakeBoxes('legal'))
+    })
+})
+
+describe('intakeIndustry', () => {
+    const intake = { industry: null, decidedIndustry: null, industryLabel: null }
+
+    it('keeps the kind they picked over whatever the site was read as', () => {
+        expect(intakeIndustry({ ...intake, industry: 'legal', decidedIndustry: 'saas' }, 'agencies')).toBe('legal')
+        expect(intakeIndustry({ ...intake, industry: 'studio' }, 'ecommerce')).toBe('saas')
+    })
+
+    it('files their own words by the decision made of them before the site', () => {
+        expect(intakeIndustry({ ...intake, industryLabel: 'Pottery studio', decidedIndustry: 'creators' }, 'ecommerce')).toBe('creators')
+        expect(intakeIndustry({ ...intake, industryLabel: 'Pottery studio' }, 'ecommerce')).toBe('ecommerce')
+    })
+
+    it('lets the site decide only when they said nothing of the kind', () => {
+        expect(intakeIndustry({ ...intake, decidedIndustry: 'saas' }, 'agencies')).toBe('agencies')
+        expect(intakeIndustry({ ...intake, decidedIndustry: 'saas' }, null)).toBe('saas')
+        expect(intakeIndustry(intake, undefined)).toBeNull()
     })
 })
 

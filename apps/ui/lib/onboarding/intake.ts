@@ -1,4 +1,4 @@
-import type { IntakeKind, TemplateCategory } from '@rerun/contracts'
+import { kindCategory, type IntakeKind, type TemplateCategory } from '@rerun/contracts'
 
 import type { ShownPlan } from '@/components/foreman/widgets/plan-card'
 import { DEFAULT_BOX_NAMES, divisionExamples } from '@/lib/onboarding/box-name-suggestions'
@@ -38,6 +38,17 @@ const MAX_BOXES = 5
  */
 export function intakeBoxes(industry: string | null | undefined, own?: string[] | null): string[] {
     return (own?.length ? own : (divisionExamples(industry) ?? DEFAULT_BOX_NAMES)).slice(0, MAX_BOXES)
+}
+
+/**
+ * The industry an answered card is filed under, `read` being what the full read of the site made of
+ * it. A kind they picked always wins, and a site never overrides it. Their own words under "Other"
+ * come next, through the fast decision made of them. Only when they said nothing of the kind does
+ * the full read decide, then the fast decision made of the address.
+ */
+export function intakeIndustry(intake: Pick<ForemanIntake, 'industry' | 'decidedIndustry' | 'industryLabel'>, read: TemplateCategory | null | undefined): TemplateCategory | null {
+    if (intake.industry) return kindCategory(intake.industry)
+    return (intake.industryLabel ? (intake.decidedIndustry ?? read) : (read ?? intake.decidedIndustry)) ?? null
 }
 
 /**

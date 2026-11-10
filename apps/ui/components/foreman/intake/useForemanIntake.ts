@@ -199,6 +199,8 @@ export function useForemanIntake({ firstName, handlers }: { firstName: string | 
 
     const submit = useCallback(
         (value: IntakeDraft, decidedIndustry: TemplateCategory | null, ownAsk?: string) => {
+            // A proposal still on its way would repaint the board over the teams the server writes.
+            proposing.current += 1
             setSubmitting(true)
             setError(null)
             void handlersRef.current

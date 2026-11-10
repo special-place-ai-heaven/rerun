@@ -29,13 +29,37 @@ export function resolveTargetAgent(ref: string, targets: AgentRow[]): { agent: A
     return { error: `Coworker "${ref}" was not found. Available coworkers: ${allowed}` }
 }
 
+// Calls made in one step run side by side, so one caller could start a whole team at once on a
+// small machine. Four at a time, like delegate_tasks; the rest wait their turn.
+export const MAX_PARALLEL_CALLS = 4
+
+function callGate(limit: number) {
+    let active = 0
+    const waiting: (() => void)[] = []
+    return {
+        enter: async () => {
+            if (active >= limit) await new Promise<void>(resolve => waiting.push(resolve))
+            else active++
+        },
+        // A waiter takes over the slot of the call that leaves, so `active` only drops when nobody waits.
+        leave: () => {
+            const next = waiting.shift()
+            if (next) next()
+            else active--
+        },
+    }
+}
+
 export function callAgentTools(ctx: RunContext): ToolSet {
     const targets = ctx.callTargets ?? []
     const roster = targets.map(t => `${t.name} (id: ${t.id})`).join(', ')
+    const gate = callGate(MAX_PARALLEL_CALLS)
     return {
         call_agent: tool({
             description:
-                'Send a one-shot message to another persistent coworker on this engine. Use it whenever your instructions name another coworker to contact (e.g. @someAgent), including from a scheduled task. The called coworker runs in its own fresh session with its own personality, tools and memory. By default the message is dispatched and you move on without waiting; set wait to true when you need the coworker\'s answer to continue. Use delegate_tasks for subtasks of your own work instead.' +
+                'Send a one-shot message to another persistent coworker on this engine. Use it whenever your instructions name another coworker to contact (e.g. @someAgent), including from a scheduled task. The called coworker runs in its own fresh session with its own personality, tools and memory. By default the message is dispatched and you move on without waiting; set wait to true when you need the coworker\'s answer to continue. To give several coworkers work at the same time, make several call_agent calls in the same step with wait true: they run side by side, up to ' +
+                MAX_PARALLEL_CALLS +
+                ' at once, and each returns its own answer. Use delegate_tasks for subtasks of your own work instead.' +
                 (roster ? ` Coworkers you can call: ${roster}.` : ''),
             inputSchema: z.object({
                 agent: z.string().describe('Name or id of the target coworker, as mentioned by the user'),
@@ -93,6 +117,8 @@ export function callAgentTools(ctx: RunContext): ToolSet {
                 progress.sessionId = session.id
                 emit()
 
+                // Taken after the progress block went out, so a call that waits its turn still shows as queued.
+                await gate.enter()
                 let run: AgentRun
                 try {
                     // `fullStream` tees, so following the run for the caller's progress block and
@@ -101,6 +127,7 @@ export function callAgentTools(ctx: RunContext): ToolSet {
                 } catch (err) {
                     // A run that never started emits no completion event of its own, so the session
                     // just mirrored on the hub would stay `working` forever.
+                    gate.leave()
                     const reason = err instanceof Error ? err.message : String(err)
                     endSubRun(progress, reason)
                     emit()
@@ -118,6 +145,7 @@ export function callAgentTools(ctx: RunContext): ToolSet {
                 }
 
                 if (!wait) {
+                    gate.leave()
                     // The run drains itself, so a dispatched call needs nothing here to keep going.
                     progress.status = 'dispatched'
                     emit()
@@ -137,6 +165,7 @@ export function callAgentTools(ctx: RunContext): ToolSet {
                     return `(error calling ${target.config.name}: ${reason})`
                 } finally {
                     stopHeartbeat()
+                    gate.leave()
                 }
             },
         }),

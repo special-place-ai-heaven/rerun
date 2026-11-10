@@ -63,6 +63,8 @@ Each one switches a feature on. Empty means the feature is off, and the rest of 
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `COMPOSIO_API_KEY` | empty | Connects 2,000+ apps by OAuth through [Composio](https://composio.dev). See [Composio](/self-host/services#composio). |
+| `RERUN_GITHUB_MCP_CLIENT_ID`, `RERUN_GITHUB_MCP_CLIENT_SECRET` | empty | A GitHub OAuth App of your own, so coworkers can connect GitHub's MCP server, which offers no self-registration. Its callback is `<NEXT_PUBLIC_APP_URL>/api/mcp/oauth/callback`. |
+| `RERUN_ASANA_MCP_CLIENT_ID`, `RERUN_ASANA_MCP_CLIENT_SECRET` | empty | The same for Asana's MCP server. |
 | `BRAVE_SEARCH_API_KEY` | empty | Web search for the coworkers, through the [Brave Search API](https://brave.com/search/api). |
 | `FIRECRAWL_API_KEY` | empty | Reading websites through [Firecrawl](https://firecrawl.dev), including your company site when the Foreman builds the Brain. |
 | `APIFY_TOKEN` | empty | LinkedIn and Google Maps research during onboarding, through [Apify](https://apify.com). |

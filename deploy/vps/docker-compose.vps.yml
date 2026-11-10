@@ -5,10 +5,11 @@
 # From the clone on the server, once:
 #   sh deploy/vps/make-env.sh      # writes .env, COMPOSE_FILE included, so plain `docker compose` uses this file
 # then, to start or update:
-#   git pull && docker compose up -d --build
+#   git pull && docker compose pull && docker compose up -d
 #
-# The build bakes NEXT_PUBLIC_APP_URL and the admin emails from .env into the app image, so the image is
-# built here rather than pulled.
+# The images come from GitHub (.github/workflows/images.yml), never built here: the app image bakes
+# NEXT_PUBLIC_APP_URL from the repository variable, which must match RERUN_APP_HOST. The server logs in
+# once with `docker login ghcr.io` (a read:packages token) while the packages are private.
 #
 # Web reading and search without paid services: `webgate` answers the app exactly as Firecrawl
 # (/v2/scrape, /v2/map, /v2/search) and Brave Search (/res/v1/web/search) would, and does the work with

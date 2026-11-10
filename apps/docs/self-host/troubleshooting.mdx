@@ -164,7 +164,7 @@ Without the key, the Foreman skips the onboarding and runs on the AI you connect
 
 **"Composio connections are not configured on this server"**: set `COMPOSIO_API_KEY` and run `docker compose up -d`.
 
-**An error from Composio when you click Connect**: the service has no auth config of yours yet. The ids shipped in the catalog are empty. Create one in Composio and write its id on the service. See [Composio](/self-host/services#composio).
+**"... has no Composio-managed sign-in, so it needs its own OAuth app or credentials"**: Rerun found no auth config for the toolkit in your Composio project, and Composio offers no managed auth to create one with. Create one in Composio with your own OAuth app or credentials and write its id on the service. See [Composio](/self-host/services#composio).
 
 ## The screen does not show
 

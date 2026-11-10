@@ -66,6 +66,7 @@ describe('resolveAuthConfigId', () => {
     })
 
     it('says the app needs its own OAuth app when Composio refuses managed auth, and tries again next time', async () => {
+        // Illustrative body in the documented error envelope; the docs name no slug for this refusal.
         const refusal = { error: { message: 'Composio managed auth is not available for this toolkit', code: 400, slug: 'Auth_Config_ValidationError', status: 400 } }
         const fetchMock = vi
             .fn()

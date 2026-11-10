@@ -57,7 +57,7 @@ export function callAgentTools(ctx: RunContext): ToolSet {
     return {
         call_agent: tool({
             description:
-                'Send a one-shot message to another persistent coworker on this engine. Use it whenever your instructions name another coworker to contact (e.g. @someAgent), including from a scheduled task. The called coworker runs in its own fresh session with its own personality, tools and memory. By default the message is dispatched and you move on without waiting; set wait to true when you need the coworker's answer to continue. To give several coworkers work at the same time, make several call_agent calls in the same step with wait true: they run side by side, up to ' +
+                'Send a one-shot message to another persistent coworker on this engine. Use it whenever your instructions name another coworker to contact (e.g. @someAgent), including from a scheduled task. The called coworker runs in its own fresh session with its own personality, tools and memory. By default the message is dispatched and you move on without waiting; set wait to true when you need the coworker\'s answer to continue. To give several coworkers work at the same time, make several call_agent calls in the same step with wait true: they run side by side, up to ' +
                 MAX_PARALLEL_CALLS +
                 ' at once, and each returns its own answer. Use delegate_tasks for subtasks of your own work instead.' +
                 (roster ? ` Coworkers you can call: ${roster}.` : ''),

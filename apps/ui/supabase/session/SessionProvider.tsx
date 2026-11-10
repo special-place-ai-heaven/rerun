@@ -1,6 +1,6 @@
 'use client'
 
-import { isAdminEmail } from '@/lib/auth/admin-emails'
+import { isAdminAction } from '@/app/api/_actions/admin.actions'
 import { Database } from '@/app/api/database.types'
 import { routes } from '@/lib/routes'
 import { parsePriceArm, PRICE_EXPERIMENT_KEY, PRICE_PROPERTY, isSubscriptionEntitled, TRIAL_CARD_PROPERTY, trialArm } from '@rerun/cloud/billing'
@@ -94,6 +94,9 @@ export type SessionContextValue = {
     refreshWorkspace: () => Promise<void>
     // Same for the `users` row: the signup form calls it once the server has stamped the signup.
     refreshUser: () => Promise<void>
+    // Rerun staff, as the server decides it for the signed-in account; false until it has answered.
+    // Optional so a fixture drawn without it reads as nobody's admin.
+    isAdmin?: boolean
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null)
@@ -107,6 +110,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
     const [workspaces, setWorkspaces] = useState<Workspace[]>([])
     const [session, setSession] = useState<Session | null>(null)
     const [phoneRead, setPhoneRead] = useState<{ userId: string; status: PhoneStatus } | null>(null)
+    const [adminRead, setAdminRead] = useState<{ email: string; admin: boolean } | null>(null)
     const [userLoading, setUserLoading] = useState(true)
     const [workspaceLoading, setWorkspaceLoading] = useState(true)
     const supabase = createClient()
@@ -226,7 +230,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
             const attribution = readAttribution()
             identifyPerson(
                 email,
-                { email, is_internal: isAdminEmail(email) },
+                { email },
                 {
                     initial_utm_source: attribution.utm_source,
                     initial_utm_campaign: attribution.utm_campaign,
@@ -235,6 +239,26 @@ export function SessionProvider({ children }: PropsWithChildren) {
             )
         }
     }, [session?.user?.email])
+
+    // Keyed on the email rather than the id: an anonymous visitor who signs up keeps their id and only
+    // then has an email to be an admin with. A failed read leaves the answer unknown, so nothing
+    // admin-only opens and `is_internal` is never written false over a true one.
+    const sessionEmail = session?.user?.email ?? null
+    const isAdmin = !!sessionEmail && adminRead?.email === sessionEmail && adminRead.admin
+    useEffect(() => {
+        if (!sessionEmail) return
+        let cancelled = false
+        isAdminAction()
+            .then(admin => {
+                if (cancelled) return
+                setAdminRead({ email: sessionEmail, admin })
+                identifyPerson(sessionEmail, { is_internal: admin })
+            })
+            .catch(() => {})
+        return () => {
+            cancelled = true
+        }
+    }, [sessionEmail])
 
     // Super property: every client event carries the workspace it happened in, which is the id
     // Stripe metadata and the server-side lifecycle events are keyed on. Cleared by
@@ -439,7 +463,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
         router.push(routes.auth)
     }
 
-    return <SessionContext.Provider value={{ user, workspace, workspaceAnswers, role, boxScope, workspaces, session, isAnonymous: session?.user?.is_anonymous ?? false, phoneStep, phoneStatus, refreshPhoneStep, loading: userLoading || workspaceLoading, signOut, refreshWorkspace: fetchWorkspace, refreshUser: fetchUser }}>{children}</SessionContext.Provider>
+    return <SessionContext.Provider value={{ user, workspace, workspaceAnswers, role, boxScope, workspaces, session, isAnonymous: session?.user?.is_anonymous ?? false, phoneStep, phoneStatus, refreshPhoneStep, loading: userLoading || workspaceLoading, signOut, refreshWorkspace: fetchWorkspace, refreshUser: fetchUser, isAdmin }}>{children}</SessionContext.Provider>
 }
 
 // For the render labs, which draw session-bound components with no signed-in user behind them.

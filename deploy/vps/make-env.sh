@@ -58,6 +58,12 @@ put RERUN_ENGINE_HOST "$ENGINE_HOST"
 put NEXT_PUBLIC_APP_URL "https://$APP_HOST"
 put RERUN_ENGINE_BROWSER_URL "https://$ENGINE_HOST"
 
+# webgate and searxng in docker-compose.vps.yml. CRAWL4AI_TOKEN is asked for by deploy/vps/add-web.sh.
+hex() { if command -v openssl >/dev/null 2>&1; then openssl rand -hex "$1"; else od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; fi; }
+put WEBGATE_KEY "$(hex 32)"
+put SEARXNG_SECRET "$(hex 32)"
+put CRAWL4AI_URL "${CRAWL4AI_URL:-https://crawl4ai.robagentic.tech}"
+
 missing=''
 for key in $BUNDLE_KEYS; do
     value=$(printf '%s\n' "$DECODED" | sed -n "s/^$key=//p" | tail -n 1)
@@ -68,6 +74,7 @@ unset DECODED value
 for key in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY SMTP_PASS; do
     [ -n "$(value_in .env "$key")" ] || missing="$missing $key"
 done
+[ -n "$(value_in .env CRAWL4AI_TOKEN)" ] || missing="$missing CRAWL4AI_TOKEN(sudo sh deploy/vps/add-web.sh)"
 
 echo "Wrote .env for https://$APP_HOST (engine: https://$ENGINE_HOST)."
 [ -z "$missing" ] || echo "Still empty:$missing"

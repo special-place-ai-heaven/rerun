@@ -336,6 +336,32 @@ class BuilderCap(FactoryCase):
         self.assertEqual(code, 0, out)
         self.assertFalse(os.path.exists(self.lock))
 
+    def test_two_breakers_of_one_stale_lock_do_not_both_get_in(self):
+        """C sees the stale lock; before C acts, B breaks it and holds a fresh one. C must wait, not delete B's lock."""
+        open(self.lock, "w").close()
+        old = os.path.getmtime(self.lock) - F.LOCK_STALE_S - 10
+        os.utime(self.lock, (old, old))
+        real, swapped = os.path.getmtime, []
+
+        def getmtime(p):
+            t = real(p)
+            if p == self.lock and not swapped:
+                swapped.append(1)
+                os.remove(self.lock)  # B breaks the stale lock and takes a fresh one
+                open(self.lock, "w").close()
+            return t
+
+        def grab(_):
+            with F.builder_lock():
+                pass
+        with mock.patch.object(F, "LOCK_WAIT_S", 0.3), mock.patch.object(F.os.path, "getmtime", getmtime):
+            code, out = self.call(grab, [])
+        self.assertEqual(code, 2, out)
+        self.assertIn("holds", out)
+        self.assertTrue(os.path.exists(self.lock))  # B's lock survives
+        self.assertFalse(os.path.exists(self.lock + ".break"))
+        os.remove(self.lock)
+
     def test_lock_is_released_when_the_holder_refuses(self):
         def refuse(_):
             with F.builder_lock():

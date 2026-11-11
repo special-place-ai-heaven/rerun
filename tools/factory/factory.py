@@ -217,11 +217,21 @@ def builder_lock():
             fd = os.open(lk, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             break
         except FileExistsError:
+            bk = lk + ".break"
             try:
                 if time.time() - os.path.getmtime(lk) > LOCK_STALE_S:
-                    # shortcut: two callers breaking the same stale lock at once can both get in; a stale lock means a crashed holder, so rare
-                    os.remove(lk)
+                    os.close(os.open(bk, os.O_CREAT | os.O_EXCL | os.O_WRONLY))  # one breaker at a time
+                    try:
+                        if time.time() - os.path.getmtime(lk) > LOCK_STALE_S:  # recheck: another breaker may have taken a fresh lock since
+                            os.remove(lk)
+                    finally:
+                        os.remove(bk)
                     continue
+            except FileExistsError:  # another caller is breaking it: wait; clear a bk left by a breaker that crashed mid-break
+                # shortcut: removing a stale bk has no guard of its own; the race needs a crash inside the break step first, so rare
+                with contextlib.suppress(OSError):
+                    if time.time() - os.path.getmtime(bk) > LOCK_STALE_S:
+                        os.remove(bk)
             except OSError:
                 continue  # released between the open and the check
             if time.time() > end:

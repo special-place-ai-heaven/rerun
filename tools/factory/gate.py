@@ -367,9 +367,9 @@ def gate(repo, n):
     print(head_line)
     for k, v in res.items():
         print("%s %s %s" % (k, "PASS" if v["ok"] else "FAIL", v["receipt"]))
-    os.makedirs("/data/work/state/gate", exist_ok=True)
+    os.makedirs(F.STATE + "/gate", exist_ok=True)
     json.dump({"repo": full, "pr": int(n), "head": head, "verdict": "FAIL" if failed else "PASS", "checks": res},
-              open("/data/work/state/gate/%s-%s-%s.json" % (F.short(full), n, head), "w"), indent=1)
+              open(F.STATE + "/gate/%s-%s-%s.json" % (F.short(full), n, head), "w"), indent=1)
     return 3 if failed else 0
 
 

@@ -6,7 +6,8 @@ import json, os, re, subprocess, sys, time, shutil, urllib.request
 
 GH, GIT = "/data/tools/bin/gh", "/data/tools/bin/git"
 OWNERS = ("special-place-ai-heaven", "special-place-administrator")
-WORK, REPOS, WT, STATE = "/data/work", "/data/work/repos", "/data/work/wt", "/data/work/state"
+WORK = os.environ.get("FACTORY_WORK", "/data/work")
+REPOS, WT, STATE = WORK + "/repos", WORK + "/wt", WORK + "/state"
 MAX_WORK_GB, MIN_FREE_GB, MAX_BUILDERS = 20, 30, 2
 QUEUE_LIMIT_S, SLICE_S = 30 * 60, 450
 PR_HEADS = ["## Done", "## Evidence", "## Not changed", "## Unsure", "## Open", "## Next owner and their done-test"]
@@ -184,6 +185,42 @@ def remote_has(p, br):
     return run([GIT, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/" + br], cwd=p, check=False).returncode == 0
 
 
+def on_remote(p, sha):
+    return bool(run([GIT, "for-each-ref", "--contains", sha, "refs/remotes/origin"], cwd=p).stdout.strip())
+
+
+def wt_save(p, path, branch):
+    """Die (nothing deleted) unless every commit of the worktree and its branch is on a remote branch.
+    Unpushed commits go to rescue/<branch>-<sha8> first. Uncommitted changes refuse: pushing them could publish stray files."""
+    if os.path.isdir(path) and run([GIT, "status", "--porcelain"], cwd=path).stdout.strip():
+        die("%s has uncommitted changes. Commit and push them, or remove them yourself, then `wt done` again. Nothing deleted." % path)
+    # --prune: a tracking ref of a branch deleted on GitHub must not count as proof
+    if run([GIT, "fetch", "--quiet", "--prune", "origin"], cwd=p, check=False).returncode:
+        die("cannot fetch origin, so cannot prove the commits of %s are saved. Nothing deleted." % branch)
+    tips = {run([GIT, "rev-parse", "--verify", "--quiet", ref], cwd=c, check=False).stdout.strip()
+            for c, ref in ((path, "HEAD"), (p, "refs/heads/" + branch)) if os.path.isdir(c)} - {""}
+    for sha in sorted(tips):
+        if on_remote(p, sha):
+            continue
+        rb = "rescue/%s-%s" % (branch, sha[:8])
+        run([GIT, "push", "--quiet", "origin", "%s:refs/heads/%s" % (sha, rb)], cwd=p, check=False)
+        if not on_remote(p, sha):
+            die("%s has commits on no remote branch (%s) and the push to %s failed. Nothing deleted." % (branch, sha[:8], rb))
+        print("RESCUED unpushed commits of %s to origin/%s" % (branch, rb))
+
+
+def unlink_links(d):
+    """Remove symlinks and junctions under d without entering them, so removing d cannot empty their targets."""
+    for e in os.scandir(d):
+        if e.is_symlink() or getattr(os.path, "isjunction", lambda _: False)(e.path):
+            try:
+                os.unlink(e.path)
+            except OSError:
+                os.rmdir(e.path)  # a directory symlink or junction on Windows
+        elif e.is_dir():
+            unlink_links(e.path)
+
+
 def cmd_wt(a):
     if not a or a[0] not in ("new", "done", "list"):
         die("usage: wt new <repo> <issue> <chunk> [--base BRANCH] | wt done <repo> <issue> <chunk> | wt list")
@@ -207,10 +244,13 @@ def cmd_wt(a):
     branch = "chunk/%s-%s" % (issue, chunk)
     if a[0] == "done":
         p = os.path.join(REPOS, repo)
+        wt_save(p, path, branch)
         if os.path.isdir(path):
+            unlink_links(path)
+            # --force only because unlinking a committed symlink dirties the tree; wt_save proved the work is saved
             run([GIT, "worktree", "remove", "--force", path], cwd=p)
         run([GIT, "worktree", "prune"], cwd=p, check=False)
-        run([GIT, "branch", "-D", branch], cwd=p, check=False)
+        run([GIT, "branch", "-D", branch], cwd=p, check=False)  # -D is safe: wt_save proved its commits are on a remote branch
         try:
             os.remove(marker(repo, branch))
         except OSError:
@@ -468,7 +508,10 @@ def cmd_merge_dev(a):
     print("MERGED %s#%s into %s as %s | head %s | remote branch %s deleted" % (full, n, base, (m.get("merge_commit_sha") or "?")[:8], pr["head"]["sha"][:8], head))
     mm = re.fullmatch(r"chunk/(\d+)-([a-z0-9]+)", head)
     if mm and os.path.isdir(os.path.join(WT, short(full), "%s-%s" % mm.groups())):
-        cmd_wt(["done", full, mm.group(1), mm.group(2)])
+        try:
+            cmd_wt(["done", full, mm.group(1), mm.group(2)])
+        except SystemExit:
+            print("KEPT worktree %s/%s-%s: the merge stands, clean the worktree up and run `wt done` again." % (short(full), mm.group(1), mm.group(2)))
 
 
 # ---------- job-open / release-pr

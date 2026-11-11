@@ -1,0 +1,39 @@
+2026-11-08T13:56:24.9628322Z         PASS [   0.006s] ( 1/28) terminal-commander-probes::governor_limits alloc_helper
+2026-11-08T13:56:24.9680326Z         PASS [   0.007s] ( 2/28) terminal-commander-probes::governor_limits host_ceiling_helper
+2026-11-08T13:56:24.9780668Z         PASS [   0.010s] ( 3/28) terminal-commander-probes::governor_limits host_memory_reports_total
+2026-11-08T13:56:25.0366669Z         PASS [   0.083s] ( 4/28) terminal-commander-probes::governor_limits forked_child_allocation_is_stopped
+2026-11-08T13:56:25.0572040Z         PASS [   0.021s] ( 5/28) terminal-commander-probes::governor_limits normal_priority_inherits
+2026-11-08T13:56:25.0816202Z         PASS [   0.024s] ( 6/28) terminal-commander-probes::governor_limits outliving_grandchild_is_killed_and_dir_removed
+2026-11-08T13:56:25.1614459Z         PASS [   0.080s] ( 7/28) terminal-commander-probes::governor_limits over_limit_allocation_is_stopped
+2026-11-08T13:56:25.2006456Z         PASS [   0.223s] ( 8/28) terminal-commander-probes::governor_limits mode_is_final_before_exit
+2026-11-08T13:56:25.2059692Z         PASS [   0.005s] ( 9/28) terminal-commander-probes::governor_limits removed_host_dir_helper
+2026-11-08T13:56:25.3614006Z         PASS [   0.408s] (10/28) terminal-commander-probes::governor_limits default_limits_are_ungoverned
+2026-11-08T13:56:25.6326429Z         PASS [   0.427s] (11/28) terminal-commander-probes::governor_limits removed_host_dir_is_unavailable_not_rlimit
+2026-11-08T13:56:25.6385908Z         PASS [   0.006s] (12/28) terminal-commander-probes::governor_limits ungovernable_limit_is_reported_honestly
+2026-11-08T13:56:25.6435981Z         PASS [   0.005s] (13/28) terminal-commander-probes::governor_limits uninstall_helper
+2026-11-08T13:56:25.9520292Z         PASS [   0.590s] (14/28) terminal-commander-probes::governor_limits single_refused_allocation_is_a_limit_hit
+2026-11-08T13:56:26.0350917Z         PASS [   0.083s] (15/28) terminal-commanderd::governor_policy a_job_runs_whatever_the_enforcer_and_status_says_how
+2026-11-08T13:56:26.0409782Z         PASS [   0.006s] (16/28) terminal-commanderd::governor_policy alloc_helper
+2026-11-08T13:56:26.0812703Z         PASS [   0.437s] (17/28) terminal-commander-probes::governor_limits uninstall_releases_host_ceiling
+2026-11-08T13:56:26.0917064Z         PASS [   0.010s] (18/28) terminal-commanderd::governor_policy default_job_memory_parsing_table
+2026-11-08T13:56:26.1027966Z         PASS [   0.062s] (19/28) terminal-commanderd::governor_policy dedup_keys_on_limits_and_a_duplicate_reports_them
+2026-11-08T13:56:26.1755630Z         PASS [   1.014s] (20/28) terminal-commander-probes::governor_limits priority_only_is_nice_without_cgroup_dir
+2026-11-08T13:56:26.2133975Z         PASS [   0.122s] (21/28) terminal-commanderd::governor_policy disabled_governor_is_byte_identical_to_ungoverned
+2026-11-08T13:56:26.2435996Z         PASS [   0.141s] (22/28) terminal-commanderd::governor_policy governed_allocation_over_the_ceiling_is_stopped
+2026-11-08T13:56:26.3221381Z         PASS [   0.146s] (23/28) terminal-commanderd::governor_policy governed_unix_pty_over_the_ceiling_reports
+2026-11-08T13:56:26.3538317Z         PASS [   0.032s] (24/28) terminal-commanderd::governor_policy policy_status_reports_the_governor_block
+2026-11-08T13:56:26.3807780Z         PASS [   0.167s] (25/28) terminal-commanderd::governor_policy hardened_profile_clamps_a_raise_and_full_access_does_not
+2026-11-08T13:56:26.4523960Z         PASS [   0.209s] (26/28) terminal-commanderd::governor_policy host_ceiling_bounds_jobs_in_aggregate
+2026-11-08T13:56:29.0137899Z         PASS [   2.660s] (27/28) terminal-commanderd::governor_policy running_status_shows_governor_and_a_stop_never_reports_the_ceiling
+2026-11-08T13:56:35.4991571Z         PASS [  10.546s] (28/28) terminal-commander-probes::governor_limits host_ceiling_caps_jobs_together
+2026-11-08T13:56:45.6586768Z         PASS [   0.007s] (1/1) terminal-commander-probes::governor_limits sweep_removes_stale_dirs
+2026-11-08T13:54:29.4025451Z test concurrent_probes_buckets_do_not_cross_talk ... ok
+2026-11-08T13:54:29.4025672Z test bucket_dropped_count_visible_when_retention_evicts ... ok
+2026-11-08T13:54:29.4025880Z test bucket_events_since_limit_clamps_to_max ... ok
+2026-11-08T13:54:29.4026069Z test event_context_window_stays_bounded ... ok
+2026-11-08T13:54:29.4026260Z test runtime_state_stays_bounded_under_live_load ... ok
+2026-11-08T13:54:29.4026629Z test megabyte_scale_noisy_stdout_emits_signal_without_raw_leak ... ok
+2026-11-08T13:54:29.4026882Z test bucket_wait_heartbeat_respects_timeout_without_busy_poll ... ok
+2026-11-08T13:54:29.4027137Z test registry_activate_during_active_stream_rebinds_without_raw_leak ... ok
+2026-11-08T13:56:30.0000000Z         FAIL [   0.050s] (29/29) terminal-commander-probes::governor_limits synthetic_failure_case
+2026-11-08T13:56:30.1000000Z test synthetic_failed_case ... FAILED

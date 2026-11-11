@@ -1,0 +1,29 @@
+#!/bin/sh
+# Install the factory tools: tools/factory/install.sh --prefix DIR
+# Writes DIR/bin/<wrappers> and DIR/factory/<sources>. The only edit is the install path:
+# the string /data/tools/factory becomes DIR/factory in the copies (wrappers and sources);
+# in the sources @@JEV_KEYFILE@@ becomes the --jev-keyfile path.
+set -eu
+HERE=$(cd "$(dirname "$0")" && pwd)
+PREFIX=
+KEYFILE=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prefix) PREFIX=${2:-}; shift 2 ;;
+    --jev-keyfile) KEYFILE=${2:-}; shift 2 ;;
+    -h|--help) echo "usage: install.sh --prefix DIR --jev-keyfile P"; exit 0 ;;
+    *) echo "usage: install.sh --prefix DIR --jev-keyfile P" >&2; exit 2 ;;
+  esac
+done
+[ -n "$PREFIX" ] && [ -n "$KEYFILE" ] || { echo "usage: install.sh --prefix DIR --jev-keyfile P" >&2; exit 2; }
+mkdir -p "$PREFIX/bin" "$PREFIX/factory"
+PREFIX=$(cd "$PREFIX" && pwd)
+for f in gate.py factory.py jobcost.py; do
+  sed -e "s#/data/tools/factory#$PREFIX/factory#g" -e "s#@@JEV_KEYFILE@@#$KEYFILE#g" "$HERE/$f" > "$PREFIX/factory/$f"
+done
+for w in "$HERE"/bin/*; do
+  n=$(basename "$w")
+  sed "s#/data/tools/factory#$PREFIX/factory#g" "$w" > "$PREFIX/bin/$n"
+  chmod 755 "$PREFIX/bin/$n"
+done
+echo "installed $(ls "$PREFIX/bin" | wc -l) wrappers into $PREFIX/bin"

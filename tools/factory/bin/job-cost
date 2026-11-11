@@ -1,0 +1,3 @@
+#!/bin/sh
+# Factory script (Rob, 2026-11-10). Read-only.
+exec python3 -I /data/tools/factory/jobcost.py "$@"

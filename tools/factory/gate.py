@@ -3,7 +3,7 @@
 to the PR's current head SHA. Exit 0 PASS, 3 FAIL, 1 could not answer (API error is never PASS).
 Commands: gate <repo> <PR>   |   review <repo> <PR> ACCEPT|REJECT --as NAME --note 'text'"""
 import fnmatch, json, os, re, subprocess, sys
-sys.path.insert(0, "/data/tools/factory")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # own dir first: the installed copy and a clean clone both find factory.py beside gate.py
 import factory as F
 
 GH = F.GH

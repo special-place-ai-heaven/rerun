@@ -193,10 +193,10 @@ question is most likely to be answered.
 | Feature | Where | State |
 |---|---|---|
 | "Plan before build" and "tests cost 0 tokens" as team rules | team rule file | live as rules; not yet enforced by mechanism |
-| Safe worktree removal, real builder cap with a lock, memory check, worktree register, sweep, `review --sha` | branch `factory/safe-worktrees` | being built and gate-checked |
+| Safe worktree removal, real builder cap with a lock, memory check, worktree register, sweep, `review --sha` | rerun PR #49 | built, reviewed, 49 tests pass in CI; not yet installed on the server |
 | Browser layout tests in CI | testpilot #193 | in progress; the layout tests fail on main in several files |
-| Repeat on environment failures, with the breathing "Retrying" note | testpilot #187, PR #194 | being built |
-| Empty capsule band; panel on the rail's line; capsule views unchanged | testpilot #189, PR #190 | rejected twice; design being planned before any further build |
+| Repeat on environment failures, with the breathing "Retrying" note | testpilot #187, PR #194 | merged into main (`a56d5bc3`), not yet deployed; follow-up testpilot #196 |
+| Empty capsule band; panel on the rail's line; capsule views unchanged | testpilot #189, PR #190 | rejected twice; plan written and challenged on the issue, 9 points accepted; build waits for testpilot #193 |
 | Face-first person generation | testpilot #188 | live |
 | Usage analytics: tokens by kind and weekly share, per coworker, job, stage, tool, model, thinking level | #40 | fact-finding; the collector is not needed (step tables exist) |
 | Source of the weekly percentage for the plan | #40 | unknown |
@@ -316,7 +316,7 @@ A change that makes one metric better by making another worse does not count as 
 | 2026-11-11 | "Plan before build" as a team rule | quality, cost: three rejected builds of one job (about 49M tokens) | no build without a challenged plan | pending |
 | 2026-11-11 | Additions to a running job go on the issue, not as a new dispatch | cost: about 11M tokens in duplicate sessions | no duplicate sessions per branch | pending |
 | 2026-11-11 | Browser layout tests run in CI (testpilot #193) | cost, speed: a reviewer built and ran them by hand (about 24M tokens) | reviewers read a result instead of producing it | pending |
-| 2026-11-11 | Safe worktree removal, real builder cap, register and sweep (`factory/safe-worktrees`) | quality: work could be deleted, builders collided | no lost work, no shared worktree | pending |
+| 2026-11-11 | Safe worktree removal, real builder cap, register and sweep (rerun PR #49) | quality: work could be deleted, builders collided | no lost work, no shared worktree | pending |
 
 **Next changes, in order** (each gets a row above when made)
 1. `wt new` refuses a job without `PLAN READY` on its issue: the planning rule becomes a mechanism.

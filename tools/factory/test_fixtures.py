@@ -1,5 +1,6 @@
 """Gate fixture tests: real-shaped CI logs (jest; cargo + nextest). Run with PYTHONPATH=tools/factory."""
-import os, unittest
+import os, sys, unittest
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # so the plain done-test command needs no PYTHONPATH
 import gate as G
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
@@ -34,6 +35,27 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(cg[0][:3], ("cargo-unit", "concurrent_probes_buckets_do_not_cross_talk", True))
         self.assertEqual(cg[-1][:3], ("cargo-unit", "synthetic_failed_case", False))
         self.assertEqual(sum(1 for x in r if not x[2]), 2)
+
+
+class PythonFixtures(unittest.TestCase):
+    def test_unittest_ci_log_fixture(self):
+        r = G.results(load("unittest_ci.log"))
+        ut = [(x[1], x[2]) for x in r if x[0] == "unittest"]
+        self.assertEqual(ut[:4], [("tests::test_report::ReportTest::test_totals", True), ("tests::test_report::ReportTest::test_empty", False),
+                                  ("tests::test_store::StoreTest::test_save", True), ("tests::test_store::StoreTest::test_load", False)])
+        self.assertEqual(sum(1 for x in ut if not x[1]), 4)  # 2 from the -v lines, 2 from the FAIL:/ERROR: blocks
+        self.assertEqual([x[2] for x in r if x[0] == "unittest-run"], [False])
+        self.assertNotIn("test_later", " ".join(x[1] for x in r))  # skipped is neither pass nor fail
+        self.assertTrue(G.test_hit("tests/test_report.py", "tests::test_report::ReportTest::test_empty", "unittest"))
+        self.assertFalse(G.test_hit("tests/test_report.py", "tests::test_store::StoreTest::test_load", "unittest"))
+
+    def test_pytest_ci_log_fixture(self):
+        r = G.results(load("pytest_ci.log"))
+        self.assertTrue(all(x[0] == "pytest" for x in r))
+        self.assertEqual(len(r), 6)
+        self.assertEqual([x[1] for x in r if not x[2]], ["tests/test_report.py::test_empty"] * 2)
+        self.assertTrue(G.test_hit("tests/test_report.py", "tests/test_report.py::test_empty", "pytest"))
+        self.assertFalse(G.test_hit("tests/test_store.py", "tests/test_report.py::test_empty", "pytest"))
 
 
 if __name__ == "__main__":

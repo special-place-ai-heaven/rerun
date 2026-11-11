@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # own dir first:
 import factory as F
 
 GH = F.GH
-TESTF = r"\.spec\.[jt]sx?$|\.test\.[jt]sx?$|(^|/)tests?/.*\.(ts|tsx|js|jsx|rs|py)$|__tests__/.*\.(ts|tsx|js|jsx)$|_test\.(py|go)$"
+TESTF = r"\.spec\.[jt]sx?$|\.test\.[jt]sx?$|(^|/)tests?/.*\.(ts|tsx|js|jsx|rs|py)$|__tests__/.*\.(ts|tsx|js|jsx)$|_test\.(py|go)$|(^|/)test_[^/]*\.py$"
 REVIEW_RE = re.compile(r"^\s*Review (ACCEPT|REJECT) @([0-9a-f]{8}): ([A-Za-z][A-Za-z0-9_-]*) (ACCEPT|REJECT)\b")
 ANSI = re.compile(r"(?:\x1b|\^\[)\[[0-9;]*m")  # real ESC, or the caret form (^[) some log paths show
 
@@ -50,11 +50,71 @@ def job_log(full, url):
     return _logs[m.group(2)]
 
 
+_PENDING = [None]
+UT_RES = {"ok": True, "FAIL": False, "ERROR": False, "FAILED": False}
+LINE_TS = re.compile(r"\d{2}:\d{2}:\d{2}(?:\.\d+)?Z (.*)$")
+
+
+def _ut_name(mod_cls, meth):
+    segs = mod_cls.split(".")
+    if segs[-1] == meth:  # python 3.11+ prints 'test_x (mod.Class.test_x)'
+        segs = segs[:-1]
+    if segs[:3] == ["unittest", "loader", "_FailedTest"] or segs[-1:] == ["_FailedTest"]:
+        segs = [meth, "_FailedTest"]  # import error: the module is named by the 'test' word, e.g. 'test_gate'
+        return "::".join(segs)
+    return "::".join(segs + [meth])
+
+
+def _py_result(ln, pending):
+    """One log line -> a python (unittest or pytest) result tuple, 'pending' (docstring form) or None."""
+    m = LINE_TS.search(ln)
+    t = (m.group(1) if m else ln).strip()
+    if not t:
+        return None
+    line = t[:120]
+    if pending:  # second line of '-v' output with a docstring: 'First doc line ... ok'
+        m = re.search(r" \.\.\. (ok|FAIL|ERROR)\b", t)
+        if m:
+            return ("unittest", pending, UT_RES[m.group(1)], line)
+    m = re.match(r"^(test\w*) \(([\w.]+)\)(?: \.\.\. (ok|FAIL|ERROR)\b.*|(?:\n)?)$", t)
+    if m:
+        if m.group(3):
+            return ("unittest", _ut_name(m.group(2), m.group(1)), UT_RES[m.group(3)], line)
+        _PENDING[0] = _ut_name(m.group(2), m.group(1))
+        return "pending"
+    m = re.match(r"^(FAIL|ERROR): (\w+) \(([\w.]+)\)\s*$", t)  # failure detail block, also without -v
+    if m:
+        return ("unittest", _ut_name(m.group(3), m.group(2)), False, line)
+    if re.match(r"^FAILED \((failures|errors|skipped)=", t):
+        return ("unittest-run", "unittest::summary", False, line)
+    if re.match(r"^OK( \(.*\))?$", t):
+        return ("unittest-run", "unittest::summary", True, line)
+    m = re.match(r"^(?:\[gw\d+\] \[\s*\d+%\] )?(PASSED|FAILED|ERROR) (\S+::\S+)", t) or None
+    if m:  # pytest -rA short summary or xdist: 'PASSED path::Class::test'
+        return ("pytest", m.group(2), m.group(1) == "PASSED", line)
+    m = re.match(r"^(\S+::\S+) (PASSED|FAILED|ERROR)\b", t)
+    if m:  # pytest -v: 'path::Class::test PASSED [ 50%]'
+        return ("pytest", m.group(1), m.group(2) == "PASSED", line)
+    return None
+
+
 def results(log):
     """[(kind, name, ok, line)] from jest PASS/FAIL lines, cargo nextest PASS/FAIL lines and cargo 'test x ... ok'."""
     out = []
     binary = None  # cargo test: current integration binary (tests/<stem>.rs), so names read '<stem>::test'
+    pending = None  # unittest -v with a docstring: 'test_x (mod.Class)' then 'Doc line ... ok'
+    ran = False
     for ln in log.splitlines():
+        py = _py_result(ln, pending)
+        pending = None
+        if py == "pending":
+            pending = _PENDING[0]
+            continue
+        if py:
+            if py[0] == "unittest-run":
+                ran = ran or py[2]
+            out.append(py)
+            continue
         r = re.search(r"Z\s+Running (unittests )?(\S+?)\.rs \(", ln)
         if r:
             binary = None if r.group(1) else os.path.basename(r.group(2))
@@ -81,6 +141,8 @@ def _norm(x):
 def same(a, b):
     """DONE_TEST names: equal, or one ends with '::' + the other. Never last-segment-only."""
     a, b = _norm(a), _norm(b)
+    if b.endswith(".py") and a.startswith(b + "::"):  # DONE_TEST names a python file: any test inside it
+        return True
     if a == b or a.endswith("::" + b) or b.endswith("::" + a):
         return True
     # file paths: jest logs print package-relative paths; match on a "/" boundary, the shorter side must itself contain "/"
@@ -103,11 +165,30 @@ def rust_prefix(path):
     return None
 
 
+def py_hit(tf, name, kind):
+    """Python test file -> its ids. pytest: the node id's file part is the file. unittest: the dotted module in the id
+    (as run, maybe a package-relative or longer path) matches the file's path without '.py' on a segment boundary."""
+    tf = _norm(tf)
+    if kind == "pytest":
+        return same(name.split("::")[0], tf)
+    if kind != "unittest":
+        return False
+    want = tf[:-3].split("/")
+    segs = name.split("::")
+    for k in range(1, len(segs)):
+        mod = segs[:k]
+        if want[-len(mod):] == mod or mod[-len(want):] == want:
+            return True
+    return False
+
+
 def test_hit(tf, name, kind=""):
     """Does test result `name` (of `kind` from results()) belong to changed test file `tf`? Rust integration file
     tests/<stem>.rs: only an integration-binary result of binary <stem>. Rust src/<mod>.rs: only a unit result under
     '<mod>::tests::' right after the crate prefix (nextest-unit 'crate::<mod>::tests::t', cargo-unit '<mod>::tests::t').
     Everything else (jest): same()."""
+    if _norm(tf).endswith(".py"):
+        return py_hit(tf, name, kind)
     rp = rust_prefix(tf)
     if not rp:
         return same(name, tf)
@@ -209,7 +290,7 @@ def gate(repo, n):
     if not tfiles:
         put("FAIL_BEFORE", False, "PR touches no test file: nothing that failed before")
     else:
-        missing, rec = [], []
+        missing, rec, nolog = [], [], set()
         red = []
         for sha in commits:
             for c in head_checks(full, sha):
@@ -218,14 +299,19 @@ def gate(repo, n):
         for tf in tfiles:
             hit = None
             for sha, c in red:
-                for k, name, ok, ln in results(job_log(full, c["url"])):
+                try:
+                    older = results(job_log(full, c["url"]))
+                except NoAnswer:  # an older red check with no readable log (runner lost, expired): cannot prove, cannot abort
+                    nolog.add(c["url"])
+                    continue
+                for k, name, ok, ln in older:
                     if not ok and test_hit(tf, name, k):
                         hit = "%s FAILED on %s | %s" % (ln, sha[:8], c["url"])
                         break
                 if hit:
                     break
             (rec if hit else missing).append(hit or tf)
-        put("FAIL_BEFORE", not missing, ("; ".join(rec)) if not missing else "no failing log on an older commit for: " + ", ".join(missing))
+        put("FAIL_BEFORE", not missing, ("; ".join(rec)) if not missing else "no failing log on an older commit for: " + ", ".join(missing) + ("; %d older red check(s) had no readable log" % len(nolog) if nolog else ""))
 
     # 4 REVIEWS
     need, stop = {"LINUS"}, []

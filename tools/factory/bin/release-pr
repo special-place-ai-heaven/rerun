@@ -1,0 +1,3 @@
+#!/bin/sh
+# Factory script (Rob, 2026-11-10). Source: /data/tools/factory/factory.py
+FACTORY_CMD=release-pr exec python3 -I /data/tools/factory/factory.py "$@"

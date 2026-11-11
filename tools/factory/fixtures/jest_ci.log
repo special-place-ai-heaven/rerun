@@ -1,0 +1,4 @@
+2026-11-08T13:50:30.1000000Z PASS packages/core/src/parser.spec.ts
+2026-11-08T13:50:31.2000000Z PASS apps/web/src/button.test.tsx
+2026-11-08T13:50:32.3000000Z FAIL apps/server/src/routes/health.test.ts
+2026-11-08T13:50:33.4000000Z PASS packages/shared/__tests__/util.test.js

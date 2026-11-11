@@ -552,14 +552,15 @@ class WtSweep(FactoryCase):
         git(self.clone, "config", "remote.origin.pushurl", os.path.join(self.tmp, "nowhere.git"))
         code, out = self.sweep("--apply")
         self.assertEqual(code, 0, out)
-        self.assertEqual(self.verdicts(out), {REPO + "/7-1": "KEEP", REPO + "/7-2": "RESCUE", REPO + "/7-3": "REMOVE",
+        self.assertEqual(self.verdicts(out), {REPO + "/7-1": "RESCUE", REPO + "/7-2": "RESCUE", REPO + "/7-3": "REMOVE",
                                               REPO + "/7-4": "KEEP", REPO + "/7-5": "KEEP", REPO + "/7-6": "KEEP"})
+        self.assertIn("KEPT %s/7-1" % REPO, out)  # uncommitted changes: `wt done` refuses
         self.assertIn("KEPT %s/7-2" % REPO, out)
         self.assertEqual(git(stuck, "rev-parse", "HEAD"), stuck_sha)
         self.assertTrue(os.path.isfile(os.path.join(dirty, "left.txt")))
         self.assertFalse(os.path.isdir(merged))
         self.assertTrue(all(os.path.isdir(x) for x in (dirty, stuck, fresh, recent, reused)))
-        self.assertIn("sweep: 4 KEEP, 1 REMOVE, 1 RESCUE", out)
+        self.assertIn("sweep: 3 KEEP, 1 REMOVE, 2 RESCUE", out)
 
     def test_open_pr_or_unreachable_github_keeps_even_when_idle(self):
         p = self.wt(chunk="1")

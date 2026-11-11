@@ -401,8 +401,7 @@ def sweep_verdict(full, r, d, path):
     head = run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=path, check=False).stdout.strip()
     if head != branch:
         return "KEEP", "on branch %s, not %s" % (head, branch), []
-    if run([GIT, "status", "--porcelain"], cwd=path, check=False).stdout.strip():
-        return "KEEP", "uncommitted changes: the builder commits or drops them, sweep never does", []
+    dirty = bool(run([GIT, "status", "--porcelain"], cwd=path, check=False).stdout.strip())
     left, prs = unsaved(os.path.join(REPOS, r), path, branch), pr_lookup(full, branch)
     if left is None or prs is None:
         return "KEEP", "cannot reach origin or GitHub, so cannot prove anything", []
@@ -410,14 +409,16 @@ def sweep_verdict(full, r, d, path):
         return "KEEP", "PR #%s open" % ", #".join(str(x["number"]) for x in prs if x.get("state", "").upper() == "OPEN"), prs
     sha = run([GIT, "rev-parse", "HEAD"], cwd=path).stdout.strip()
     done = next((x for x in prs if x.get("headRefOid") == sha and x.get("state", "").upper() in ("MERGED", "CLOSED")), None)  # head must match: branch names are reused
-    if done and not left:
+    if done and not left and not dirty:
         return "REMOVE", "PR #%s %s, nothing unpushed" % (done["number"], done["state"].lower()), prs
     h = age_h(reg_read(r, d))
     last = max(int(run([GIT, "log", "-1", "--format=%ct", "HEAD"], cwd=path).stdout.strip() or 0), 0 if h is None else time.time() - h * 3600)
     idle = (time.time() - last) / 3600
-    if left and idle >= WT_IDLE_HOURS:
-        return "RESCUE", "idle %dh, %d unpushed commit tip(s), no open PR" % (idle, len(left)), prs
-    return "KEEP", "active: idle %dh, %s" % (idle, "unpushed work" if left else "no merged or closed PR"), prs
+    work = ", ".join(x for x in ("%d unpushed commit tip(s)" % len(left) if left else "", "uncommitted changes" if dirty else "") if x)
+    if work and idle >= WT_IDLE_HOURS:
+        # uncommitted changes make `wt done` refuse (KEPT): only a human may commit or drop them
+        return "RESCUE", "idle %dh, %s, no open PR" % (idle, work), prs
+    return "KEEP", "active: idle %dh, %s" % (idle, work or "no merged or closed PR"), prs
 
 
 def wt_sweep(apply):

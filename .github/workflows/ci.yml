@@ -13,14 +13,14 @@ jobs:
   check:
     # Runs in the open source repository and the special-place-ai-heaven fork, not in a private clone.
     # The fork runs it only for its own branches, so code from someone else's pull request never
-    # runs on a self-hosted runner. It runs GitHub-hosted unless the repository variable CI_RUNS_ON
-    # names another runner as JSON, e.g. {"group":"aap-crrr","labels":["self-hosted","linux","heavy"]}.
+    # runs on a self-hosted runner. The fork uses the org's self-hosted heavy pool unless the
+    # repository variable TP_RUNS_ON names another runner as JSON, e.g. "ubuntu-latest" (with quotes).
     if: >-
       github.repository == 'rerun-build/rerun' ||
       (github.repository == 'special-place-ai-heaven/rerun' &&
        (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository))
     name: Typecheck, lint, tests
-    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON(vars.TP_RUNS_ON || (github.repository == 'special-place-ai-heaven/rerun' && '{"group":"aap-crrr","labels":["self-hosted","linux","heavy"]}' || '"ubuntu-latest"')) }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

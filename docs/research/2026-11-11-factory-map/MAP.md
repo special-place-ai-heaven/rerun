@@ -280,3 +280,45 @@ numbers show what still hurts.
 - Boss's instructions are about 27,000 characters, much of it procedure a script will own. Each mechanism that lands removes its section from that prompt.
 - Thirty-eight coworkers, several with overlapping duties. A coworker whose duty a script takes over loses that duty, and one left with none is retired.
 - KPIs: start with four (first-time pass rate, review rounds, planning share, weekly pace). The other eight in section 10 are added only when one of the four cannot explain a problem.
+
+## 12. The win condition and the self-correcting line
+
+Rob, 2026-11-11: "Win condition is a superior product at a lower cost and grater speed. 3 metrics that should be tracked,
+analyzed from input to output. Changes proposed, changes made, monitored again, gaging the results, pivoting when needed.
+A selfcorecting line". He put his local Claude in charge of making it happen.
+
+**Three metrics, per job, from the request to the merged and deployed result**
+
+| Metric | Measured as | Source |
+|---|---|---|
+| **Quality** (superior product) | first-time pass rate of chunks; review rounds and rejections; returns to planning; defects found after acceptance | Proof and Review results on GitHub, the issue trail |
+| **Cost** (lower) | tokens by kind per merged job, and the job's share of the weekly allowance | the stored step data (`job-cost`), the weekly reading |
+| **Speed** (greater) | lead time from request to merged, split into planning, waiting for a builder, building, CI, waiting for review, review, rework | timestamps of issue, runs, commits, CI and merge |
+
+All three are read from records. None is reported by a coworker.
+
+**The loop**
+1. **Measure.** When a job closes, a script writes its three metrics and a "why" report: number of model calls, context size over the run, the largest tool outputs, repeated commands, rejected rounds, where the time went.
+2. **Analyze.** Compare with the baseline (the old-process baseline is on issue #42) and name the largest cause.
+3. **Propose.** One change at a time, aimed at that cause, with the metric it should move and by how much.
+4. **Change.** The smallest version, at a choke point where possible (section 11).
+5. **Monitor.** The next comparable jobs are measured the same way.
+6. **Keep, adjust or pivot.** A change that moved its metric without hurting the other two stays. One that did not is removed or reworked, and the outcome is recorded here.
+
+A change that makes one metric better by making another worse does not count as a win.
+
+**Change log of the line** (append only; one row per change)
+
+| Date | Change | Aimed at | Expected | Measured result |
+|---|---|---|---|---|
+| 2026-11-11 | "Plan before build" as a team rule | quality, cost: three rejected builds of one job (about 49M tokens) | no build without a challenged plan | pending |
+| 2026-11-11 | Additions to a running job go on the issue, not as a new dispatch | cost: about 11M tokens in duplicate sessions | no duplicate sessions per branch | pending |
+| 2026-11-11 | Browser layout tests run in CI (testpilot #193) | cost, speed: a reviewer built and ran them by hand (about 24M tokens) | reviewers read a result instead of producing it | pending |
+| 2026-11-11 | Safe worktree removal, real builder cap, register and sweep (`factory/safe-worktrees`) | quality: work could be deleted, builders collided | no lost work, no shared worktree | pending |
+
+**Next changes, in order** (each gets a row above when made)
+1. `wt new` refuses a job without `PLAN READY` on its issue: the planning rule becomes a mechanism.
+2. The "why" report and the three metrics from `job-cost`, written when a job closes.
+3. The starting context of a coworker taken apart and cut (issue #40): about 40,000 tokens are loaded before any work.
+4. A cancel tool for Boss beside `call_agent`.
+5. Reassess with the numbers before building anything further from this map.

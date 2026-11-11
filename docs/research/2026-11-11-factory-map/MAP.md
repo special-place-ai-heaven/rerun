@@ -254,6 +254,12 @@ This map is the whole picture, not a build list. Rules for what actually gets bu
 2. **Prefer a check at a choke point over a new service.** Builders already pass through `wt new`, `pr-open` and `merge-dev`; a check there costs a few lines and no new moving part.
 3. **Every new part must delete something**: a section of a prompt, a manual step, a coworker's duty, a script.
 4. **No part is built for a later milestone's sake.** If M1 works with a table in a file, it has no service.
+5. **The result must be superior at a lower cost** (Rob, 2026-11-11: "the resulting product must be superior at a lower cost"). Simpler is not the goal; better and cheaper is, and both are measured:
+   - **Better:** first-time pass rate up, review rounds and returned-to-planning down, no defect found after acceptance.
+   - **Cheaper:** tokens per merged job down (by kind), and a smaller share of the weekly allowance per job.
+   - **Baseline first.** Before a part is built, the same figures are taken for comparable jobs done the old way (`job-cost` already sums tokens per job from the stored step data). No baseline, no claim.
+   - **Keep or remove.** After a part has run on real jobs, it stays only if quality rose without cost per job rising, or cost fell without quality falling. A part that fails both tests is removed, and the removal is recorded.
+   - A cheaper process that ships worse work, and a better one that burns the week, both fail.
 
 **The smallest version that would have prevented the failures of 2026-11-11**
 

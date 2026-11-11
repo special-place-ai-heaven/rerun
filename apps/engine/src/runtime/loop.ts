@@ -1,4 +1,4 @@
-import { streamText, type LanguageModelUsage, type ModelMessage, type StreamTextResult, type ToolSet, type UIMessageStreamWriter } from 'ai'
+import { streamText, ToolChoiceViolationError, type LanguageModelUsage, type ModelMessage, type StreamTextResult, type ToolSet, type UIMessageStreamWriter } from 'ai'
 import { RERUN_CONNECTION_ID, contextTextPart, type ContextOccupancy, type MessageAuthor } from '@rerun/contracts'
 import { applyCaching, withTailBreakpoint } from '../agents/caching.js'
 import { mergeProviderOptions, reasoningProviderOptions } from '../agents/reasoning.js'
@@ -265,6 +265,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
         if (timer) clearTimeout(timer)
     }
 
+    let toolCallWithheld = false
     let settled = false
     let resolveSettled!: (outcome: RunOutcome) => void
     const settledPromise = new Promise<RunOutcome>(resolve => {
@@ -512,6 +513,10 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
                     await settle({ kind: 'cancelled' })
                     return
                 }
+                if (error instanceof ToolChoiceViolationError) {
+                    toolCallWithheld = true
+                    return
+                }
                 await settle({ kind: 'error', error, errorCode: classifyProviderError(provider, error) })
             },
             // The only callback the SDK runs when the abort lands before the first step: without it
@@ -532,7 +537,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
                 // A CLI provider reports a spent subscription or a blown context as a plain finish,
                 // not as an error. Taken at face value it stores an empty turn as a success and the
                 // reason the agent said nothing is lost.
-                if (isFailedFinish(finishReason, rawFinishReason)) {
+                if (!toolCallWithheld && isFailedFinish(finishReason, rawFinishReason)) {
                     const errorCode = classifyFinishReason(finishReason, rawFinishReason)
                     await settle({
                         kind: 'error',

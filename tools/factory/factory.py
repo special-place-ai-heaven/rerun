@@ -254,6 +254,22 @@ def cap_check():
         die("%d builders are already active (%s). At most %d at once. Return BLOCKED to @boss." % (len(active), ", ".join("/".join(x) for x in active), MAX_BUILDERS))
 
 
+PLAN_RE = re.compile(r"^\s*(PLAN READY|SMALL FIX)\b", re.M)
+
+
+def plan_check(full, issue):
+    """No worktree without a plan: the issue must carry a line starting PLAN READY (plan written and challenged) or SMALL FIX."""
+    it = api("repos/%s/issues/%s" % (full, issue))
+    # shortcut: only the first 100 comments are read, page when an issue outgrows that
+    cm = api("repos/%s/issues/%s/comments?per_page=100" % (full, issue))
+    if not isinstance(it, dict) or not isinstance(cm, list):
+        die("cannot read %s#%s on GitHub, so its plan cannot be checked. No worktree made." % (full, issue))
+    if not any(PLAN_RE.search(t or "") for t in [it.get("body")] + [c.get("body") for c in cm]):
+        die("%s#%s has no plan marker. A builder starts only after the plan is on the issue and was challenged by someone who did not "
+            "write it; the challenger then posts a line starting `PLAN READY`. A small known fix needs a line starting `SMALL FIX` "
+            "with one sentence why. Tell @boss; no worktree made." % (full, issue))
+
+
 def ensure_clone(full):
     p = os.path.join(REPOS, short(full))
     if not os.path.isdir(os.path.join(p, ".git")):
@@ -362,6 +378,7 @@ def cmd_wt(a):
     if du_gb(WORK) > MAX_WORK_GB:
         die("/data/work is over %d GB. Tell @boss; old worktrees need `wt done`." % MAX_WORK_GB)
     cap_check()  # early refusal before any fetch or push; repeated under the lock below
+    plan_check(full, issue)
     p = ensure_clone(full)
     info = api("repos/%s" % full)
     default = info["default_branch"]

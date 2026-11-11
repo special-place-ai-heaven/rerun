@@ -317,9 +317,10 @@ A change that makes one metric better by making another worse does not count as 
 | 2026-11-11 | Additions to a running job go on the issue, not as a new dispatch | cost: about 11M tokens in duplicate sessions | no duplicate sessions per branch | pending |
 | 2026-11-11 | Browser layout tests run in CI (testpilot #193) | cost, speed: a reviewer built and ran them by hand (about 24M tokens) | reviewers read a result instead of producing it | pending |
 | 2026-11-11 | Safe worktree removal, real builder cap, register and sweep (rerun PR #49) | quality: work could be deleted, builders collided | no lost work, no shared worktree | pending |
+| 2026-11-11 | `wt new` refuses an issue without a line starting `PLAN READY` or `SMALL FIX` | quality, cost: builds started without a challenged plan | every build traceable to a plan or a stated small fix; fewer rejected builds per job | pending |
 
 **Next changes, in order** (each gets a row above when made)
-1. `wt new` refuses a job without `PLAN READY` on its issue: the planning rule becomes a mechanism.
+1. Done: `wt new` refuses a job without `PLAN READY` on its issue (or `SMALL FIX` for a small known fix). Known limit: all coworkers post from one account, so the marker shows that the step was taken, not who took it.
 2. The "why" report and the three metrics from `job-cost`, written when a job closes.
 3. The starting context of a coworker taken apart and cut (issue #40): about 40,000 tokens are loaded before any work.
 4. A cancel tool for Boss beside `call_agent`.

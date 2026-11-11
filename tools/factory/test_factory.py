@@ -265,7 +265,7 @@ class BuilderCap(FactoryCase):
             return self.clone
         with mock.patch.object(F.shutil, "disk_usage", lambda p: types.SimpleNamespace(free=1000 * 2**30)), \
                 mock.patch.object(F, "du_gb", lambda p: 0.0), mock.patch.object(F, "api", lambda *a, **k: {"default_branch": "main"}), \
-                mock.patch.object(F, "ensure_clone", fake_clone):
+                mock.patch.object(F, "ensure_clone", fake_clone), mock.patch.object(F, "plan_check", lambda *a: None):
             yield
 
     def new(self, chunk):
@@ -615,6 +615,44 @@ class WorkOverride(unittest.TestCase):
     def test_gate_has_no_own_work_path(self):
         with open(os.path.join(HERE, "gate.py"), encoding="utf-8") as f:
             self.assertNotIn("/data/work", f.read())
+
+
+class PlanGate(FactoryCase):
+    """`wt new` makes no worktree unless the issue carries a PLAN READY or SMALL FIX line; unreadable GitHub refuses too."""
+
+    def new(self, body, comments):
+        def fake_api(path, *a, **k):
+            if path.endswith("/issues/7"):
+                return body if body is None else {"body": body}
+            if "/issues/7/comments" in path:
+                return None if comments is None else [{"body": c} for c in comments]
+            return {"default_branch": "main"}
+        with mock.patch.object(F.shutil, "disk_usage", lambda p: types.SimpleNamespace(free=1000 * 2**30)), \
+                mock.patch.object(F, "du_gb", lambda p: 0.0), mock.patch.object(F, "api", fake_api), \
+                mock.patch.object(F, "MEMINFO", os.path.join(self.tmp, "no-meminfo")), \
+                mock.patch.object(F, "ensure_clone", lambda full: self.clone):
+            code, out = self.call(F.cmd_wt, ["new", REPO, "7", "1"])
+        return code, out, os.path.isdir(os.path.join(F.WT, REPO, "7-1"))
+
+    def test_no_marker_refuses_and_makes_nothing(self):
+        code, out, made = self.new("## Plan\nwe mention PLAN READY mid-line only", ["looks good"])
+        self.assertEqual((code, made), (2, False), out)
+        self.assertIn("no plan marker", out)
+        self.assertFalse(self.has_branch())
+
+    def test_plan_ready_in_a_comment_passes(self):
+        code, out, made = self.new("work order", ["## Challenge", "all points accepted\nPLAN READY"])
+        self.assertEqual((code, made), (0, True), out)
+
+    def test_small_fix_in_the_body_passes(self):
+        code, out, made = self.new("SMALL FIX: one-line SQL filter\n\ndetails", [])
+        self.assertEqual((code, made), (0, True), out)
+
+    def test_unreadable_github_refuses(self):
+        for body, comments in ((None, []), ("PLAN READY", None)):
+            code, out, made = self.new(body, comments)
+            self.assertEqual((code, made), (2, False), out)
+            self.assertIn("cannot read", out)
 
 
 if __name__ == "__main__":

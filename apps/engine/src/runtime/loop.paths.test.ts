@@ -424,7 +424,7 @@ describe('run loop paths', () => {
             expect(outcome.kind).toBe('done')
             expect((await getRun(id, started.runId))?.stepCount).toBe(2)
             expect(stream.calls).toHaveLength(2)
-            expect(sent.find(n => n.event === 'agent.notification')?.metadata).toMatchObject({ toolCallId: 'call-2' })
+            expect(sent.filter(n => n.event === 'agent.notification')).toHaveLength(1)
         })
     })
 

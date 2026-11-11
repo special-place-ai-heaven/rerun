@@ -1,6 +1,6 @@
 'use client'
 
-import type RFB from '@novnc/novnc/lib/rfb'
+import type RFB from '@novnc/novnc'
 import { useTranslations } from 'next-intl'
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
 
@@ -56,7 +56,7 @@ export function DesktopViewer({ socketUrl, onDisconnect, viewOnly = false, ref, 
         const screen = screenRef.current
         if (!screen) return
         let cancelled = false
-        void import('@novnc/novnc/lib/rfb').then(({ default: Client }) => {
+        void import('@novnc/novnc').then(({ default: Client }) => {
             if (cancelled) return
             const rfb = new Client(screen, socketUrl)
             rfb.scaleViewport = true

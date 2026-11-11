@@ -14,11 +14,11 @@
         "ts-check": "tsc --noEmit"
     },
     "peerDependencies": {
-        "@supabase/supabase-js": "^2.106.1"
+        "@supabase/supabase-js": "^2.119.0"
     },
     "devDependencies": {
-        "@supabase/supabase-js": "^2.106.2",
-        "@types/node": "^20",
-        "typescript": "^5"
+        "@supabase/supabase-js": "^2.119.0",
+        "@types/node": "^20.19.43",
+        "typescript": "^5.9.3"
     }
 }

@@ -1,6 +1,6 @@
 """factory.py tests on a temp clone with a local bare remote. FactoryCase points factory's paths and git at a temp
 dir, so nothing touches /data. Run: python -I -m unittest discover -s . -p test_*.py"""
-import contextlib, io, os, shutil, stat, subprocess, sys, tempfile, unittest
+import contextlib, io, os, shutil, stat, subprocess, sys, tempfile, threading, types, unittest
 from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -244,6 +244,172 @@ class WtDoneCleans(FactoryCase):
         green = [{"name": "ci", "status": "completed", "conclusion": "success", "id": 1, "url": ""}]
         with mock.patch.object(F, "api", fake_api), mock.patch.object(F, "run", fake_run), mock.patch.object(F, "checks", lambda *a: green):
             return self.call(F.cmd_merge_dev, [REPO, "9"])
+
+
+class BuilderCap(FactoryCase):
+    """G3: at most MAX_BUILDERS active worktrees, also under two simultaneous calls and on `pr-open --fix`. G4: memory floor."""
+
+    def setUp(self):
+        super().setUp()
+        for k, v in (("MAX_BUILDERS", 2), ("MEMINFO", os.path.join(self.tmp, "no-meminfo")), ("LOCK_WAIT_S", 30)):
+            p = mock.patch.object(F, k, v)
+            p.start()
+            self.addCleanup(p.stop)
+        self.lock = os.path.join(F.STATE, "builders.lock")
+
+    @contextlib.contextmanager
+    def wt_new_fakes(self, before_clone=lambda: None):
+        """`wt new` with GitHub, /data and du faked; ensure_clone returns the test clone after before_clone()."""
+        def fake_clone(full):
+            before_clone()
+            return self.clone
+        with mock.patch.object(F.shutil, "disk_usage", lambda p: types.SimpleNamespace(free=1000 * 2**30)), \
+                mock.patch.object(F, "du_gb", lambda p: 0.0), mock.patch.object(F, "api", lambda *a, **k: {"default_branch": "main"}), \
+                mock.patch.object(F, "ensure_clone", fake_clone):
+            yield
+
+    def new(self, chunk):
+        with self.wt_new_fakes():
+            return self.call(F.cmd_wt, ["new", REPO, "7", chunk])
+
+    def made(self, chunk):
+        return os.path.isdir(os.path.join(F.WT, REPO, "7-" + chunk))
+
+    def test_wt_new_below_the_cap_creates_the_worktree(self):
+        self.wt(chunk="1")
+        code, out = self.new("3")
+        self.assertEqual(code, 0, out)
+        self.assertIn("WORKTREE", out)
+        self.assertTrue(self.made("3"))
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_wt_new_at_the_cap_refuses(self):
+        self.wt(chunk="1")
+        self.wt(chunk="2")
+        code, out = self.new("3")
+        self.assertEqual(code, 2, out)
+        self.assertIn("builders are already active", out)
+        self.assertFalse(self.made("3"))
+
+    def test_green_worktree_does_not_count(self):
+        self.wt(chunk="1")
+        self.wt(chunk="2")
+        open(F.marker(REPO, "chunk/7-2"), "w").close()
+        code, out = self.new("3")
+        self.assertEqual(code, 0, out)
+
+    def test_two_simultaneous_wt_new_create_only_one(self):
+        self.wt(chunk="1")
+        both_past_first_check = threading.Barrier(2, timeout=20)
+        codes, out = {}, io.StringIO()
+
+        def one(chunk):
+            try:
+                F.cmd_wt(["new", REPO, "7", chunk])
+                codes[chunk] = 0
+            except SystemExit as e:
+                codes[chunk] = e.code
+
+        with self.wt_new_fakes(before_clone=both_past_first_check.wait), contextlib.redirect_stdout(out):
+            ts = [threading.Thread(target=one, args=(c,)) for c in ("3", "4")]
+            [t.start() for t in ts]
+            [t.join(60) for t in ts]
+        self.assertEqual(sorted(codes.values()), [0, 2], out.getvalue())
+        self.assertEqual(self.made("3") + self.made("4"), 1, out.getvalue())
+        self.assertIn("builders are already active", out.getvalue())
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_busy_lock_refuses_and_stale_lock_is_taken_over(self):
+        def grab(_):
+            with F.builder_lock():
+                pass
+        with mock.patch.object(F, "LOCK_WAIT_S", 0.3), F.builder_lock():
+            code, out = self.call(grab, [])
+        self.assertEqual(code, 2, out)
+        self.assertIn("holds", out)
+        self.assertFalse(os.path.exists(self.lock))
+        open(self.lock, "w").close()
+        old = os.path.getmtime(self.lock) - F.LOCK_STALE_S - 10
+        os.utime(self.lock, (old, old))
+        with mock.patch.object(F, "LOCK_WAIT_S", 0.3):
+            code, out = self.call(grab, [])
+        self.assertEqual(code, 0, out)
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_lock_is_released_when_the_holder_refuses(self):
+        def refuse(_):
+            with F.builder_lock():
+                F.die("inside the lock")
+        code, out = self.call(refuse, [])
+        self.assertEqual(code, 2, out)
+        self.assertFalse(os.path.exists(self.lock))
+
+    def fix(self, chunk):
+        """`pr-open --fix` in worktree 7-<chunk>, its PR already open; GitHub faked, the push goes to the bare remote."""
+        p = os.path.join(F.WT, REPO, "7-" + chunk)
+        real_run = F.run
+
+        def fake_run(cmd, *a, **k):
+            if cmd[0] != F.GH:
+                return real_run(cmd, *a, **k)
+            return subprocess.CompletedProcess(cmd, 0, '[{"number": 9, "url": "https://github.com/%s/pull/9"}]' % FULL, "")
+
+        ctx = (p, FULL, "chunk/7-" + chunk, "dev", "7", chunk)
+        with mock.patch.object(F, "wt_context", lambda: ctx), mock.patch.object(F, "run", fake_run):
+            return self.call(F.cmd_pr_open, ["--fix"])
+
+    def test_fix_on_a_green_worktree_at_the_cap_refuses_before_the_push(self):
+        sha = self.commit(self.wt(chunk="1"))
+        open(F.marker(REPO, "chunk/7-1"), "w").close()
+        self.wt(chunk="2")
+        self.wt(chunk="3")
+        code, out = self.fix("1")
+        self.assertEqual(code, 2, out)
+        self.assertIn("builders are already active", out)
+        self.assertTrue(os.path.exists(F.marker(REPO, "chunk/7-1")))
+        self.assertNotEqual(self.remote_sha("refs/heads/chunk/7-1"), sha)
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_fix_on_a_green_worktree_below_the_cap_turns_it_active(self):
+        sha = self.commit(self.wt(chunk="1"))
+        open(F.marker(REPO, "chunk/7-1"), "w").close()
+        self.wt(chunk="2")
+        code, out = self.fix("1")
+        self.assertEqual(code, 0, out)
+        self.assertIn("PUSHED fix to", out)
+        self.assertEqual(self.remote_sha("refs/heads/chunk/7-1"), sha)
+        self.assertFalse(os.path.exists(F.marker(REPO, "chunk/7-1")))
+
+    def test_fix_on_an_active_worktree_needs_no_free_slot(self):
+        sha = self.commit(self.wt(chunk="1"))
+        self.wt(chunk="2")
+        self.wt(chunk="3")
+        code, out = self.fix("1")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.remote_sha("refs/heads/chunk/7-1"), sha)
+
+    def meminfo(self, kb):
+        F.MEMINFO = os.path.join(self.tmp, "meminfo")
+        write(self.tmp, "meminfo", "MemTotal:       16384000 kB\nMemFree:          100000 kB\nMemAvailable:   %8d kB\n" % kb)
+
+    def test_meminfo_reader(self):
+        self.assertIsNone(F.avail_mem_gb())  # no /proc/meminfo (Windows, macOS): skipped, not failed
+        self.meminfo(2 * 1048576)
+        self.assertEqual(F.avail_mem_gb(), 2.0)
+
+    def test_wt_new_refuses_below_the_memory_floor(self):
+        self.meminfo(int((F.MIN_FREE_MEM_GB - 0.5) * 1048576))
+        code, out = self.new("3")
+        self.assertEqual(code, 2, out)
+        self.assertIn("memory", out)
+        self.assertFalse(self.made("3"))
+
+    def test_wt_new_above_the_memory_floor_and_without_meminfo_proceeds(self):
+        self.assertEqual(self.new("3")[0], 0)
+        self.meminfo(int((F.MIN_FREE_MEM_GB + 1) * 1048576))
+        code, out = self.new("4")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.made("4"))
 
 
 class WorkOverride(unittest.TestCase):

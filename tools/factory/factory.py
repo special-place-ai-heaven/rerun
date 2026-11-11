@@ -2,13 +2,15 @@
 """Factory scripts (Rob, 2026-11-10). One call replaces several tool calls.
 Commands: packet, wt, pr-open, ci-wait, risk, merge-dev, job-open, release-pr, repo-check.
 GitHub only through the gh/git wrappers; the token is never read or printed here."""
-import json, os, re, subprocess, sys, time, shutil, urllib.request
+import contextlib, json, os, re, subprocess, sys, time, shutil, urllib.request
 
 GH, GIT = "/data/tools/bin/gh", "/data/tools/bin/git"
 OWNERS = ("special-place-ai-heaven", "special-place-administrator")
 WORK = os.environ.get("FACTORY_WORK", "/data/work")
 REPOS, WT, STATE = WORK + "/repos", WORK + "/wt", WORK + "/state"
 MAX_WORK_GB, MIN_FREE_GB, MAX_BUILDERS = 20, 30, 2
+MIN_FREE_MEM_GB, MEMINFO = 4, "/proc/meminfo"
+LOCK_WAIT_S, LOCK_STALE_S = 60, 900  # stale > the longest hold (`git worktree add`, run() timeout 300 s)
 QUEUE_LIMIT_S, SLICE_S = 30 * 60, 450
 PR_HEADS = ["## Done", "## Evidence", "## Not changed", "## Unsure", "## Open", "## Next owner and their done-test"]
 WF = r"\.github/(workflows|actions)/|\.github/(CODEOWNERS|dependabot\.yml)$"
@@ -173,6 +175,54 @@ def marker(repo, branch):
     return os.path.join(STATE, "green__%s__%s" % (repo, branch.replace("/", "_")))
 
 
+def avail_mem_gb():
+    """MemAvailable in GB, or None where /proc/meminfo or the line does not exist (the check is skipped, not failed)."""
+    try:
+        with open(MEMINFO) as f:
+            for l in f:
+                if l.startswith("MemAvailable:"):
+                    return int(l.split()[1]) / 1048576
+    except OSError:
+        pass
+    return None
+
+
+@contextlib.contextmanager
+def builder_lock():
+    """Exclusive-create lock file (portable, no fcntl) around counting builders and the change that adds one."""
+    lk, end = os.path.join(STATE, "builders.lock"), time.time() + LOCK_WAIT_S
+    while True:
+        try:
+            fd = os.open(lk, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(lk) > LOCK_STALE_S:
+                    # shortcut: two callers breaking the same stale lock at once can both get in; a stale lock means a crashed holder, so rare
+                    os.remove(lk)
+                    continue
+            except OSError:
+                continue  # released between the open and the check
+            if time.time() > end:
+                die("another `wt new` or `pr-open --fix` holds %s for over %d s. Try again; if it stays, tell @boss." % (lk, LOCK_WAIT_S))
+            time.sleep(0.2)
+    os.write(fd, ("%d %d\n" % (os.getpid(), time.time())).encode())
+    os.close(fd)
+    try:
+        yield
+    finally:
+        try:
+            os.remove(lk)
+        except OSError:
+            pass
+
+
+def cap_check():
+    active = [(r, d) for r, d, p in wt_dirs() if not os.path.exists(marker(r, run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=p, check=False).stdout.strip()))]
+    if len(active) >= MAX_BUILDERS:
+        die("%d builders are already active (%s). At most %d at once. Return BLOCKED to @boss." % (len(active), ", ".join("/".join(x) for x in active), MAX_BUILDERS))
+
+
 def ensure_clone(full):
     p = os.path.join(REPOS, short(full))
     if not os.path.isdir(os.path.join(p, ".git")):
@@ -263,11 +313,12 @@ def cmd_wt(a):
     st = shutil.disk_usage("/data")
     if st.free / 2**30 < MIN_FREE_GB:
         die("/data has %.0f GB free, floor is %d GB. Tell @boss." % (st.free / 2**30, MIN_FREE_GB))
+    mem = avail_mem_gb()
+    if mem is not None and mem < MIN_FREE_MEM_GB:
+        die("%.1f GB of memory available, floor is %d GB. Tell @boss." % (mem, MIN_FREE_MEM_GB))
     if du_gb(WORK) > MAX_WORK_GB:
         die("/data/work is over %d GB. Tell @boss; old worktrees need `wt done`." % MAX_WORK_GB)
-    active = [(r, d) for r, d, p in wt_dirs() if not os.path.exists(marker(r, run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=p, check=False).stdout.strip()))]
-    if len(active) >= MAX_BUILDERS:
-        die("%d builders are already active (%s). At most %d at once. Return BLOCKED to @boss." % (len(active), ", ".join("/".join(x) for x in active), MAX_BUILDERS))
+    cap_check()  # early refusal before any fetch or push; repeated under the lock below
     p = ensure_clone(full)
     info = api("repos/%s" % full)
     default = info["default_branch"]
@@ -279,7 +330,12 @@ def cmd_wt(a):
         run([GIT, "fetch", "--quiet", "origin"], cwd=p)
         print("created job branch %s from %s" % (base, default))
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    run([GIT, "worktree", "add", "--quiet", "-b", branch, path, "origin/" + base], cwd=p)
+    with builder_lock():  # count and create together, so two calls cannot both take the last slot
+        if os.path.isdir(path):
+            print("EXISTS %s (branch %s). Work there, or `wt done` first." % (path, branch))
+            return
+        cap_check()
+        run([GIT, "worktree", "add", "--quiet", "-b", branch, path, "origin/" + base], cwd=p)
     run([GIT, "config", "branch.%s.factorybase" % branch, base], cwd=p)
     ex = os.path.join(p, ".git", "info", "exclude")
     if ".symforge" not in open(ex).read():
@@ -332,11 +388,14 @@ def cmd_pr_open(a):
     if ex:
         if "--fix" not in a:
             die("PR already open: %s. To push a fix for red CI use `pr-open --fix`." % ex[0]["url"])
+        if os.path.exists(marker(short(full), branch)):
+            with builder_lock():  # a green worktree turns active again: same cap as `wt new`, checked before the push
+                cap_check()
+                try:
+                    os.remove(marker(short(full), branch))
+                except OSError:
+                    pass
         run([GIT, "push", "--quiet", "origin", branch], cwd=top)
-        try:
-            os.remove(marker(short(full), branch))
-        except OSError:
-            pass
         print("PUSHED fix to %s\nPR %s\nNext: `ci-wait %s %s`" % (branch, ex[0]["url"], short(full), ex[0]["number"]))
         return
     if "--title" not in a or "--body-file" not in a:

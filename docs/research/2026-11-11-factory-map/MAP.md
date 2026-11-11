@@ -243,3 +243,34 @@ set after two milestones of real numbers, not guessed now.
 | Stuck and orphan runs | runs live with no step for a set time; sessions nobody started through the runner | run records, lineage |
 | Escaped defects | problems found after Accept, traced to the stage that should have caught them | Learn stage |
 | Knowledge use | packets delivered, and brain and skill reads per run | stored tool calls |
+
+## 11. Build the least: "the best part is no part"
+
+Rob, 2026-11-11: "overengineering is a curse and a blight. As Elon Musk says 'the best part is no part'."
+
+This map is the whole picture, not a build list. Rules for what actually gets built:
+
+1. **A part is built only when a measured failure demands it**, and the failure is named on its issue.
+2. **Prefer a check at a choke point over a new service.** Builders already pass through `wt new`, `pr-open` and `merge-dev`; a check there costs a few lines and no new moving part.
+3. **Every new part must delete something**: a section of a prompt, a manual step, a coworker's duty, a script.
+4. **No part is built for a later milestone's sake.** If M1 works with a table in a file, it has no service.
+
+**The smallest version that would have prevented the failures of 2026-11-11**
+
+| Failure | Smallest fix | New parts |
+|---|---|---|
+| Work went to builders without a plan | `wt new` refuses unless the job's issue carries `PLAN READY` (or a one-line "no plan needed because") | none: one check in an existing script |
+| Three sessions on one branch | the worktree register records the owner; `wt new` refuses a second owner | none beyond M0 |
+| Unpushed work could be deleted | safe removal | none beyond M0 |
+| Tests run by hand, millions of tokens | the tests run in CI | one CI job per repo |
+| A session could not be stopped by Boss | a cancel tool beside `call_agent` | one seam |
+| Nobody could see what burned the tokens | one query over the step tables that exist, shown as a table | one screen, no collector |
+
+That is the first thing to build, and it is M0 plus three small items. The runner service, the ledger database, the
+scheduler, parallel copies, Jev routing, the knowledge packets and everything in Ring 3 wait until these are in and the
+numbers show what still hurts.
+
+**Things to delete as parts arrive**
+- Boss's instructions are about 27,000 characters, much of it procedure a script will own. Each mechanism that lands removes its section from that prompt.
+- Thirty-eight coworkers, several with overlapping duties. A coworker whose duty a script takes over loses that duty, and one left with none is retired.
+- KPIs: start with four (first-time pass rate, review rounds, planning share, weekly pace). The other eight in section 10 are added only when one of the four cannot explain a problem.

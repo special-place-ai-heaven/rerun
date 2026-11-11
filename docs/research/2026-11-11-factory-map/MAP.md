@@ -1,5 +1,7 @@
 # The factory map: how the ideas of 2026-11-11 fit together and graft onto Rerun
 
+Read [PRINCIPLES.md](PRINCIPLES.md) first: the rules this design follows, in Rob's own words.
+
 Status: research and plan, not built. Code facts are from three read-only passes over `dev` at `145f239`
 plus one on brain and memory; each fact has a file and line in issue #42. Facts marked "reading" were not
 re-verified by hand and must be checked by whoever builds the item.

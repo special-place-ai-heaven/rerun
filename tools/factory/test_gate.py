@@ -1,4 +1,4 @@
-import os, sys, unittest
+import os, re, sys, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate as G
 
@@ -44,5 +44,32 @@ class G_(unittest.TestCase):
         self.assertEqual([(x[1], x[2]) for x in r], [("packages/a/src/x.spec.ts", True), ("src/y.test.ts", False)])
         self.assertTrue(G.test_hit("a/src/y.test.ts", "src/y.test.ts", "jest"))
         self.assertFalse(G.test_hit("src/z.test.ts", "src/y.test.ts", "jest"))
+class PythonGate(unittest.TestCase):
+    def test_test_file_patterns(self):
+        for f in ("pkg/test_report.py", "test_x.py", "pkg/report_test.py", "tests/helpers.py", "a/tests/b/c.py"):
+            self.assertTrue(re.search(G.TESTF, f), f)
+        for f in ("pkg/report.py", "pkg/latest_x.py", "docs/testing.py"):
+            self.assertFalse(re.search(G.TESTF, f), f)
+
+    def test_unittest_lines(self):
+        T = "2026-11-11T05:10:01.0000000Z "
+        log = T + "test_a (pkg.test_m.C.test_a) ... ok\n" + T + "test_b (pkg.test_m.C) ... FAIL\n" + T + "OK\n"
+        r = G.results(log)
+        self.assertEqual([(x[1], x[2]) for x in r], [("pkg::test_m::C::test_a", True), ("pkg::test_m::C::test_b", False), ("unittest::summary", True)])
+        self.assertTrue(G.same(r[0][1], "C::test_a"))
+        self.assertTrue(G.test_hit("src/pkg/test_m.py", r[1][1], "unittest"))
+        self.assertTrue(G.test_hit("pkg/test_m.py", "test_m::C::test_b", "unittest"))
+        self.assertFalse(G.test_hit("pkg/test_n.py", r[1][1], "unittest"))
+
+    def test_import_error_names_module(self):
+        r = G.results("2026-11-11T05:10:01.0000000Z ERROR: test_m (unittest.loader._FailedTest.test_m)\n")
+        self.assertEqual((r[0][1], r[0][2]), ("test_m::_FailedTest", False))
+        self.assertTrue(G.test_hit("pkg/test_m.py", r[0][1], "unittest"))
+
+    def test_done_test_python_file(self):
+        self.assertTrue(G.same("tests/test_m.py::C::test_a", "tests/test_m.py"))
+        self.assertFalse(G.same("tests/test_mm.py::C::test_a", "tests/test_m.py"))
+
+
 if __name__ == "__main__":
     unittest.main()

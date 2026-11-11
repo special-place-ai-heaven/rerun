@@ -220,3 +220,26 @@ Warden (usage watchdog) reads and comments on the usage page instead of collecti
 in its checking by the Proof stage's script and keeps the cases the script cannot decide; Box Janitor (server health) runs the
 worktree sweep and reports capacity readings to the scheduler; Agent Smith (workspace tidiness) runs the brain clean-up and the
 audit of unread pages and unused skills.
+
+## 10. The factory's KPIs
+
+Rob, 2026-11-11: "as in any factory, you have rules, regulations, procedures, automated steps and people or robots to
+manage it all so a product churn is smooth and KPI stays green. Here instead of people and robots we have our LLMs."
+
+Every figure is read from the ledger and the step tables; none is reported by a coworker. Each has a green range that is
+set after two milestones of real numbers, not guessed now.
+
+| KPI | What it tells | Source |
+|---|---|---|
+| First-time pass rate of chunks | whether chunks are cut right for the model that builds them | Proof stage |
+| Review rounds per task | whether plans are good enough before building | Review stage |
+| Returned-to-planning rate | plans that were wrong | ledger |
+| Planning share | tokens spent in planning stages against building, per job (target: the larger share) | usage by stage |
+| Lead time per chunk and per job | from Ready to merged | ledger |
+| Queue age and work in progress | where work waits, and for what: a coworker, capacity, a review | ledger, scheduler |
+| Tokens per merged chunk, by kind | cost of a unit of output | usage |
+| Waiting tokens | tokens spent while a command ran (target: zero) | step tables |
+| Weekly pace | share of the weekly allowance used against the day of the week | weekly reading |
+| Stuck and orphan runs | runs live with no step for a set time; sessions nobody started through the runner | run records, lineage |
+| Escaped defects | problems found after Accept, traced to the stage that should have caught them | Learn stage |
+| Knowledge use | packets delivered, and brain and skill reads per run | stored tool calls |

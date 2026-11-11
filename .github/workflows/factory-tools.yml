@@ -1,0 +1,55 @@
+name: Factory tools
+
+# Fork-only: tests for tools/factory and a proof that its install command works into a temp prefix.
+on:
+  pull_request:
+    branches: [dev]
+    paths: ['tools/factory/**', '.github/workflows/factory-tools.yml']
+  push:
+    branches: [dev]
+    paths: ['tools/factory/**', '.github/workflows/factory-tools.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-tools-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  factory-tools:
+    if: github.repository == 'special-place-ai-heaven/rerun'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sources are the reviewed bytes
+        run: |
+          cd tools/factory
+          cat > /tmp/sums <<'S'
+          26d64d036f769aaa3d04857da30244e357706998c881fc02ce5e7d4c3bf7458d  gate.py
+          ae101c1b95c4ef75a78674a14cddf8d408f60c23adba2d3c53bfb3a73ae42730  test_gate.py
+          5a01bf64ee8283959a02f5802d1ecdf84e82399163b5f2ad161109eda84d6c57  factory.py
+          927a9358912799ee6826c3e5af33694fba0fb52b5fdefab29b28d17b38a2886a  jobcost.py
+          S
+          sha256sum -c /tmp/sums
+      - name: Unit and fixture tests
+        run: |
+          cd tools/factory
+          PYTHONPATH="$PWD" python3 -m unittest -v test_gate test_fixtures
+      - name: Install into a temp prefix and smoke every wrapper
+        run: |
+          P="$(mktemp -d)"
+          tools/factory/install.sh --prefix "$P"
+          n=0
+          for w in "$P"/bin/*; do
+            out="$("$w" --help </dev/null 2>&1 || true)"
+            echo "== $(basename "$w"): $(echo "$out" | head -1)"
+            test -n "$out"
+            if echo "$out" | grep -q Traceback; then echo "traceback in $w"; exit 1; fi
+            grep -q "$P/factory" "$w" || { echo "wrapper $w does not point at the prefix"; exit 1; }
+            n=$((n+1))
+          done
+          test "$n" -eq 12
+          ! grep -rl '/data/tools/factory' "$P" || { echo "install left a live path"; exit 1; }
+          echo "install proof: $n wrappers ran from $P"

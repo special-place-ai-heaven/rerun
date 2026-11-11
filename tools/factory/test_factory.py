@@ -1,6 +1,6 @@
 """factory.py tests on a temp clone with a local bare remote. FactoryCase points factory's paths and git at a temp
 dir, so nothing touches /data. Run: python -I -m unittest discover -s . -p test_*.py"""
-import contextlib, io, os, shutil, stat, subprocess, sys, tempfile, threading, types, unittest
+import contextlib, io, json, os, shutil, stat, subprocess, sys, tempfile, threading, types, unittest
 from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -410,6 +410,168 @@ class BuilderCap(FactoryCase):
         code, out = self.new("4")
         self.assertEqual(code, 0, out)
         self.assertTrue(self.made("4"))
+
+
+class WtRegister(FactoryCase):
+    """G5: one record per worktree with owner and run id; `wt list` shows owner, age and state, also for older worktrees."""
+    wt_new_fakes = BuilderCap.wt_new_fakes
+
+    def setUp(self):
+        super().setUp()
+        for p in (mock.patch.object(F, "MEMINFO", os.path.join(self.tmp, "no-meminfo")),
+                  mock.patch.dict(os.environ, {"FACTORY_OWNER": "", "FACTORY_RUN": ""})):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def new(self, chunk, *extra):
+        with self.wt_new_fakes():
+            return self.call(F.cmd_wt, ["new", REPO, "7", chunk] + list(extra))
+
+    def record(self, chunk):
+        with open(F.reg_path(REPO, "7-" + chunk)) as f:
+            return json.load(f)
+
+    def test_wt_new_writes_the_record_and_wt_done_removes_it(self):
+        os.environ.update({"FACTORY_OWNER": "env-owner", "FACTORY_RUN": "run-42"})
+        code, out = self.new("3", "--owner", "alice")
+        self.assertEqual(code, 0, out)
+        rec = self.record("3")
+        created = rec.pop("created")
+        self.assertEqual(rec, {"repo": FULL, "issue": "7", "chunk": "3", "branch": "chunk/7-3", "base": "dev", "owner": "alice", "run": "run-42"})
+        self.assertRegex(created, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertLess(abs(F.age_h({"created": created})), 0.02)  # UTC, not local time
+        self.new("3", "--owner", "bob")  # EXISTS: the record stays the first owner's
+        self.assertEqual(self.record("3")["owner"], "alice")
+        code, out = self.call(F.cmd_wt, ["done", REPO, "7", "3"])
+        self.assertEqual(code, 0, out)
+        self.assertFalse(os.path.exists(F.reg_path(REPO, "7-3")))
+
+    def test_owner_from_environment_and_unknown_when_absent(self):
+        self.new("3")
+        self.assertEqual((self.record("3")["owner"], self.record("3")["run"]), ("unknown", "unknown"))
+        os.environ["FACTORY_OWNER"] = "env-owner"
+        self.new("4")
+        self.assertEqual(self.record("4")["owner"], "env-owner")
+
+    def test_wt_list_shows_owner_age_state_and_older_worktrees(self):
+        self.new("3", "--owner", "alice")
+        self.wt(chunk="1")  # made before the register: no record
+        open(F.marker(REPO, "chunk/7-1"), "w").close()
+        with self.wt_new_fakes():
+            code, out = self.call(F.cmd_wt, ["list"])
+        self.assertEqual(code, 0, out)
+        rows = dict(l.split("  ", 1) for l in out.splitlines() if l.startswith(REPO + "/"))
+        self.assertRegex(rows[REPO + "/7-3"], r"owner alice  age 0h  ACTIVE builder$")
+        self.assertRegex(rows[REPO + "/7-1"], r"owner unknown  age \?  CI green, waits for merge$")
+        self.assertIn("active builders: 1 of 2", out)
+
+
+class WtSweep(FactoryCase):
+    """G6: `wt sweep` is a dry run by default; --apply acts on REMOVE and RESCUE through `wt done` and never loses work."""
+
+    def setUp(self):
+        super().setUp()
+        self.prs = {}
+
+    def old_commit(self, path, name="work.txt"):
+        write(path, name, "old work\n")
+        git(path, "add", "-A")
+        env = dict(os.environ, GIT_COMMITTER_DATE="2026-01-01T00:00:00Z", GIT_AUTHOR_DATE="2026-01-01T00:00:00Z")
+        subprocess.run(["git", "-C", path, "commit", "--quiet", "-m", "old work"], check=True, env=env, capture_output=True)
+        return git(path, "rev-parse", "HEAD")
+
+    def pr(self, chunk, number, state, sha):
+        self.prs.setdefault("chunk/7-" + chunk, []).append({"number": number, "state": state, "headRefOid": sha})
+
+    def sweep(self, *argv):
+        with mock.patch.object(F, "pr_lookup", lambda full, branch: self.prs.get(branch, [])):
+            return self.call(F.cmd_wt, ["sweep"] + list(argv))
+
+    def verdicts(self, out):
+        return {l.split()[1]: l.split()[0] for l in out.splitlines() if l.split()[:1] in (["KEEP"], ["REMOVE"], ["RESCUE"])}
+
+    def state_file(self, name, gate=False):
+        d = os.path.join(F.STATE, "gate") if gate else F.STATE
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, name), "w").close()
+        return os.path.join(d, name)
+
+    def test_dry_run_prints_verdicts_and_changes_nothing(self):
+        p = self.wt(chunk="1")
+        sha = self.commit(p)
+        git(p, "push", "--quiet", "origin", "chunk/7-1")
+        self.pr("1", 9, "MERGED", sha)
+        code, out = self.sweep()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.verdicts(out), {REPO + "/7-1": "REMOVE"})
+        self.assertIn("dry run", out)
+        self.assertTrue(os.path.isdir(p))
+        self.assertTrue(self.has_branch("chunk/7-1"))
+
+    def test_apply_removes_a_merged_worktree_and_only_its_state_files(self):
+        p = self.wt(chunk="1")
+        sha = self.commit(p)
+        git(p, "push", "--quiet", "origin", "chunk/7-1")
+        self.pr("1", 9, "MERGED", sha)
+        mine = [self.state_file("ciwait__%s__9__%s.json" % (REPO, sha[:12])), self.state_file("%s-9-%s.json" % (REPO, sha), gate=True)]
+        other = [self.state_file("ciwait__%s__91__%s.json" % (REPO, sha[:12])), self.state_file("%s-91-%s.json" % (REPO, sha), gate=True)]
+        code, out = self.sweep("--apply")
+        self.assertEqual(code, 0, out)
+        self.assertIn("removed worktree", out)
+        self.assertFalse(os.path.isdir(p))
+        self.assertFalse(self.has_branch("chunk/7-1"))
+        self.assertEqual([os.path.exists(f) for f in mine + other], [False, False, True, True])
+
+    def test_apply_rescues_idle_unpushed_work_of_a_closed_pr_before_removing(self):
+        p = self.wt(chunk="1")
+        sha = self.old_commit(p)
+        git(p, "push", "--quiet", "origin", "chunk/7-1")
+        git(self.origin, "branch", "-D", "chunk/7-1")  # PR closed unmerged, branch deleted on GitHub
+        self.pr("1", 9, "CLOSED", sha)
+        code, out = self.sweep("--apply")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.verdicts(out), {REPO + "/7-1": "RESCUE"})
+        self.assertEqual(self.remote_sha("refs/heads/rescue/chunk/7-1-" + sha[:8]), sha)
+        self.assertFalse(os.path.isdir(p))
+
+    def test_apply_keeps_dirty_refused_and_fresh_worktrees_and_goes_on(self):
+        dirty = self.wt(chunk="1")
+        self.old_commit(dirty)
+        write(dirty, "left.txt", "uncommitted\n")
+        stuck = self.wt(chunk="2")
+        stuck_sha = self.old_commit(stuck)  # idle and unpushed, but the rescue push will fail
+        merged = self.wt(chunk="3")
+        sha = self.commit(merged)
+        git(merged, "push", "--quiet", "origin", "chunk/7-3")
+        self.pr("3", 11, "MERGED", sha)
+        fresh = self.wt(chunk="4")  # no PR, nothing unpushed
+        recent = self.wt(chunk="5")
+        self.commit(recent)  # unpushed but not idle
+        reused = self.wt(chunk="6")  # an old merged PR of the same branch name, other head
+        self.pr("6", 5, "MERGED", "0" * 40)
+        git(self.clone, "config", "remote.origin.pushurl", os.path.join(self.tmp, "nowhere.git"))
+        code, out = self.sweep("--apply")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.verdicts(out), {REPO + "/7-1": "KEEP", REPO + "/7-2": "RESCUE", REPO + "/7-3": "REMOVE",
+                                              REPO + "/7-4": "KEEP", REPO + "/7-5": "KEEP", REPO + "/7-6": "KEEP"})
+        self.assertIn("KEPT %s/7-2" % REPO, out)
+        self.assertEqual(git(stuck, "rev-parse", "HEAD"), stuck_sha)
+        self.assertTrue(os.path.isfile(os.path.join(dirty, "left.txt")))
+        self.assertFalse(os.path.isdir(merged))
+        self.assertTrue(all(os.path.isdir(x) for x in (dirty, stuck, fresh, recent, reused)))
+        self.assertIn("sweep: 4 KEEP, 1 REMOVE, 1 RESCUE", out)
+
+    def test_open_pr_or_unreachable_github_keeps_even_when_idle(self):
+        p = self.wt(chunk="1")
+        sha = self.old_commit(p)
+        self.pr("1", 9, "OPEN", sha)
+        self.assertEqual(self.verdicts(self.sweep("--apply")[1]), {REPO + "/7-1": "KEEP"})
+        self.prs = {}
+        with mock.patch.object(F, "pr_lookup", lambda *a: None):
+            code, out = self.call(F.cmd_wt, ["sweep", "--apply"])
+        self.assertEqual(self.verdicts(out), {REPO + "/7-1": "KEEP"})
+        self.assertTrue(os.path.isdir(p))
+        self.assertEqual(self.remote_refs(), "")
 
 
 class WorkOverride(unittest.TestCase):

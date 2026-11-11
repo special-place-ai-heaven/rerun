@@ -2,7 +2,7 @@
 """Factory scripts (Rob, 2026-11-10). One call replaces several tool calls.
 Commands: packet, wt, pr-open, ci-wait, risk, merge-dev, job-open, release-pr, repo-check.
 GitHub only through the gh/git wrappers; the token is never read or printed here."""
-import contextlib, json, os, re, subprocess, sys, time, shutil, urllib.request
+import calendar, contextlib, json, os, re, subprocess, sys, time, shutil, urllib.request
 
 GH, GIT = "/data/tools/bin/gh", "/data/tools/bin/git"
 OWNERS = ("special-place-ai-heaven", "special-place-administrator")
@@ -11,6 +11,7 @@ REPOS, WT, STATE = WORK + "/repos", WORK + "/wt", WORK + "/state"
 MAX_WORK_GB, MIN_FREE_GB, MAX_BUILDERS = 20, 30, 2
 MIN_FREE_MEM_GB, MEMINFO = 4, "/proc/meminfo"
 LOCK_WAIT_S, LOCK_STALE_S = 60, 900  # stale > the longest hold (`git worktree add`, run() timeout 300 s)
+WT_IDLE_HOURS = 48  # `wt sweep`: no new commit and no `wt new` for this long counts as idle
 QUEUE_LIMIT_S, SLICE_S = 30 * 60, 450
 PR_HEADS = ["## Done", "## Evidence", "## Not changed", "## Unsure", "## Open", "## Next owner and their done-test"]
 WF = r"\.github/(workflows|actions)/|\.github/(CODEOWNERS|dependabot\.yml)$"
@@ -175,6 +176,26 @@ def marker(repo, branch):
     return os.path.join(STATE, "green__%s__%s" % (repo, branch.replace("/", "_")))
 
 
+def reg_path(repo, d):
+    return os.path.join(STATE, "wt__%s__%s.json" % (repo, d))
+
+
+def reg_read(repo, d):
+    """The register record of worktree WT/<repo>/<d>, or {} for one made before the register existed."""
+    try:
+        with open(reg_path(repo, d)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def age_h(rec):
+    try:
+        return (time.time() - calendar.timegm(time.strptime(rec["created"], "%Y-%m-%dT%H:%M:%SZ"))) / 3600
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def avail_mem_gb():
     """MemAvailable in GB, or None where /proc/meminfo or the line does not exist (the check is skipped, not failed)."""
     try:
@@ -239,19 +260,25 @@ def on_remote(p, sha):
     return bool(run([GIT, "for-each-ref", "--contains", sha, "refs/remotes/origin"], cwd=p).stdout.strip())
 
 
+def unsaved(p, path, branch):
+    """Tips of the worktree and its branch that are on no remote branch, or None when origin cannot be fetched."""
+    # --prune: a tracking ref of a branch deleted on GitHub must not count as proof
+    if run([GIT, "fetch", "--quiet", "--prune", "origin"], cwd=p, check=False).returncode:
+        return None
+    tips = {run([GIT, "rev-parse", "--verify", "--quiet", ref], cwd=c, check=False).stdout.strip()
+            for c, ref in ((path, "HEAD"), (p, "refs/heads/" + branch)) if os.path.isdir(c)} - {""}
+    return [sha for sha in sorted(tips) if not on_remote(p, sha)]
+
+
 def wt_save(p, path, branch):
     """Die (nothing deleted) unless every commit of the worktree and its branch is on a remote branch.
     Unpushed commits go to rescue/<branch>-<sha8> first. Uncommitted changes refuse: pushing them could publish stray files."""
     if os.path.isdir(path) and run([GIT, "status", "--porcelain"], cwd=path).stdout.strip():
         die("%s has uncommitted changes. Commit and push them, or remove them yourself, then `wt done` again. Nothing deleted." % path)
-    # --prune: a tracking ref of a branch deleted on GitHub must not count as proof
-    if run([GIT, "fetch", "--quiet", "--prune", "origin"], cwd=p, check=False).returncode:
+    left = unsaved(p, path, branch)
+    if left is None:
         die("cannot fetch origin, so cannot prove the commits of %s are saved. Nothing deleted." % branch)
-    tips = {run([GIT, "rev-parse", "--verify", "--quiet", ref], cwd=c, check=False).stdout.strip()
-            for c, ref in ((path, "HEAD"), (p, "refs/heads/" + branch)) if os.path.isdir(c)} - {""}
-    for sha in sorted(tips):
-        if on_remote(p, sha):
-            continue
+    for sha in left:
         rb = "rescue/%s-%s" % (branch, sha[:8])
         run([GIT, "push", "--quiet", "origin", "%s:refs/heads/%s" % (sha, rb)], cwd=p, check=False)
         if not on_remote(p, sha):
@@ -272,15 +299,20 @@ def unlink_links(d):
 
 
 def cmd_wt(a):
-    if not a or a[0] not in ("new", "done", "list"):
-        die("usage: wt new <repo> <issue> <chunk> [--base BRANCH] | wt done <repo> <issue> <chunk> | wt list")
+    if not a or a[0] not in ("new", "done", "list", "sweep"):
+        die("usage: wt new <repo> <issue> <chunk> [--base BRANCH] [--owner NAME] | wt done <repo> <issue> <chunk> | wt list | wt sweep [--apply]")
+    if a[0] == "sweep":
+        return wt_sweep("--apply" in a)
     if a[0] == "list":
         act = 0
         for r, d, p in wt_dirs():
             br = run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=p, check=False).stdout.strip()
             g = os.path.exists(marker(r, br))
             act += 0 if g else 1
-            print("%s/%s  branch %s  %.2f GB  %s" % (r, d, br, du_gb(p), "CI green, waits for merge" if g else "ACTIVE builder"))
+            rec = reg_read(r, d)
+            h = age_h(rec)
+            print("%s/%s  branch %s  %.2f GB  owner %s  age %s  %s" % (r, d, br, du_gb(p), rec.get("owner", "unknown"),
+                                                                     "?" if h is None else "%dh" % h, "CI green, waits for merge" if g else "ACTIVE builder"))
         st = shutil.disk_usage("/data")
         print("active builders: %d of %d | /data/work %.1f of %d GB | /data free %.0f GB (floor %d)" % (act, MAX_BUILDERS, du_gb(WORK), MAX_WORK_GB, st.free / 2**30, MIN_FREE_GB))
         return
@@ -301,10 +333,11 @@ def cmd_wt(a):
             run([GIT, "worktree", "remove", "--force", path], cwd=p)
         run([GIT, "worktree", "prune"], cwd=p, check=False)
         run([GIT, "branch", "-D", branch], cwd=p, check=False)  # -D is safe: wt_save proved its commits are on a remote branch
-        try:
-            os.remove(marker(repo, branch))
-        except OSError:
-            pass
+        for f in (marker(repo, branch), reg_path(repo, "%s-%s" % (issue, chunk))):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
         print("removed worktree %s and local branch %s" % (path, branch))
         return
     if os.path.isdir(path):
@@ -337,6 +370,11 @@ def cmd_wt(a):
         cap_check()
         run([GIT, "worktree", "add", "--quiet", "-b", branch, path, "origin/" + base], cwd=p)
     run([GIT, "config", "branch.%s.factorybase" % branch, base], cwd=p)
+    owner = a[a.index("--owner") + 1] if "--owner" in a else os.environ.get("FACTORY_OWNER") or "unknown"
+    with open(reg_path(repo, "%s-%s" % (issue, chunk)), "w") as f:
+        json.dump({"repo": full, "issue": issue, "chunk": chunk, "branch": branch, "base": base,
+                   "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "owner": owner,
+                   "run": os.environ.get("FACTORY_RUN") or "unknown"}, f)
     ex = os.path.join(p, ".git", "info", "exclude")
     if ".symforge" not in open(ex).read():
         open(ex, "a").write("\n.symforge/\n.symforge-knowledge.toml\n")
@@ -344,6 +382,68 @@ def cmd_wt(a):
     print("WORKTREE %s\nbranch %s (from origin/%s, fresh)\nrepo %s | job issue #%s | chunk %s" % (path, branch, base, full, issue, chunk))
     print("build and test notes: %s" % (", ".join(notes) or "none in repo"))
     print("Next: edit here, quick checks only (lint, type check, named test files), commit, then `pr-open`.")
+
+
+def pr_lookup(full, branch):
+    """PRs with head `branch` as [{number, state OPEN|CLOSED|MERGED, headRefOid}], or None when GitHub cannot be asked."""
+    r = run([GH, "pr", "list", "-R", full, "--head", branch, "--state", "all", "--limit", "20", "--json", "number,state,headRefOid"], check=False)
+    try:
+        return None if r.returncode else json.loads(r.stdout or "[]")
+    except ValueError:
+        return None
+
+
+def sweep_verdict(full, r, d, path):
+    """(KEEP|REMOVE|RESCUE, reason, PRs of the branch) for worktree WT/<r>/<d>. Anything unclear is KEEP."""
+    if not re.fullmatch(r"\d+-[a-z0-9]{1,12}", d):
+        return "KEEP", "not made by `wt new`", []
+    branch = "chunk/" + d
+    head = run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=path, check=False).stdout.strip()
+    if head != branch:
+        return "KEEP", "on branch %s, not %s" % (head, branch), []
+    if run([GIT, "status", "--porcelain"], cwd=path, check=False).stdout.strip():
+        return "KEEP", "uncommitted changes: the builder commits or drops them, sweep never does", []
+    left, prs = unsaved(os.path.join(REPOS, r), path, branch), pr_lookup(full, branch)
+    if left is None or prs is None:
+        return "KEEP", "cannot reach origin or GitHub, so cannot prove anything", []
+    if any(x.get("state", "").upper() == "OPEN" for x in prs):
+        return "KEEP", "PR #%s open" % ", #".join(str(x["number"]) for x in prs if x.get("state", "").upper() == "OPEN"), prs
+    sha = run([GIT, "rev-parse", "HEAD"], cwd=path).stdout.strip()
+    done = next((x for x in prs if x.get("headRefOid") == sha and x.get("state", "").upper() in ("MERGED", "CLOSED")), None)  # head must match: branch names are reused
+    if done and not left:
+        return "REMOVE", "PR #%s %s, nothing unpushed" % (done["number"], done["state"].lower()), prs
+    h = age_h(reg_read(r, d))
+    last = max(int(run([GIT, "log", "-1", "--format=%ct", "HEAD"], cwd=path).stdout.strip() or 0), 0 if h is None else time.time() - h * 3600)
+    idle = (time.time() - last) / 3600
+    if left and idle >= WT_IDLE_HOURS:
+        return "RESCUE", "idle %dh, %d unpushed commit tip(s), no open PR" % (idle, len(left)), prs
+    return "KEEP", "active: idle %dh, %s" % (idle, "unpushed work" if left else "no merged or closed PR"), prs
+
+
+def wt_sweep(apply):
+    """Dry run unless apply. REMOVE and RESCUE go through `wt done`, which saves unpushed commits or refuses."""
+    n = {"KEEP": 0, "REMOVE": 0, "RESCUE": 0}
+    for r, d, path in wt_dirs():
+        full = reg_read(r, d).get("repo") or repo_full(r)  # shortcut: a worktree older than the register is assumed under OWNERS[0]
+        verdict, why, prs = sweep_verdict(full, r, d, path)
+        n[verdict] += 1
+        print("%-6s %s/%s  %s" % (verdict, r, d, why))
+        if not apply or verdict == "KEEP":
+            continue
+        try:
+            cmd_wt(["done", full] + d.split("-", 1))
+        except SystemExit:
+            print("KEPT %s/%s: `wt done` refused (see above), nothing deleted." % (r, d))
+            continue
+        nums = {str(x["number"]) for x in prs if x.get("state", "").upper() != "OPEN"}
+        for sd, pat in ((STATE, r"ciwait__%s__(\d+)__[0-9a-f]+\.json"), (os.path.join(STATE, "gate"), r"%s-(\d+)-[0-9a-f]+\.json")):
+            for f in sorted(os.listdir(sd)) if os.path.isdir(sd) else []:
+                m = re.fullmatch(pat % re.escape(r), f)
+                if m and m.group(1) in nums:
+                    os.remove(os.path.join(sd, f))
+                    print("deleted stale state %s" % f)
+    print("sweep: %d KEEP, %d REMOVE, %d RESCUE | %s" % (n["KEEP"], n["REMOVE"], n["RESCUE"],
+                                                     "applied" if apply else "dry run, nothing changed. `wt sweep --apply` acts on REMOVE and RESCUE"))
 
 
 def wt_context():

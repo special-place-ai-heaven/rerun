@@ -2,7 +2,7 @@
 """Factory scripts (Rob, 2026-11-10). One call replaces several tool calls.
 Commands: packet, wt, pr-open, ci-wait, risk, merge-dev, job-open, release-pr, repo-check.
 GitHub only through the gh/git wrappers; the token is never read or printed here."""
-import calendar, contextlib, json, os, re, subprocess, sys, time, shutil, urllib.request
+import calendar, contextlib, json, os, re, signal, subprocess, sys, time, shutil, urllib.request
 
 GH, GIT = "/data/tools/bin/gh", "/data/tools/bin/git"
 OWNERS = ("special-place-ai-heaven", "special-place-administrator")
@@ -366,6 +366,7 @@ def cmd_wt(a):
     info = api("repos/%s" % full)
     default = info["default_branch"]
     base = a[a.index("--base") + 1] if "--base" in a else ("dev" if remote_has(p, "dev") else "job/" + issue)
+    owner = a[a.index("--owner") + 1] if "--owner" in a else os.environ.get("FACTORY_OWNER") or "unknown"
     if not remote_has(p, base):
         if base != "job/" + issue:
             die("base branch %s does not exist on origin" % base)
@@ -380,7 +381,6 @@ def cmd_wt(a):
         cap_check()
         run([GIT, "worktree", "add", "--quiet", "-b", branch, path, "origin/" + base], cwd=p)
     run([GIT, "config", "branch.%s.factorybase" % branch, base], cwd=p)
-    owner = a[a.index("--owner") + 1] if "--owner" in a else os.environ.get("FACTORY_OWNER") or "unknown"
     with open(reg_path(repo, "%s-%s" % (issue, chunk)), "w") as f:
         json.dump({"repo": full, "issue": issue, "chunk": chunk, "branch": branch, "base": base,
                    "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "owner": owner,
@@ -762,6 +762,8 @@ CMDS = {"packet": cmd_packet, "wt": cmd_wt, "pr-open": cmd_pr_open, "ci-wait": c
         "merge-dev": cmd_merge_dev, "job-open": cmd_job_open, "release-pr": cmd_release_pr, "repo-check": cmd_repo_check}
 
 if __name__ == "__main__":
+    # SIGTERM skips `finally` by default; exit normally so builders.lock is released
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     name = os.environ.get("FACTORY_CMD") or (sys.argv[1] if len(sys.argv) > 1 else "")
     args = sys.argv[1:] if os.environ.get("FACTORY_CMD") else sys.argv[2:]
     if name not in CMDS:

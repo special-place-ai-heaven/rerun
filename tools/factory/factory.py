@@ -2,12 +2,16 @@
 """Factory scripts (Rob, 2026-11-10). One call replaces several tool calls.
 Commands: packet, wt, pr-open, ci-wait, risk, merge-dev, job-open, release-pr, repo-check.
 GitHub only through the gh/git wrappers; the token is never read or printed here."""
-import json, os, re, subprocess, sys, time, shutil, urllib.request
+import calendar, contextlib, json, os, re, signal, subprocess, sys, time, shutil, urllib.request
 
 GH, GIT = "/data/tools/bin/gh", "/data/tools/bin/git"
 OWNERS = ("special-place-ai-heaven", "special-place-administrator")
-WORK, REPOS, WT, STATE = "/data/work", "/data/work/repos", "/data/work/wt", "/data/work/state"
+WORK = os.environ.get("FACTORY_WORK", "/data/work")
+REPOS, WT, STATE = WORK + "/repos", WORK + "/wt", WORK + "/state"
 MAX_WORK_GB, MIN_FREE_GB, MAX_BUILDERS = 20, 30, 2
+MIN_FREE_MEM_GB, MEMINFO = 4, "/proc/meminfo"
+LOCK_WAIT_S, LOCK_STALE_S = 60, 900  # stale > the longest hold (`git worktree add`, run() timeout 300 s)
+WT_IDLE_HOURS = 48  # `wt sweep`: no new commit and no `wt new` for this long counts as idle
 QUEUE_LIMIT_S, SLICE_S = 30 * 60, 450
 PR_HEADS = ["## Done", "## Evidence", "## Not changed", "## Unsure", "## Open", "## Next owner and their done-test"]
 WF = r"\.github/(workflows|actions)/|\.github/(CODEOWNERS|dependabot\.yml)$"
@@ -172,6 +176,84 @@ def marker(repo, branch):
     return os.path.join(STATE, "green__%s__%s" % (repo, branch.replace("/", "_")))
 
 
+def reg_path(repo, d):
+    return os.path.join(STATE, "wt__%s__%s.json" % (repo, d))
+
+
+def reg_read(repo, d):
+    """The register record of worktree WT/<repo>/<d>, or {} for one made before the register existed."""
+    try:
+        with open(reg_path(repo, d)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def age_h(rec):
+    try:
+        return (time.time() - calendar.timegm(time.strptime(rec["created"], "%Y-%m-%dT%H:%M:%SZ"))) / 3600
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def avail_mem_gb():
+    """MemAvailable in GB, or None where /proc/meminfo or the line does not exist (the check is skipped, not failed)."""
+    try:
+        with open(MEMINFO) as f:
+            for l in f:
+                if l.startswith("MemAvailable:"):
+                    return int(l.split()[1]) / 1048576
+    except OSError:
+        pass
+    return None
+
+
+@contextlib.contextmanager
+def builder_lock():
+    """Exclusive-create lock file (portable, no fcntl) around counting builders and the change that adds one."""
+    lk, end = os.path.join(STATE, "builders.lock"), time.time() + LOCK_WAIT_S
+    while True:
+        try:
+            fd = os.open(lk, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            bk = lk + ".break"
+            try:
+                if time.time() - os.path.getmtime(lk) > LOCK_STALE_S:
+                    os.close(os.open(bk, os.O_CREAT | os.O_EXCL | os.O_WRONLY))  # one breaker at a time
+                    try:
+                        if time.time() - os.path.getmtime(lk) > LOCK_STALE_S:  # recheck: another breaker may have taken a fresh lock since
+                            os.remove(lk)
+                    finally:
+                        os.remove(bk)
+                    continue
+            except FileExistsError:  # another caller is breaking it: wait; clear a bk left by a breaker that crashed mid-break
+                # shortcut: removing a stale bk has no guard of its own; the race needs a crash inside the break step first, so rare
+                with contextlib.suppress(OSError):
+                    if time.time() - os.path.getmtime(bk) > LOCK_STALE_S:
+                        os.remove(bk)
+            except OSError:
+                continue  # released between the open and the check
+            if time.time() > end:
+                die("another `wt new` or `pr-open --fix` holds %s for over %d s. Try again; if it stays, tell @boss." % (lk, LOCK_WAIT_S))
+            time.sleep(0.2)
+    os.write(fd, ("%d %d\n" % (os.getpid(), time.time())).encode())
+    os.close(fd)
+    try:
+        yield
+    finally:
+        try:
+            os.remove(lk)
+        except OSError:
+            pass
+
+
+def cap_check():
+    active = [(r, d) for r, d, p in wt_dirs() if not os.path.exists(marker(r, run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=p, check=False).stdout.strip()))]
+    if len(active) >= MAX_BUILDERS:
+        die("%d builders are already active (%s). At most %d at once. Return BLOCKED to @boss." % (len(active), ", ".join("/".join(x) for x in active), MAX_BUILDERS))
+
+
 def ensure_clone(full):
     p = os.path.join(REPOS, short(full))
     if not os.path.isdir(os.path.join(p, ".git")):
@@ -184,16 +266,63 @@ def remote_has(p, br):
     return run([GIT, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/" + br], cwd=p, check=False).returncode == 0
 
 
+def on_remote(p, sha):
+    return bool(run([GIT, "for-each-ref", "--contains", sha, "refs/remotes/origin"], cwd=p).stdout.strip())
+
+
+def unsaved(p, path, branch):
+    """Tips of the worktree and its branch that are on no remote branch, or None when origin cannot be fetched."""
+    # --prune: a tracking ref of a branch deleted on GitHub must not count as proof
+    if run([GIT, "fetch", "--quiet", "--prune", "origin"], cwd=p, check=False).returncode:
+        return None
+    tips = {run([GIT, "rev-parse", "--verify", "--quiet", ref], cwd=c, check=False).stdout.strip()
+            for c, ref in ((path, "HEAD"), (p, "refs/heads/" + branch)) if os.path.isdir(c)} - {""}
+    return [sha for sha in sorted(tips) if not on_remote(p, sha)]
+
+
+def wt_save(p, path, branch):
+    """Die (nothing deleted) unless every commit of the worktree and its branch is on a remote branch.
+    Unpushed commits go to rescue/<branch>-<sha8> first. Uncommitted changes refuse: pushing them could publish stray files."""
+    if os.path.isdir(path) and run([GIT, "status", "--porcelain"], cwd=path).stdout.strip():
+        die("%s has uncommitted changes. Commit and push them, or remove them yourself, then `wt done` again. Nothing deleted." % path)
+    left = unsaved(p, path, branch)
+    if left is None:
+        die("cannot fetch origin, so cannot prove the commits of %s are saved. Nothing deleted." % branch)
+    for sha in left:
+        rb = "rescue/%s-%s" % (branch, sha[:8])
+        run([GIT, "push", "--quiet", "origin", "%s:refs/heads/%s" % (sha, rb)], cwd=p, check=False)
+        if not on_remote(p, sha):
+            die("%s has commits on no remote branch (%s) and the push to %s failed. Nothing deleted." % (branch, sha[:8], rb))
+        print("RESCUED unpushed commits of %s to origin/%s" % (branch, rb))
+
+
+def unlink_links(d):
+    """Remove symlinks and junctions under d without entering them, so removing d cannot empty their targets."""
+    for e in os.scandir(d):
+        if e.is_symlink() or getattr(os.path, "isjunction", lambda _: False)(e.path):
+            try:
+                os.unlink(e.path)
+            except OSError:
+                os.rmdir(e.path)  # a directory symlink or junction on Windows
+        elif e.is_dir():
+            unlink_links(e.path)
+
+
 def cmd_wt(a):
-    if not a or a[0] not in ("new", "done", "list"):
-        die("usage: wt new <repo> <issue> <chunk> [--base BRANCH] | wt done <repo> <issue> <chunk> | wt list")
+    if not a or a[0] not in ("new", "done", "list", "sweep"):
+        die("usage: wt new <repo> <issue> <chunk> [--base BRANCH] [--owner NAME] | wt done <repo> <issue> <chunk> | wt list | wt sweep [--apply]")
+    if a[0] == "sweep":
+        return wt_sweep("--apply" in a)
     if a[0] == "list":
         act = 0
         for r, d, p in wt_dirs():
             br = run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=p, check=False).stdout.strip()
             g = os.path.exists(marker(r, br))
             act += 0 if g else 1
-            print("%s/%s  branch %s  %.2f GB  %s" % (r, d, br, du_gb(p), "CI green, waits for merge" if g else "ACTIVE builder"))
+            rec = reg_read(r, d)
+            h = age_h(rec)
+            print("%s/%s  branch %s  %.2f GB  owner %s  age %s  %s" % (r, d, br, du_gb(p), rec.get("owner", "unknown"),
+                                                                     "?" if h is None else "%dh" % h, "CI green, waits for merge" if g else "ACTIVE builder"))
         st = shutil.disk_usage("/data")
         print("active builders: %d of %d | /data/work %.1f of %d GB | /data free %.0f GB (floor %d)" % (act, MAX_BUILDERS, du_gb(WORK), MAX_WORK_GB, st.free / 2**30, MIN_FREE_GB))
         return
@@ -207,14 +336,18 @@ def cmd_wt(a):
     branch = "chunk/%s-%s" % (issue, chunk)
     if a[0] == "done":
         p = os.path.join(REPOS, repo)
+        wt_save(p, path, branch)
         if os.path.isdir(path):
+            unlink_links(path)
+            # --force only because unlinking a committed symlink dirties the tree; wt_save proved the work is saved
             run([GIT, "worktree", "remove", "--force", path], cwd=p)
         run([GIT, "worktree", "prune"], cwd=p, check=False)
-        run([GIT, "branch", "-D", branch], cwd=p, check=False)
-        try:
-            os.remove(marker(repo, branch))
-        except OSError:
-            pass
+        run([GIT, "branch", "-D", branch], cwd=p, check=False)  # -D is safe: wt_save proved its commits are on a remote branch
+        for f in (marker(repo, branch), reg_path(repo, "%s-%s" % (issue, chunk))):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
         print("removed worktree %s and local branch %s" % (path, branch))
         return
     if os.path.isdir(path):
@@ -223,15 +356,17 @@ def cmd_wt(a):
     st = shutil.disk_usage("/data")
     if st.free / 2**30 < MIN_FREE_GB:
         die("/data has %.0f GB free, floor is %d GB. Tell @boss." % (st.free / 2**30, MIN_FREE_GB))
+    mem = avail_mem_gb()
+    if mem is not None and mem < MIN_FREE_MEM_GB:
+        die("%.1f GB of memory available, floor is %d GB. Tell @boss." % (mem, MIN_FREE_MEM_GB))
     if du_gb(WORK) > MAX_WORK_GB:
         die("/data/work is over %d GB. Tell @boss; old worktrees need `wt done`." % MAX_WORK_GB)
-    active = [(r, d) for r, d, p in wt_dirs() if not os.path.exists(marker(r, run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=p, check=False).stdout.strip()))]
-    if len(active) >= MAX_BUILDERS:
-        die("%d builders are already active (%s). At most %d at once. Return BLOCKED to @boss." % (len(active), ", ".join("/".join(x) for x in active), MAX_BUILDERS))
+    cap_check()  # early refusal before any fetch or push; repeated under the lock below
     p = ensure_clone(full)
     info = api("repos/%s" % full)
     default = info["default_branch"]
     base = a[a.index("--base") + 1] if "--base" in a else ("dev" if remote_has(p, "dev") else "job/" + issue)
+    owner = a[a.index("--owner") + 1] if "--owner" in a else os.environ.get("FACTORY_OWNER") or "unknown"
     if not remote_has(p, base):
         if base != "job/" + issue:
             die("base branch %s does not exist on origin" % base)
@@ -239,8 +374,17 @@ def cmd_wt(a):
         run([GIT, "fetch", "--quiet", "origin"], cwd=p)
         print("created job branch %s from %s" % (base, default))
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    run([GIT, "worktree", "add", "--quiet", "-b", branch, path, "origin/" + base], cwd=p)
+    with builder_lock():  # count and create together, so two calls cannot both take the last slot
+        if os.path.isdir(path):
+            print("EXISTS %s (branch %s). Work there, or `wt done` first." % (path, branch))
+            return
+        cap_check()
+        run([GIT, "worktree", "add", "--quiet", "-b", branch, path, "origin/" + base], cwd=p)
     run([GIT, "config", "branch.%s.factorybase" % branch, base], cwd=p)
+    with open(reg_path(repo, "%s-%s" % (issue, chunk)), "w") as f:
+        json.dump({"repo": full, "issue": issue, "chunk": chunk, "branch": branch, "base": base,
+                   "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "owner": owner,
+                   "run": os.environ.get("FACTORY_RUN") or "unknown"}, f)
     ex = os.path.join(p, ".git", "info", "exclude")
     if ".symforge" not in open(ex).read():
         open(ex, "a").write("\n.symforge/\n.symforge-knowledge.toml\n")
@@ -248,6 +392,69 @@ def cmd_wt(a):
     print("WORKTREE %s\nbranch %s (from origin/%s, fresh)\nrepo %s | job issue #%s | chunk %s" % (path, branch, base, full, issue, chunk))
     print("build and test notes: %s" % (", ".join(notes) or "none in repo"))
     print("Next: edit here, quick checks only (lint, type check, named test files), commit, then `pr-open`.")
+
+
+def pr_lookup(full, branch):
+    """PRs with head `branch` as [{number, state OPEN|CLOSED|MERGED, headRefOid}], or None when GitHub cannot be asked."""
+    r = run([GH, "pr", "list", "-R", full, "--head", branch, "--state", "all", "--limit", "20", "--json", "number,state,headRefOid"], check=False)
+    try:
+        return None if r.returncode else json.loads(r.stdout or "[]")
+    except ValueError:
+        return None
+
+
+def sweep_verdict(full, r, d, path):
+    """(KEEP|REMOVE|RESCUE, reason, PRs of the branch) for worktree WT/<r>/<d>. Anything unclear is KEEP."""
+    if not re.fullmatch(r"\d+-[a-z0-9]{1,12}", d):
+        return "KEEP", "not made by `wt new`", []
+    branch = "chunk/" + d
+    head = run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=path, check=False).stdout.strip()
+    if head != branch:
+        return "KEEP", "on branch %s, not %s" % (head, branch), []
+    dirty = bool(run([GIT, "status", "--porcelain"], cwd=path, check=False).stdout.strip())
+    left, prs = unsaved(os.path.join(REPOS, r), path, branch), pr_lookup(full, branch)
+    if left is None or prs is None:
+        return "KEEP", "cannot reach origin or GitHub, so cannot prove anything", []
+    if any(x.get("state", "").upper() == "OPEN" for x in prs):
+        return "KEEP", "PR #%s open" % ", #".join(str(x["number"]) for x in prs if x.get("state", "").upper() == "OPEN"), prs
+    sha = run([GIT, "rev-parse", "HEAD"], cwd=path).stdout.strip()
+    done = next((x for x in prs if x.get("headRefOid") == sha and x.get("state", "").upper() in ("MERGED", "CLOSED")), None)  # head must match: branch names are reused
+    if done and not left and not dirty:
+        return "REMOVE", "PR #%s %s, nothing unpushed" % (done["number"], done["state"].lower()), prs
+    h = age_h(reg_read(r, d))
+    last = max(int(run([GIT, "log", "-1", "--format=%ct", "HEAD"], cwd=path).stdout.strip() or 0), 0 if h is None else time.time() - h * 3600)
+    idle = (time.time() - last) / 3600
+    work = ", ".join(x for x in ("%d unpushed commit tip(s)" % len(left) if left else "", "uncommitted changes" if dirty else "") if x)
+    if work and idle >= WT_IDLE_HOURS:
+        # uncommitted changes make `wt done` refuse (KEPT): only a human may commit or drop them
+        return "RESCUE", "idle %dh, %s, no open PR" % (idle, work), prs
+    return "KEEP", "active: idle %dh, %s" % (idle, work or "no merged or closed PR"), prs
+
+
+def wt_sweep(apply):
+    """Dry run unless apply. REMOVE and RESCUE go through `wt done`, which saves unpushed commits or refuses."""
+    n = {"KEEP": 0, "REMOVE": 0, "RESCUE": 0}
+    for r, d, path in wt_dirs():
+        full = reg_read(r, d).get("repo") or repo_full(r)  # shortcut: a worktree older than the register is assumed under OWNERS[0]
+        verdict, why, prs = sweep_verdict(full, r, d, path)
+        n[verdict] += 1
+        print("%-6s %s/%s  %s" % (verdict, r, d, why))
+        if not apply or verdict == "KEEP":
+            continue
+        try:
+            cmd_wt(["done", full] + d.split("-", 1))
+        except SystemExit:
+            print("KEPT %s/%s: `wt done` refused (see above), nothing deleted." % (r, d))
+            continue
+        nums = {str(x["number"]) for x in prs if x.get("state", "").upper() != "OPEN"}
+        for sd, pat in ((STATE, r"ciwait__%s__(\d+)__[0-9a-f]+\.json"), (os.path.join(STATE, "gate"), r"%s-(\d+)-[0-9a-f]+\.json")):
+            for f in sorted(os.listdir(sd)) if os.path.isdir(sd) else []:
+                m = re.fullmatch(pat % re.escape(r), f)
+                if m and m.group(1) in nums:
+                    os.remove(os.path.join(sd, f))
+                    print("deleted stale state %s" % f)
+    print("sweep: %d KEEP, %d REMOVE, %d RESCUE | %s" % (n["KEEP"], n["REMOVE"], n["RESCUE"],
+                                                     "applied" if apply else "dry run, nothing changed. `wt sweep --apply` acts on REMOVE and RESCUE"))
 
 
 def wt_context():
@@ -292,11 +499,14 @@ def cmd_pr_open(a):
     if ex:
         if "--fix" not in a:
             die("PR already open: %s. To push a fix for red CI use `pr-open --fix`." % ex[0]["url"])
+        if os.path.exists(marker(short(full), branch)):
+            with builder_lock():  # a green worktree turns active again: same cap as `wt new`, checked before the push
+                cap_check()
+                try:
+                    os.remove(marker(short(full), branch))
+                except OSError:
+                    pass
         run([GIT, "push", "--quiet", "origin", branch], cwd=top)
-        try:
-            os.remove(marker(short(full), branch))
-        except OSError:
-            pass
         print("PUSHED fix to %s\nPR %s\nNext: `ci-wait %s %s`" % (branch, ex[0]["url"], short(full), ex[0]["number"]))
         return
     if "--title" not in a or "--body-file" not in a:
@@ -468,7 +678,10 @@ def cmd_merge_dev(a):
     print("MERGED %s#%s into %s as %s | head %s | remote branch %s deleted" % (full, n, base, (m.get("merge_commit_sha") or "?")[:8], pr["head"]["sha"][:8], head))
     mm = re.fullmatch(r"chunk/(\d+)-([a-z0-9]+)", head)
     if mm and os.path.isdir(os.path.join(WT, short(full), "%s-%s" % mm.groups())):
-        cmd_wt(["done", full, mm.group(1), mm.group(2)])
+        try:
+            cmd_wt(["done", full, mm.group(1), mm.group(2)])
+        except SystemExit:
+            print("KEPT worktree %s/%s-%s: the merge stands, clean the worktree up and run `wt done` again." % (short(full), mm.group(1), mm.group(2)))
 
 
 # ---------- job-open / release-pr
@@ -549,6 +762,8 @@ CMDS = {"packet": cmd_packet, "wt": cmd_wt, "pr-open": cmd_pr_open, "ci-wait": c
         "merge-dev": cmd_merge_dev, "job-open": cmd_job_open, "release-pr": cmd_release_pr, "repo-check": cmd_repo_check}
 
 if __name__ == "__main__":
+    # SIGTERM skips `finally` by default; exit normally so builders.lock is released
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     name = os.environ.get("FACTORY_CMD") or (sys.argv[1] if len(sys.argv) > 1 else "")
     args = sys.argv[1:] if os.environ.get("FACTORY_CMD") else sys.argv[2:]
     if name not in CMDS:

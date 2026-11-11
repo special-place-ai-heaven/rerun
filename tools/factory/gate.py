@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Chunk proof gate (chunk A of factory-tooling). Reads evidence from GitHub itself; every receipt is bound
 to the PR's current head SHA. Exit 0 PASS, 3 FAIL, 1 could not answer (API error is never PASS).
-Commands: gate <repo> <PR>   |   review <repo> <PR> ACCEPT|REJECT --as NAME --note 'text'"""
+Commands: gate <repo> <PR>   |   review <repo> <PR> ACCEPT|REJECT --as NAME --note 'text' [--sha HEAD]"""
 import fnmatch, json, os, re, subprocess, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # own dir first: the installed copy and a clean clone both find factory.py beside gate.py
 import factory as F
@@ -367,15 +367,15 @@ def gate(repo, n):
     print(head_line)
     for k, v in res.items():
         print("%s %s %s" % (k, "PASS" if v["ok"] else "FAIL", v["receipt"]))
-    os.makedirs("/data/work/state/gate", exist_ok=True)
+    os.makedirs(F.STATE + "/gate", exist_ok=True)
     json.dump({"repo": full, "pr": int(n), "head": head, "verdict": "FAIL" if failed else "PASS", "checks": res},
-              open("/data/work/state/gate/%s-%s-%s.json" % (F.short(full), n, head), "w"), indent=1)
+              open(F.STATE + "/gate/%s-%s-%s.json" % (F.short(full), n, head), "w"), indent=1)
     return 3 if failed else 0
 
 
 def review(a):
     if len(a) < 3 or a[2] not in ("ACCEPT", "REJECT") or "--as" not in a or "--note" not in a:
-        print("usage: review <repo> <PR> ACCEPT|REJECT --as <NAME> --note '<text>'")
+        print("usage: review <repo> <PR> ACCEPT|REJECT --as <NAME> --note '<text>' [--sha <head commit you read>]")
         return 2
     full, n = F.repo_full(a[0]), a[1].lstrip("#")
     name = a[a.index("--as") + 1].upper()
@@ -383,7 +383,16 @@ def review(a):
     if not re.fullmatch(r"[A-Z][A-Z0-9_-]*", name):
         print("--as must be a name like LINUS, BRUCE")
         return 2
+    read = None
+    if "--sha" in a:
+        read = (a[a.index("--sha") + 1:] or [""])[0].lower()
+        if not re.fullmatch(r"[0-9a-f]{7,40}", read):
+            print("--sha must be the 7 to 40 hex characters of the head commit you read")
+            return 2
     pr = gh_json("repos/%s/pulls/%s" % (full, n))
+    if read and not pr["head"]["sha"].startswith(read):
+        print("REFUSED: PR head is now %s, you read %s. Read the new head and review again. Nothing posted." % (pr["head"]["sha"][:8], read[:8]))
+        return 2
     s8 = pr["head"]["sha"][:8]
     body = "Review %s @%s: %s %s @%s: %s" % (a[2], s8, name, a[2], s8, note)
     r = subprocess.run([GH, "pr", "comment", n, "-R", full, "--body", body], capture_output=True, text=True)

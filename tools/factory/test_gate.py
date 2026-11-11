@@ -1,4 +1,5 @@
-import os, re, sys, unittest
+import contextlib, io, os, re, subprocess, sys, unittest
+from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate as G
 
@@ -69,6 +70,46 @@ class PythonGate(unittest.TestCase):
     def test_done_test_python_file(self):
         self.assertTrue(G.same("tests/test_m.py::C::test_a", "tests/test_m.py"))
         self.assertFalse(G.same("tests/test_mm.py::C::test_a", "tests/test_m.py"))
+
+
+class ReviewSha(unittest.TestCase):
+    """G7: review --sha refuses to post when the PR head is not the commit the reviewer read."""
+    HEAD = "abcdef0123456789" + "0" * 24
+
+    def review(self, *extra):
+        posted, out = [], io.StringIO()
+
+        def fake_run(cmd, *a, **k):
+            posted.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, "https://github.com/o/r/pull/9#issuecomment-1\n", "")
+        with mock.patch.object(G, "gh_json", lambda path, **k: {"head": {"sha": self.HEAD}}), \
+                mock.patch.object(G.subprocess, "run", fake_run), contextlib.redirect_stdout(out):
+            code = G.review(["rerun", "9", "ACCEPT", "--as", "linus", "--note", "looks fine"] + list(extra))
+        return code, out.getvalue(), [c[c.index("--body") + 1] for c in posted]
+
+    def test_without_sha_posts_as_before(self):
+        code, out, bodies = self.review()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(bodies, ["Review ACCEPT @abcdef01: LINUS ACCEPT @abcdef01: looks fine"])
+        self.assertTrue(G.REVIEW_RE.match(bodies[0]))
+
+    def test_matching_sha_posts(self):
+        for sha in (self.HEAD, self.HEAD[:8], self.HEAD[:7].upper()):
+            code, out, bodies = self.review("--sha", sha)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(bodies, ["Review ACCEPT @abcdef01: LINUS ACCEPT @abcdef01: looks fine"])
+
+    def test_moved_head_refuses_and_posts_nothing(self):
+        code, out, bodies = self.review("--sha", "1234567890abcdef")
+        self.assertNotEqual(code, 0)
+        self.assertIn("REFUSED", out)
+        self.assertEqual(bodies, [])
+
+    def test_too_short_or_not_hex_sha_refuses(self):
+        for sha in ("", "a", "abcdef", "abcdefg1"):
+            code, out, bodies = self.review("--sha", sha)
+            self.assertNotEqual(code, 0, sha)
+            self.assertEqual(bodies, [], sha)
 
 
 if __name__ == "__main__":

@@ -105,7 +105,10 @@ class Store:
 
     def refires(self, job, chunk, stage):
         """Number of refires of this chunk (0 = fired once or never): the one counter, ready_chunks.attempts."""
-        return self.attempts(job, chunk)
+        if chunk:
+            return self.attempts(job, chunk)
+        r = self.db.execute("SELECT MAX(refire) FROM fires WHERE job=? AND chunk='' AND stage=?", (job, stage)).fetchone()
+        return r[0] or 0  # plain stages share chunk '': count per stage
 
     def resume(self, job):
         """What a restarted runner needs: pending intents, running runs, last fire, saved kv."""
@@ -174,7 +177,9 @@ class Store:
 
     def add_ready(self, job, chunk, paths=(), builder="", deps=(), at=None):
         """Ready-chunk queue: add a chunk (idempotent per job/chunk)."""
-        self.db.execute("INSERT OR IGNORE INTO ready_chunks(job,chunk,builder,paths,deps,added_at) VALUES(?,?,?,?,?,?)",
+        self.db.execute("INSERT INTO ready_chunks(job,chunk,builder,paths,deps,added_at) VALUES(?,?,?,?,?,?) "
+                        "ON CONFLICT(job,chunk) DO UPDATE SET builder=excluded.builder, paths=excluded.paths, "
+                        "deps=excluded.deps, state='ready' WHERE state='seen'",
                         (job, chunk, builder, json.dumps(list(paths)), json.dumps(list(deps)), at or now()))
 
     def _ready(self, r):

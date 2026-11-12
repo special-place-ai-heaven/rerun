@@ -317,6 +317,12 @@ def gate(repo, n):
 
     # 4 REVIEWS
     need, stop = {"LINUS"}, []
+    builder = (fld.get("builder") or "").strip().lower() or None
+    roster_err, ro = None, None
+    try:
+        ro = F.base_roster(full)  # read at dev (fallback: default branch), never at the PR base or head
+    except F.RosterError as e:
+        roster_err = str(e)
     for f in files:
         fn = f["filename"]
         test_only = re.search(r"\.spec\.ts$|\.test\.[jt]sx?$|(^|/)tests?/|__tests__|\.md$", fn)
@@ -326,19 +332,28 @@ def gate(repo, n):
                     stop.append(fn)
                 else:
                     need.add(who)
+    if ro:
+        import roster as R
+        need = R.required(ro, [f["filename"] for f in files], builder)
     if len(files) > 25 or lines > 1200:
         need.add("ADA")
-    verdict = {}
+    verdict, refused = {}, []
     for cm in sorted(gh_json("repos/%s/issues/%s/comments?per_page=100" % (full, n), paginate=True), key=lambda c: c["created_at"]):
         mm = REVIEW_RE.match(cm.get("body") or "")
         if mm and mm.group(2) == s8:
+            if builder and mm.group(3).lower() == builder and mm.group(4) == "ACCEPT":
+                refused.append(mm.group(3).upper())
+                continue
             verdict[mm.group(3).upper()] = (mm.group(4), cm["html_url"])
     bad = sorted(w for w in need if verdict.get(w, ("", ""))[0] != "ACCEPT")
-    if stop:
+    if roster_err:
+        put("REVIEWS", False, "roster unreadable, failing closed: " + roster_err)
+    elif stop:
         put("REVIEWS", False, "STOP: workflow or GitHub settings file touched (Rob only): " + ", ".join(stop[:3]))
     else:
       put("REVIEWS", not bad, ("%s ACCEPT @%s | %s" % (", ".join(sorted(need)), s8, " ".join(verdict[w][1] for w in sorted(need)))) if not bad else
-        "need ACCEPT @%s from: %s (have: %s)" % (s8, ", ".join(bad), ", ".join("%s %s" % (k, v[0]) for k, v in verdict.items()) or "none on this head"))
+        "need ACCEPT @%s from: %s (have: %s)%s" % (s8, ", ".join(bad), ", ".join("%s %s" % (k, v[0]) for k, v in verdict.items()) or "none on this head",
+                                                    "; ACCEPT by builder %s refused" % ", ".join(sorted(set(refused))) if refused else ""))
 
     # 5 LIMITS
     mx = int(re.sub(r"\D", "", fld.get("max-lines", "")) or 800)

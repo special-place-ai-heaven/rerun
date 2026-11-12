@@ -114,3 +114,109 @@ class ReviewSha(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+H = "abcdef0123456789abcdef0123456789abcdef01"
+S8 = H[:8]
+
+
+def _run_gate(files, comments, roster, builder="code"):
+    """Run G.gate on a fake PR (base branch job/78); returns the REVIEWS line."""
+    import tempfile
+    calls = []
+
+    def fake(path, paginate=False, jq=".[]"):
+        calls.append(path)
+        p = path.split("?")[0]
+        if p.endswith("/pulls/5"):
+            return {"head": {"sha": H, "ref": "chunk/78-O2"}, "base": {"ref": "job/78"}, "body": "Job: special-place-ai-heaven/rerun#78, chunk O2"}
+        if p.endswith("/pulls/5/files"):
+            return [{"filename": f, "status": "modified", "additions": 1, "deletions": 0} for f in files]
+        if p.endswith("/pulls/5/commits"):
+            return []
+        if p.endswith("/issues/78"):
+            return {"body": "- [ ] O2. x | builder: %s | done-test: t | max-lines: 300" % builder}
+        if p.endswith("/issues/5/comments"):
+            return [{"created_at": "2026-11-12T10:0%d" % i, "html_url": "u/%d" % i, "body": "Review ACCEPT @%s: %s ACCEPT ok" % (S8, who)} for i, who in enumerate(comments)]
+        return {"sha": H}
+
+    out = io.StringIO()
+    with tempfile.TemporaryDirectory() as td, mock.patch.object(G, "gh_json", fake), mock.patch.object(G, "head_checks", lambda *a: []), \
+            mock.patch.object(G.F, "STATE", td), mock.patch.object(G.F, "base_roster", roster), contextlib.redirect_stdout(out):
+        G.gate("special-place-ai-heaven/rerun", "5")
+    return next(l for l in out.getvalue().splitlines() if l.startswith("REVIEWS ")), calls
+
+
+def _real_roster(*a):
+    import roster as R
+    return R.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "roster.json")).read())
+
+
+class TestGateRoster(unittest.TestCase):
+    def test_pr_editing_roster_judged_by_base(self):
+        # the head's roster could drop BRUCE; only dev's roster is read, never a ref of the PR
+        line, calls = _run_gate(["tools/factory/roster.json"], ["LINUS"], _real_roster)
+        self.assertTrue(line.startswith("REVIEWS FAIL"), line)
+        self.assertIn("BRUCE", line)
+        line, calls = _run_gate(["tools/factory/roster.json"], ["LINUS", "BRUCE"], _real_roster)
+        self.assertTrue(line.startswith("REVIEWS PASS"), line)
+        self.assertFalse([c for c in calls if "roster.json" in c])
+
+    def test_reviews_use_base_roster_when_present(self):
+        files = ["apps/engine/src/config/env.ts"]
+        line, _ = _run_gate(files, ["MARGARET", "BRUCE"], _real_roster)
+        self.assertTrue(line.startswith("REVIEWS PASS"), line)
+        line, _ = _run_gate(files, ["LINUS"], _real_roster)
+        self.assertIn("MARGARET", line)
+        self.assertTrue(line.startswith("REVIEWS FAIL"), line)
+
+    def test_reviews_fall_back_to_rules_without_roster(self):
+        line, _ = _run_gate(["src/a.ts"], ["LINUS"], lambda *a: None)
+        self.assertTrue(line.startswith("REVIEWS PASS"), line)
+        line, _ = _run_gate(["src/a.ts"], [], lambda *a: None)
+        self.assertIn("LINUS", line)
+        self.assertTrue(line.startswith("REVIEWS FAIL"), line)
+
+    def test_builder_accept_refused(self):
+        line, _ = _run_gate(["src/a.ts"], ["CODE"], lambda *a: None, builder="code")
+        self.assertTrue(line.startswith("REVIEWS FAIL"), line)
+        self.assertIn("ACCEPT by builder CODE refused", line)
+        line, _ = _run_gate(["src/a.ts"], ["CODE"], _real_roster, builder="code")
+        self.assertIn("ACCEPT by builder CODE refused", line)
+
+    def test_base_roster_read_error_fails_closed(self):
+        def boom(*a):
+            raise G.F.RosterError("HTTP 500")
+        line, _ = _run_gate(["src/a.ts"], ["LINUS"], boom)
+        self.assertTrue(line.startswith("REVIEWS FAIL"), line)
+        self.assertIn("failing closed", line)
+
+    def _base(self, answers):
+        seen = []
+
+        def fake_run(cmd, **kw):
+            seen.append(" ".join(cmd))
+            rc, out, err = answers.pop(0)
+            return subprocess.CompletedProcess(cmd, rc, out, err)
+        with mock.patch.object(G.F.subprocess, "run", fake_run):
+            try:
+                return G.F.base_roster("special-place-ai-heaven/rerun"), seen
+            except G.F.RosterError as e:
+                return e, seen
+
+    def test_job_branch_roster_ignored(self):
+        text = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "roster.json")).read()
+        got, seen = self._base([(0, text, "")])
+        self.assertTrue(got["areas"])
+        self.assertTrue(seen[0].endswith("roster.json?ref=dev"), seen)
+        # no dev roster: the default branch is read, still never a job or PR branch
+        got, seen = self._base([(1, "", "HTTP 404 Not Found"), (0, "main\n", ""), (0, text, "")])
+        self.assertTrue(got["areas"])
+        self.assertTrue(seen[2].endswith("roster.json?ref=main"), seen)
+        self.assertFalse([s for s in seen if "job/" in s or "chunk/" in s])
+
+    def test_no_roster_anywhere_is_none_and_500_raises(self):
+        got, _ = self._base([(1, "", "HTTP 404"), (0, "main\n", ""), (1, "", "HTTP 404")])
+        self.assertIsNone(got)
+        got, _ = self._base([(1, "", "HTTP 500")])
+        self.assertIsInstance(got, G.F.RosterError)

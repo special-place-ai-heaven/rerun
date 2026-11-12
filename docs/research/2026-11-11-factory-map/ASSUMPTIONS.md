@@ -100,7 +100,7 @@ Rows N1 to N18 come from the Advisor's design (issue #42, comment 6818876939), r
 |---|---|---|---|
 | N1 | Every engine data path resolves under `RERUN_DATA_DIR` (default `~/.rerun`; `/data` in the image) | proven (code, one reader) | `config/paths.ts:5-77`, `config/env.ts:6`, `apps/engine/Dockerfile:33`, `ee15f5a` |
 | N2 | With no hub URL or no key, `sendNotification` returns without a request | proven (code, one reader) | `runtime/notify.ts:57-58`, `ee15f5a` |
-| N3 | `update.sh` runs `docker compose pull` and `docker compose up -d` with no project flag and no `--remove-orphans`, so it does not touch another compose project | code proven, effect unproven | `deploy/vps/update.sh:21,34`; P7 |
+| N3 | `update.sh` runs `docker compose pull` and `docker compose up -d` with no project flag and no `--remove-orphans`, so it does not touch another compose project. Since 2026-11-12 it ends with `docker image prune -f`, which removes untagged images that no container uses, of any project; tagged images, containers and volumes are not touched | code proven, effect unproven | `deploy/vps/update.sh:21,34,38`; P7 |
 | N4 | A non-privileged container with only its own volume and no docker socket cannot write the live engine's data | unproven | P1 |
 | N5 | The engine boots and serves with no hub and no model connection | unproven | P5 |
 | N6 | The engine builds from source inside the engine image (corepack present; native modules unknown) | partly proven (code: `Dockerfile:5-7`), the build unproven | T2 |

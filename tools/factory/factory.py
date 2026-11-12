@@ -65,6 +65,40 @@ def api(path, *args, paginate=False):
         except Exception:
             return None
 
+class RosterError(Exception):
+    pass
+
+
+def base_roster(full):
+    """The roster read at `dev` (fallback: the repo default branch), never at a PR base or head.
+    Returns None when the repo has no roster (404); raises RosterError on any other error or an invalid file."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import roster as R
+
+    def raw(path):
+        r = subprocess.run([GH, "api", "-H", "Accept: application/vnd.github.raw+json", path],
+                           capture_output=True, text=True, timeout=300)
+        if r.returncode == 0:
+            return r.stdout
+        if "404" in (r.stderr + r.stdout) or "Not Found" in (r.stderr + r.stdout):
+            return None
+        raise RosterError("cannot read roster (%s): %s" % (path, (r.stderr or r.stdout).strip()[-200:]))
+
+    where = "repos/%s/contents/tools/factory/roster.json?ref=" % full
+    text = raw(where + "dev")
+    if text is None:
+        r = subprocess.run([GH, "api", "repos/%s" % full, "--jq", ".default_branch"], capture_output=True, text=True, timeout=300)
+        if r.returncode or not r.stdout.strip():
+            raise RosterError("cannot read default branch of %s: %s" % (full, (r.stderr or r.stdout).strip()[-200:]))
+        text = raw(where + r.stdout.strip())
+    if text is None:
+        return None
+    try:
+        return R.load(text)
+    except ValueError as e:
+        raise RosterError(str(e))
+
+
 
 def repo_full(name):
     full = name if "/" in name else OWNERS[0] + "/" + name
@@ -613,6 +647,19 @@ def cmd_risk(a):
                 hit = True
         if not hit and not re.search(SAFE, fn, re.I):
             plain.append(fn)
+    try:
+        ro = base_roster(full)
+    except RosterError as e:
+        die("risk: " + str(e), 1)
+    if ro:
+        import roster as R
+        need = {k: v for k, v in need.items() if k == "STOP"}
+        plain = []
+        for f in files:
+            fn = f["filename"]
+            for area, _ in R.areas(ro, [fn]).items():
+                for who in R.required(ro, [fn]):
+                    need.setdefault(who, ["roster owner (area %s)" % area, []])[1].append(fn)
     tops = {f["filename"].split("/")[0] for f in files}
     lines = sum(f["additions"] + f["deletions"] for f in files)
     if len(files) > 25 or lines > 1200:
@@ -623,7 +670,7 @@ def cmd_risk(a):
     jev_note = ""
     if plain and not need and "--no-jev" not in a and (lines > 150 or len(plain) > 6):
         jev_note = jev_risk(pr["title"], [f["filename"] for f in files], need)
-    extra = [w for w in need if w != "STOP"]
+    extra = [w for w in need if w not in ("STOP", "LINUS")]
     for w in extra:
         print("EXTRA REVIEWER %s: %s%s" % (w, need[w][0], (" (" + ", ".join(need[w][1][:4]) + (" ..." if len(need[w][1]) > 4 else "") + ")") if need[w][1] else ""))
     if not extra and "STOP" not in need:

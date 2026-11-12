@@ -17,3 +17,4 @@ build/
 
 # The private cloud/ repository of Rerun Cloud, cloned inside the checkout by the team.
 /cloud/
+/.symforge/

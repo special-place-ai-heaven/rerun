@@ -379,6 +379,26 @@ class Runner:
             self.st.enqueue(job, "arbiter", chunk, {"job": job, "stage": "arbiter", "chunk": chunk, "why": why})
         return what
 
+    def fire_batch(self, batch):
+        """One builder run for a picked batch (batch.pick_batch). Each chunk gets its own lease and attempt; all leases
+        end together, 2 x run_limit_s from now (as start_ready). Returns the run id, None when no token."""
+        ent = self.by_stage.get("build")
+        token = ent and self.tokens.get("%s/%s" % (ent["agent"], ent["slug"]))
+        if not token or not batch:
+            return None
+        job, ids = batch[0]["job"], [c["chunk"] for c in batch]
+        exp = iso(self.clock() + 2 * self.cfg.get("run_limit_s", 600))
+        payload = {"job": job, "stage": "build", "chunks": ids}
+        fid = self.st.dequeue_to_intent(self.st.enqueue(job, "build", ids[0], payload), job, ids[0], "build",
+                                        ent.get("coworker", ""), ent["slug"], batch[0]["paths"], exp)
+        for c in batch[1:]:
+            self.st.grant_lease(job, c["chunk"], c["paths"], exp, attempt=self.st.attempts(job, c["chunk"]))
+        for c in ids:
+            self.st.set_ready_state(job, c, "running")
+        run_id, _ = T.fire(self.eng, ent["agent"], ent["slug"], token, payload)
+        self.st.fired(fid, run_id)
+        return run_id
+
     def start_ready(self):
         """Fire ready chunks (stage 'build') that readyq.eligible allows; running plain stages share the slot count."""
         ent = self.by_stage.get("build")

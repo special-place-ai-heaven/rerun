@@ -235,7 +235,10 @@ class Runner:
         rid = f["run_id"]
         if what == "RUNNING":
             return
-        if what == "DONE":
+        if what == "DONE" and self.lease_closed(f):
+            self.st.close_run(rid, "discarded", iso(self.clock()), tin, tout, "result under a closed lease")
+            log("run %s result discarded: lease of chunk %s closed" % (rid, f["chunk"]))
+        elif what == "DONE":
             self.st.close_run(rid, "done", iso(self.clock()), tin, tout)
         elif what == "CANCEL":
             self.eng.cancel(agent, rid)
@@ -294,6 +297,12 @@ class Runner:
                 continue
             self.st.fired(fid, run_id)
             log("fired stage %s of job %s: run %s" % (stage, job, run_id))
+
+    def lease_closed(self, f):
+        """True when the fire's attempt (its refire number) has a lease for its chunk and none of that attempt is open."""
+        ls = [l for l in self.st.db.execute("SELECT closed_at FROM leases WHERE job=? AND chunk=? AND attempt=?",
+                                            (f["job"], f["chunk"], f["refire"]))] if f["chunk"] else []
+        return bool(ls) and all(l[0] for l in ls)
 
     def sweep_leases(self):
         """Close an expired lease only after eng.cancel succeeded or the run row is terminal; a failed cancel keeps it open."""

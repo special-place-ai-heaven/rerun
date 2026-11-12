@@ -34,6 +34,16 @@ class BuildWiring(unittest.TestCase):
                 r.st.close()
         self.assertEqual(calls, ["checkout", "checkout", "apply ['a.py']", "testrun", "publish ['a.py']"])
 
+    def test_build_passes_ghclient_open_pr(self):
+        gh = NS(open_pr=lambda *a: None, get=lambda p: None, create_issue=lambda *a: None)
+        with tempfile.TemporaryDirectory() as d:
+            cfg = {"poll_s": 30, "run_limit_s": 600, "stall_s": 0, "token_file": os.path.join(d, "t.json"),
+                   "store_file": os.path.join(d, "l.db"),
+                   "triggers": [{"stage": "build", "coworker": "CODE", "agent": "ag1", "slug": "factory-build"}]}
+            r = R.build(cfg, Eng(), clock=lambda: T0, gh=gh)
+            r.st.close()
+        self.assertIs(r.open_pr, gh.open_pr)
+
 
 if __name__ == "__main__":
     unittest.main()

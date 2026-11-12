@@ -1,5 +1,5 @@
 """publish.py: commit the worktree, push factory/job-<issue> to origin, open the pull request (rerun#71 C6e).
-open_pr(title, head, base) is passed in; this module reads no token and knows no GitHub."""
+open_pr(title, head, base, body) is passed in; this module reads no token and knows no GitHub."""
 import subprocess
 
 
@@ -13,7 +13,7 @@ def _outside(worktree, paths):
     return [c for c in changed if not any(c == p or c.startswith(p + "/") for p in ok)]
 
 
-def publish(worktree, issue, title, base, open_pr, paths, remote="origin"):
+def publish(worktree, issue, title, base, open_pr, paths, remote="origin", body=""):
     """Commit only `paths` on factory/job-<issue>, push it, call open_pr. A changed or new file outside
     `paths` raises ValueError before anything is committed or pushed. Returns the pushed commit sha."""
     head = "factory/job-%s" % issue
@@ -25,5 +25,5 @@ def publish(worktree, issue, title, base, open_pr, paths, remote="origin"):
     if _git(worktree, "diff", "--cached", "--name-only"):
         _git(worktree, "commit", "-qm", title)
     _git(worktree, "push", "-q", remote, "%s:refs/heads/%s" % (head, head))
-    open_pr(title, head, base)
+    open_pr(title, head, base, body) if body else open_pr(title, head, base)
     return _git(worktree, "rev-parse", "HEAD")

@@ -9,7 +9,7 @@ import argparse, json, os, signal, subprocess, sys, tempfile, threading, time, u
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import applypatch as AP, batch as BT, checkout as CO, engine as E, factory as F, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T, wake
+import applypatch as AP, batch as BT, checkout as CO, engine as E, evidence as EV, factory as F, ghclient as GH, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T, wake
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -460,12 +460,14 @@ class Runner:
         return {"merged": merged, "busy": busy, "stages": stages, "leases": self.st.open_leases(),
                 "fired": self.st.fire_count(job), "cfg": self.cfg}
 
-def build(cfg=None, eng=None, clock=time.time):
+def build(cfg=None, eng=None, clock=time.time, gh=None):
+    """gh: the one GitHub client (ghclient.Client) for open_pr and issues; default made from cfg github_api / repo, token from GH_TOKEN."""
     cfg = load_runtime(cfg)
+    gh = gh or GH.Client(cfg.get("github_api", "https://api.github.com"), cfg.get("repo", "special-place-ai-heaven/rerun"))
     eng = eng or E.Engine()
     tokens = T.ensure_triggers(eng, cfg)
     st = S.Store(store_path(cfg))
-    return Runner(eng, st, cfg, tokens, clock)
+    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr)
 
 def run(r, stop, poll_s):
     log("started")

@@ -107,6 +107,10 @@ class Engine:
             raise EngineError("engine answered without a slug and token for the new trigger")
         return row
 
+    def set_trigger_model(self, agent_id, slug, model):
+        """Set the model of one trigger by the update route; the updated row."""
+        return self._call("PATCH", "/agents/%s/triggers/%s" % (_q(agent_id), _q(slug)), payload={"model": model})
+
     def fire_trigger(self, agent_id, slug, token, payload):
         """Fire a webhook trigger once: Bearer key plus the trigger token in the body, the payload as a JSON string.
         (runId, sessionId) from the 202 answer. NEVER retried: a timeout may still have started a run."""

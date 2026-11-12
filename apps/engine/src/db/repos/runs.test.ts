@@ -6,7 +6,7 @@ process.env.RERUN_DATA_DIR = mkdtempSync(resolve(tmpdir(), 'rerun-runs-'))
 process.env.RERUN_API_KEY = ''
 
 const { afterEach, describe, expect, it, vi } = await import('vitest')
-const { aggregateUsageByDay, bumpRunStep, cancelRun, failInterruptedRuns, failRun, finishRun, getRun, listRunsByAgent, setRunContext, startRun } = await import('./runs.js')
+const { aggregateUsageByDay, bumpRunStep, cancelRun, failInterruptedRuns, failRun, finishRun, getRun, listRunsByAgent, setRunContext, startRun, updateRunLive } = await import('./runs.js')
 
 afterEach(() => {
     vi.useRealTimers()
@@ -55,6 +55,21 @@ describe('run lifecycle', () => {
         })
         expect(run?.finishedAt).not.toBeNull()
         expect(JSON.parse(run!.usageJson!)).toEqual(usage)
+    })
+
+    it('writes live progress while running and never after the run settled', async () => {
+        await startRun('life', 's1', 'r-live')
+        await updateRunLive('life', 'r-live', { stepCount: 4, usage: { inputTokens: 9 } })
+        expect(await getRun('life', 'r-live')).toMatchObject({ status: 'running', stepCount: 4, inputTokens: 9, outputTokens: null })
+
+        await finishRun('life', 'r-live', { inputTokens: 10, outputTokens: 20 }, 5)
+        await updateRunLive('life', 'r-live', { stepCount: 99, usage: { inputTokens: 99 } })
+        expect(await getRun('life', 'r-live')).toMatchObject({ status: 'done', stepCount: 5, inputTokens: 10, outputTokens: 20 })
+
+        await startRun('life', 's1', 'r-live-failed')
+        await failRun('life', 'r-live-failed', 'boom')
+        await updateRunLive('life', 'r-live-failed', { stepCount: 7 })
+        expect(await getRun('life', 'r-live-failed')).toMatchObject({ status: 'error', stepCount: 0 })
     })
 
     it('folds the context occupancy into the usage json', async () => {

@@ -59,14 +59,14 @@ class RotateEngineKey(unittest.TestCase):
         body = "" if value is None else "printf '%%s\\n' '%s'\n" % value
         self.write("bin/openssl", '#!/bin/sh\nprintf "called\\n" >> "$FAKE_OPENSSL_LOG"\n' + body, 0o755)
 
-    def run_script(self, mode, answer=""):
+    def run_script(self, mode, answer="", wait_s="0"):
         sp = self.path("state.json")
         with open(sp, "w", encoding="utf-8") as f:
             json.dump(self.state, f)
         env = dict(os.environ, PATH=self.bin + os.pathsep + os.environ.get("PATH", ""),
                    FAKE_PYTHON=posix(sys.executable), FAKE_DOCKER_PY=posix(FAKE), FAKE_DOCKER_STATE=sp,
                    FAKE_OPENSSL_LOG=posix(self.path("openssl.log")), SUPABASE_DIR=posix(self.path("supabase")),
-                   ROTATE_POLL_S="0", ROTATE_WAIT_S="0")
+                   ROTATE_POLL_S="0", ROTATE_WAIT_S=wait_s)
         env.pop("SUPABASE_DB_CONTAINER", None)
         p = subprocess.run([SH, "deploy/vps/rotate-engine-key.sh", mode], cwd=self.tmp, input=answer.encode(),
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, timeout=300)
@@ -110,6 +110,7 @@ class RotateEngineKey(unittest.TestCase):
         self.assertEqual(self.ups(), [])
         self.assertFalse(self.exists(".env.engine-key-rotation"))
         for line in ("env-key acceptable=yes quoting=single", "db-access=socket", "db-tables-with-engine_api_key public.engine_pool",
+                     "db-triggers-on-engine_pool none", "db-publications-with-engine_pool none",
                      "db-rows-holding-current-key 1 (expect 1)", "db-rehearsal swapped (rolled back)", "running app engine",
                      "engine-no-key http=401",
                      "engine-current-key http=200", "app-current-key http=400", "record absent"):
@@ -121,6 +122,27 @@ class RotateEngineKey(unittest.TestCase):
         self.assertIn("db-access=password", self.out)
         self.assertIn("db-rows-holding-current-key 1", self.out)
         self.assertIn(["exec", "-i", "-e", "PGPASSWORD", "supabase-db"], [a[:5] for a in self.argvs()])
+
+    def test_check_shows_what_else_touches_the_row_names_only(self):
+        self.state["triggers"] = ["engine_pool_touch", "audit_2"]
+        self.state["publications"] = ["supabase_realtime"]
+        self.assertEqual(self.run_script("check"), 0, self.out)
+        self.assertIn("db-triggers-on-engine_pool engine_pool_touch,audit_2\n", self.out)
+        self.assertIn("db-publications-with-engine_pool supabase_realtime\n", self.out)
+        self.assertIn("info", [c.get("sql") for c in self.state["calls"]])
+        self.state["triggers"] = ["fine", "not a; name"]
+        self.assertEqual(self.run_script("check"), 0, self.out)
+        self.assertIn("db-triggers-on-engine_pool error\n", self.out)
+        self.assertNotIn("not a; name", self.out)
+
+    def test_the_fake_refuses_an_info_program_holding_a_key_or_a_copy(self):
+        sys.path.insert(0, os.path.dirname(FAKE))
+        self.addCleanup(sys.path.remove, os.path.dirname(FAKE))
+        import fake_docker
+        for text in ("-- rotate-engine-key: info\nselect '%s';\n" % OLD, "-- rotate-engine-key: info\ncopy k from stdin;\nx\n\\.\n"):
+            st = dict(self.state, calls=[{"argv": []}], violations=[])
+            self.assertEqual(fake_docker.sql(st, text)[0], 9)
+            self.assertEqual(len(st["violations"]), 1)
 
     def test_check_without_a_throwaway_key_skips_the_rehearsal(self):
         self.openssl(None)
@@ -147,6 +169,23 @@ class RotateEngineKey(unittest.TestCase):
         self.assertEqual(self.read(".env.engine-key-rotation"), ("PREVIOUS=%s\n" % OLD).encode())
         self.assertIn("rotate complete", self.out)
         self.assertNotIn("FAIL", self.out)
+        self.assertFalse(self.exists(".env.tmp"))
+
+    @unittest.skipIf(os.name == "nt", "no POSIX file modes on Windows")
+    def test_rotate_keeps_the_mode_of_env(self):
+        os.chmod(self.path(".env"), 0o640)
+        self.assertEqual(self.rotate(), 0, self.out)
+        self.assertEqual(os.stat(self.path(".env")).st_mode & 0o777, 0o640)
+        self.assertFalse(self.exists(".env.tmp"))
+
+    def test_rotate_waits_for_an_app_that_needs_a_few_polls(self):
+        self.state["app_slow"] = 3
+        self.assertEqual(self.run_script("rotate", "ROTATE\n", wait_s="60"), 0, self.out)
+        self.assertIn("verify app-new-key http=400 ok", self.out)
+        self.assertEqual(self.state["app_slow"], 0)
+        hub = [c for c in self.argvs() if "http://app:3000/api/hub" in c]
+        self.assertGreater(len(hub), 3 + 1)
+        self.assertIn("rotate complete", self.out)
 
     # 4
     def test_quoting_single_double_none_reads_the_same_key(self):
@@ -193,6 +232,28 @@ class RotateEngineKey(unittest.TestCase):
         self.assertEqual(self.keys(), [OLD])
         self.assertEqual(self.read(".env.engine-key-rotation"), ("PREVIOUS=%s\n" % OTHER).encode())
 
+    def test_a_change_whose_answer_was_lost_is_carried_through(self):
+        self.state["swap_reply_lost"] = True
+        self.assertEqual(self.rotate(), 0, self.out)
+        self.assertIn("its answer was lost", self.out)
+        self.assertEqual(self.keys(), [NEW])
+        self.assertEqual(self.env_value(), "'%s'" % NEW)
+        self.assertEqual(self.ups()[-1]["env_key"], NEW)
+        self.assertEqual(self.read(".env.engine-key-rotation"), ("PREVIOUS=%s\n" % OLD).encode())
+        self.assertIn("rotate complete", self.out)
+
+    def test_a_database_gone_after_the_stop_starts_nothing_and_keeps_the_record(self):
+        self.state["db_down_at_swap"] = True
+        before = self.read(".env")
+        self.assertEqual(self.rotate(), 1, self.out)
+        self.assertTrue(self.stopped())
+        self.assertIn("database state is unknown", self.out)
+        self.assertIn("left STOPPED", self.out)
+        self.assertEqual(self.ups(), [])
+        self.assertNotIn("engine", self.state["running"])
+        self.assertEqual(self.read(".env"), before)
+        self.assertEqual(self.read(".env.engine-key-rotation"), ("OLD=%s\nNEW=%s\n" % (OLD, NEW)).encode())
+
     # 6
     def test_minting_nothing_or_a_bad_value_stops_before_anything(self):
         for value in (None, "", "XYZ" * 22, "0123456789abcdef" * 3):
@@ -221,6 +282,9 @@ class RotateEngineKey(unittest.TestCase):
     def test_rollback_after_a_rotation_restores_the_old_key(self):
         self.assertEqual(self.rotate(), 0, self.out)
         self.assertEqual(self.run_script("rollback", "ROLLBACK\n"), 0, self.out)
+        warn = self.out.find("brings that exposure back")
+        self.assertGreaterEqual(warn, 0, self.out)
+        self.assertLess(warn, self.out.find("Type ROLLBACK to go on"))
         self.assertEqual(self.keys(), [OLD])
         self.assertEqual(self.env_value(), "'%s'" % OLD)
         self.assertEqual(self.state["engine_key"], OLD)
@@ -233,11 +297,36 @@ class RotateEngineKey(unittest.TestCase):
         self.assertFalse(self.stopped())
         self.assertEqual(self.read(".env"), before)
 
+    def test_finish_removes_a_finished_record_and_rollback_then_refuses(self):
+        self.assertEqual(self.rotate(), 0, self.out)
+        self.assertEqual(self.run_script("finish"), 0, self.out)
+        self.assertIn("rollback is no longer possible", self.out)
+        self.assertFalse(self.exists(".env.engine-key-rotation"))
+        self.assertEqual(self.run_script("rollback", "ROLLBACK\n"), 1, self.out)
+        self.assertIn("REFUSED", self.out)
+        self.assertEqual(self.keys(), [NEW])
+
+    def test_finish_without_a_finished_record_refuses(self):
+        self.assertEqual(self.run_script("finish"), 1, self.out)
+        self.assertIn("finish REFUSED", self.out)
+        self.assertFalse(self.exists(".env.engine-key-rotation"))
+        rec = ("OLD=%s\nNEW=%s\n" % (OLD, NEW))
+        self.write(".env.engine-key-rotation", rec)
+        self.assertEqual(self.run_script("finish"), 1, self.out)
+        self.assertIn("finish REFUSED", self.out)
+        self.assertEqual(self.read(".env.engine-key-rotation"), rec.encode())
+        self.assertEqual(self.state["calls"], [])
+
     # 9
     def test_engine_open_without_a_key_fails_and_keeps_the_record(self):
         self.state["engine_open"] = True
         self.assertEqual(self.rotate(), 1, self.out)
         self.assertIn("verify engine-no-key http=200 FAIL", self.out)
+        self.assertIn("App and engine are STOPPED", self.out)
+        self.assertNotIn("app", self.state["running"])
+        self.assertNotIn("engine", self.state["running"])
+        self.assertEqual(self.argvs()[-1], ["compose", "stop", "app", "engine"])
+        self.assertNotIn("verify engine-new-key", self.out)
         self.assertIn("rollback", self.out)
         self.assertEqual(self.read(".env.engine-key-rotation"), ("OLD=%s\nNEW=%s\n" % (OLD, NEW)).encode())
         # What the FAIL text tells the owner to do: rollback undoes the change in progress.

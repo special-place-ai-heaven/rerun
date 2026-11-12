@@ -6,6 +6,7 @@
 #                                                      (it runs the database step with a throwaway key and rolls it back)
 #   sudo sh deploy/vps/rotate-engine-key.sh rotate     new key in the database and .env, restart, verify
 #   sudo sh deploy/vps/rotate-engine-key.sh rollback   puts the previous key back the same way
+#   sudo sh deploy/vps/rotate-engine-key.sh finish     deletes the record of a finished rotation; rollback is then no longer possible
 # A rotation that stopped part-way is finished by running rotate again; it reuses the same new key.
 # How the key values travel: read from .env and from the record file .env.engine-key-rotation
 # (root-only, git-ignored) into shell variables; to the database only as COPY data on psql's standard
@@ -34,11 +35,14 @@ envkey() { sed -n 's/^RERUN_ENGINE_API_KEY=//p' .env 2>/dev/null | tail -n 1 | s
 ok_key() { case "$1" in ''|*[!A-Za-z0-9_.~+/=-]*) return 1 ;; esac; [ "${#1}" -ge 32 ]; }
 
 # Same writer as set-env.sh: the value goes in single quotes, read by awk from the environment.
+# .env.tmp is written under the umask 077 set above, given the owner and mode of .env (--reference is GNU
+# coreutils, which the server has) and renamed over .env in one step, so .env is never left half written.
 put() {
     case "$2" in *"'"*) echo "The value of $1 contains a single quote, which .env cannot hold. Nothing changed for it."; return 0 ;; esac
     K="$1" V="$2" awk 'BEGIN { k = ENVIRON["K"]; line = k "=\047" ENVIRON["V"] "\047" }
         $0 ~ "^" k "=" { if (!done) print line; done = 1; next } { print }
-        END { if (!done) print line }' .env > .env.tmp && cat .env.tmp > .env && rm -f .env.tmp
+        END { if (!done) print line }' .env > .env.tmp &&
+        chown --reference=.env .env.tmp && chmod --reference=.env .env.tmp && mv -f .env.tmp .env
 }
 
 # The record file: OLD= and NEW= while a swap is in progress, PREVIOUS= once it finished.
@@ -134,6 +138,25 @@ counts() {
     case "$ROWS_OLD$ROWS_NEW" in ''|*[!0-9]*) ROWS_OLD=error ROWS_NEW=error ;; esac
     case "$TABLES" in *[!A-Za-z0-9_.,]*) TABLES=error ;; esac
 }
+# Prints triggers|publications: what else fires on or copies public.engine_pool. No key goes in.
+sql_info() {
+    cat <<'SQL'
+-- rotate-engine-key: info
+select coalesce((select string_agg(tgname::text, ',' order by tgname::text) from pg_trigger
+        where tgrelid = 'public.engine_pool'::regclass and not tgisinternal), '')
+    || '|' || coalesce((select string_agg(pubname::text, ',' order by pubname::text) from pg_publication_tables
+        where schemaname = 'public' and tablename = 'engine_pool'), '');
+SQL
+}
+# Sets TRIGGERS PUBLICATIONS from the info program; names only, else "error".
+info() {
+    C=$(sql_info | db 2>/dev/null) || C=''
+    case "$C" in *'|'*) ;; *) C='error|error' ;; esac
+    TRIGGERS=${C%%|*}
+    PUBLICATIONS=${C#*|}
+    case "$TRIGGERS" in *[!A-Za-z0-9_,]*) TRIGGERS=error ;; esac
+    case "$PUBLICATIONS" in *[!A-Za-z0-9_,]*) PUBLICATIONS=error ;; esac
+}
 
 # HTTP code of a request made inside the engine container. With a key, the Bearer header goes on standard input.
 code() {
@@ -192,19 +215,32 @@ swap() {
     RES=$( { sql_swap swap commit | db; } 2>&1 ) && RC=0 || RC=$?
     case "$RES" in *"$KEY_FROM"*|*"$KEY_TO"*) RES='(message withheld: it held a key)' ;; esac
     if [ "$RC" != 0 ]; then
-        say "db-swap FAIL: the database is unchanged."
+        say "db-swap gave no clean answer (exit $RC); counting the rows to see whether the change went in."
         printf '%s\n' "$RES" | grep '^ERROR' | head -n 3 || true
-        say "db-swap: zero rows holding the old key most likely means the key in .env is quoted or written differently from the one in the database."
-        # Nothing changed, so the record goes back to what it was: a stale in-progress record would make
-        # rotate and rollback expect keys that are in neither place.
-        if [ -n "$KEY_REC_BEFORE" ]; then printf '%s\n' "$KEY_REC_BEFORE" > "$REC"; else rm -f "$REC"; fi
-        KEY_REC_BEFORE=''
-        say "record put back as it was before this run"
-        up "$KEY_FROM"
-        say "App and engine started again with the key they had. FAIL: nothing was rotated."
-        exit 1
+        RES=''
+        # The answer may be lost after the commit: the rows, not the exit code, say what happened.
+        counts
+        if [ "$ROWS_NEW" = 1 ] && [ "$ROWS_OLD" = 0 ]; then
+            say "db-swap swapped (the database holds the new key; its answer was lost)"
+        elif [ "$ROWS_OLD" = 1 ] && [ "$ROWS_NEW" = 0 ]; then
+            say "db-swap FAIL: the database is unchanged."
+            # Nothing changed, so the record goes back to what it was: a stale in-progress record would make
+            # rotate and rollback expect keys that are in neither place.
+            if [ -n "$KEY_REC_BEFORE" ]; then printf '%s\n' "$KEY_REC_BEFORE" > "$REC"; else rm -f "$REC"; fi
+            KEY_REC_BEFORE=''
+            say "record put back as it was before this run"
+            up "$KEY_FROM"
+            say "App and engine started again with the key they had. FAIL: nothing was rotated."
+            exit 1
+        else
+            KEY_REC_BEFORE=''
+            say "db-swap FAIL: the database state is unknown (rows-old=$ROWS_OLD rows-new=$ROWS_NEW). App and engine are left STOPPED."
+            stopped_help
+        fi
+    else
+        case "$RES" in *already*) say "db-swap already (the database held the new key)" ;; *) say "db-swap swapped" ;; esac
     fi
-    case "$RES" in *already*) say "db-swap already (the database held the new key)" ;; *) say "db-swap swapped" ;; esac
+    KEY_REC_BEFORE=''
     RES=''
 
     say "3/6 .env"
@@ -230,8 +266,23 @@ swap() {
 
     say "5/6 verify"
     FAILS=0
-    expect "verify engine-health" 200 "$(poll 200 '' http://localhost:3000/health)"
-    expect "verify engine-no-key" 401 "$(code '' http://localhost:3000/agents)"
+    HEALTH=$(poll 200 '' http://localhost:3000/health)
+    # The engine is reachable from outside the server: one that answers without a key is stopped before anything else.
+    NOKEY=$(code '' http://localhost:3000/agents)
+    case "$NOKEY" in
+        ''|000|401) ;;
+        *)
+            if docker compose stop app engine </dev/null; then
+                say "verify engine-no-key http=$NOKEY FAIL: the engine answered without a key. App and engine are STOPPED."
+            else
+                say "verify engine-no-key http=$NOKEY FAIL: the engine answered without a key and did not stop: run 'docker compose stop app engine' now."
+            fi
+            say "The record file $REC is kept. Fix why the engine answers without a key before '$ME rotate', or undo with '$ME rollback'."
+            stopped_help
+            ;;
+    esac
+    expect "verify engine-health" 200 "$HEALTH"
+    expect "verify engine-no-key" 401 "$NOKEY"
     expect "verify engine-new-key" 200 "$(code "$KEY_TO" http://localhost:3000/agents)"
     expect "verify engine-old-key" 401 "$(code "$KEY_FROM" http://localhost:3000/agents)"
     expect "verify app-new-key" 400 "$(poll 400 "$KEY_TO" -X POST http://app:3000/api/hub)"
@@ -261,6 +312,11 @@ check() {
     if ok_key "$KEY_CUR"; then KEYOK=yes; else KEYOK=no; fi
     say "env-key acceptable=$KEYOK quoting=${QUOTING:-no-line}"
     if pick_db; then say "db-access=$DBM"; else say "db-access FAIL: none of socket, local, password answered"; fi
+    if [ "$DBM" != none ]; then
+        info
+        say "db-triggers-on-engine_pool ${TRIGGERS:-none}"
+        say "db-publications-with-engine_pool ${PUBLICATIONS:-none}"
+    fi
     if [ "$DBM" != none ] && [ "$KEYOK" = yes ]; then
         KEY_FROM=$KEY_CUR
         KEY_TO=$KEY_CUR
@@ -292,12 +348,24 @@ check() {
     say "record $(recstate)"
 }
 
+# Deletes the record of a finished rotation, and only that: an in-progress record is what rotate and rollback need.
+finish() {
+    STATE=$(recstate)
+    if [ "$STATE" != finished ]; then
+        say "finish REFUSED: the record is $STATE, not finished. Nothing changed."
+        exit 1
+    fi
+    rm -f "$REC"
+    say "record removed: $REC is gone, so rollback is no longer possible"
+}
+
 MODE=${1:-}
 case "$MODE" in
     check) check; exit 0 ;;
+    finish) finish; exit 0 ;;
     rotate) WORD=ROTATE ;;
     rollback) WORD=ROLLBACK ;;
-    *) say "Usage: $ME check|rotate|rollback"; exit 2 ;;
+    *) say "Usage: $ME check|rotate|rollback|finish"; exit 2 ;;
 esac
 
 # Everything that can refuse comes before the record is written and anything is stopped.
@@ -357,6 +425,9 @@ if ! rehearse; then
     exit 1
 fi
 
+if [ "$MODE" = rollback ] && [ "$STATE" = finished ]; then
+    say "This puts back the key that was replaced. If it was replaced because it may have been seen, this brings that exposure back: rollback is for recovering from a rotation that went wrong."
+fi
 say "This stops the app and the engine for about a minute; any coworker run in progress fails."
 printf 'Type %s to go on: ' "$WORD"
 read -r ANSWER || ANSWER=''

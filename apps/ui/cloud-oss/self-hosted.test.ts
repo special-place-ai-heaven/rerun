@@ -45,13 +45,17 @@ describe('the self-hosted side of @rerun/cloud', () => {
     })
 })
 
+// Each test imports `./email` again after `vi.resetModules()`, and that first load of the mail and template
+// modules takes several seconds on a busy CI runner: it has hit the default 5 s limit more than once.
+const COLD_IMPORT = { timeout: 30_000 }
+
 describe('the email of a self-hosted install', () => {
     afterEach(() => {
         vi.unstubAllEnvs()
         vi.resetModules()
     })
 
-    it('goes out through its own Resend account once it has a key', async () => {
+    it('goes out through its own Resend account once it has a key', COLD_IMPORT, async () => {
         vi.stubEnv('RESEND_API_KEY', 're_test_key')
         const email = await import('./email')
         expect(email.EMAIL_DELIVERY).toBe(true)
@@ -63,7 +67,7 @@ describe('the email of a self-hosted install', () => {
         expect(DEFAULT_WHATSAPP_FROM).toBeNull()
     })
 
-    it('goes nowhere without one, so an invitation hands its link to whoever sent it', async () => {
+    it('goes nowhere without one, so an invitation hands its link to whoever sent it', COLD_IMPORT, async () => {
         vi.stubEnv('RESEND_API_KEY', '')
         const email = await import('./email')
         expect(email.EMAIL_DELIVERY).toBe(false)

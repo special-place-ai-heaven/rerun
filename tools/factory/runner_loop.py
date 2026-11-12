@@ -9,7 +9,7 @@ import argparse, json, os, signal, subprocess, sys, tempfile, threading, time, u
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import applypatch as AP, checkout as CO, engine as E, limits as L, publish as PB, readyq as RQ, store as S, testrun as TR, trigger as T
+import applypatch as AP, checkout as CO, engine as E, factory as F, limits as L, publish as PB, readyq as RQ, store as S, testrun as TR, trigger as T
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -361,6 +361,16 @@ class Runner:
                 log("lease %s kept open, cancel failed: %s" % (l["id"], e))
                 continue
             self.st.close_lease(l["id"], "expired", at=at)
+
+    def fire_reviews(self, job, head, checks, owners):
+        """Queue the review stage once per roster owner, only when every check at head is green; the wake claim
+        (job-independent key: event, owner, head) lets a second look at the same head fire nothing."""
+        if F.ci_state(checks) != "GREEN":
+            return []
+        new = [o for o in sorted(set(owners)) if self.st.add_wake("review", o, head)]
+        for o in new:
+            self.st.enqueue(job, "review", "", {"job": job, "stage": "review", "owner": o, "head": head})
+        return new
 
     def start_ready(self):
         """Fire ready chunks (stage 'build') that readyq.eligible allows; running plain stages share the slot count."""

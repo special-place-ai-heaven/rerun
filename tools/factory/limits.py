@@ -177,3 +177,12 @@ def model_for(stage, cfg=None):
     if stage not in STAGE_TIER:
         raise ValueError("unknown stage: %r" % (stage,))
     return (_runner_cfg() if cfg is None else cfg)["model_tiers"][STAGE_TIER[stage]]
+
+
+PACKET_CAP = 4096
+
+
+def packet_oversize(text, cfg=None, lane=None):
+    """True when the UTF-8 byte length of a packet is above the strictest of PACKET_CAP, cfg packet_cap and lane."""
+    cap = min(v for v in (PACKET_CAP, _pos((cfg or {}).get("packet_cap")), _pos(lane)) if v is not None)
+    return len(text.encode("utf-8")) > cap

@@ -83,5 +83,14 @@ class TestSharedStorePath(unittest.TestCase):
         self.assertNotIn("ledger.db", inspect.getsource(S.main))
 
 
+class StartTime(unittest.TestCase):
+    @unittest.skipUnless(os.path.exists("/proc/1/stat") and hasattr(os, "sysconf"), "needs Linux /proc")
+    def test_runner_start_time_is_readable_and_in_the_past(self):
+        import time
+        started = S.runner_started_at()
+        self.assertIsInstance(started, int)
+        self.assertLessEqual(started, int(time.time()) + 1)
+        self.assertGreater(started, 1_600_000_000)
+
 if __name__ == "__main__":
     unittest.main()

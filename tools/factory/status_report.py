@@ -39,7 +39,7 @@ def runner_started_at():
             ticks = int(f.read().rsplit(")", 1)[1].split()[19])
         with open("/proc/stat") as f:
             btime = next(int(l.split()[1]) for l in f if l.startswith("btime"))
-        return btime + ticks // os.sysconf("SC_CLK_TK")
+        return btime + ticks // os.sysconf("SC_CLK_TCK")
     except (OSError, ValueError, StopIteration, IndexError):
         return None
 

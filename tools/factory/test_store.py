@@ -62,6 +62,13 @@ class TestStore(unittest.TestCase):
         self.assertEqual(self.s.foreign(["r1", "x9", "x8"]), ["x9", "x8"])
         self.assertEqual(self.s.foreign([]), [])
 
+    def test_fires_may_share_a_run_id(self):
+        a, b = self.s.intent("60", "A", "build"), self.s.intent("60", "B", "build")
+        self.s.fired(a, "r1")
+        self.s.fired(b, "r1")
+        self.s.close_run("r1", "done")
+        self.assertEqual([r[0] for r in self.s.db.execute("SELECT status FROM fires")], ["done", "done"])
+
     def test_single_writer(self):
         with self.assertRaises(RuntimeError):
             S.Store(self.p)

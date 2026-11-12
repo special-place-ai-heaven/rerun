@@ -10,6 +10,7 @@ import argparse, json, os, signal, subprocess, sys, tempfile, threading, time, u
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import applypatch as AP, batch as BT, checkout as CO, engine as E, evidence as EV, factory as F, ghclient as GH, intake as IN, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T, wake
+from publish import body as pr_body  # not via PB: tests swap PB for a fake with publish only
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -305,9 +306,13 @@ class Runner:
             base, head = (CO.Checkout(os.path.join(d, job, n), kv["repo_url"], kv["base"]).ensure() for n in ("base", "head"))
             if (r := AP.apply(head, kv["patch:" + chunk], paths)) != "applied":
                 raise ChainFailed("patch %s" % r)
-            if (r := TR.run(base, head, kv["test:" + chunk].split())["verdict"]) != "ok":
-                raise ChainFailed("done-test %s" % r)
-            PB.publish(head, job, kv["title"], kv["base_branch"], self.open_pr, paths)
+            res = TR.run(base, head, kv["test:" + chunk].split())
+            if res["verdict"] != "ok":
+                raise ChainFailed("done-test %s" % res["verdict"])
+            self.st.set(job, "receipt:" + chunk, json.dumps(res))
+            recs = {k[8:]: json.loads(v) for k, v in self.st.get_all(job).items() if k.startswith("receipt:")}
+            text = pr_body("%s#%s" % (self.cfg.get("repo", "special-place-ai-heaven/rerun"), job), recs)
+            PB.publish(head, job, kv["title"], kv["base_branch"], lambda t, h, b, _="": self.open_pr(t, h, b, text), paths)
             self.st.set(job, "published:" + chunk, "1")
         except (KeyError, ValueError, OSError, subprocess.CalledProcessError) as e:
             raise ChainFailed("publish chain stopped: %s" % type(e).__name__) from e

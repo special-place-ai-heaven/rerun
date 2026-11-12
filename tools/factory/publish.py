@@ -13,6 +13,16 @@ def _outside(worktree, paths):
     return [c for c in changed if not any(c == p or c.startswith(p + "/") for p in ok)]
 
 
+def body(job_ref, receipts):
+    """PR body: `Job: repo#n, chunk cA, cB` and one receipt line per chunk from its testrun result ({chunk: result})."""
+    ids = sorted(receipts)
+    lines = ["Job: %s, chunk %s" % (job_ref, ", ".join(ids))]
+    for c in ids:
+        r = receipts[c]
+        lines.append("Receipt %s: done-test %s (base exit %s, head exit %s)" % (c, r.get("verdict"), r.get("base"), r.get("head")))
+    return "\n".join(lines)
+
+
 def publish(worktree, issue, title, base, open_pr, paths, remote="origin", body=""):
     """Commit only `paths` on factory/job-<issue>, push it, call open_pr. A changed or new file outside
     `paths` raises ValueError before anything is committed or pushed. Returns the pushed commit sha."""
@@ -25,5 +35,5 @@ def publish(worktree, issue, title, base, open_pr, paths, remote="origin", body=
     if _git(worktree, "diff", "--cached", "--name-only"):
         _git(worktree, "commit", "-qm", title)
     _git(worktree, "push", "-q", remote, "%s:refs/heads/%s" % (head, head))
-    open_pr(title, head, base, body) if body else open_pr(title, head, base)
+    open_pr(title, head, base, body)
     return _git(worktree, "rev-parse", "HEAD")

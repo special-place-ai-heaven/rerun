@@ -11,6 +11,7 @@ import { readLastUpdate } from '../../runtime/last-update.js'
 import { artifactArgs } from '../../cli/commands/release.js'
 import { dataDir } from '../../config/paths.js'
 import { logger } from '../../lib/logger.js'
+import { childProcessEnv } from '../../lib/child-env.js'
 
 export const updateRoutes = new Hono()
 
@@ -47,7 +48,8 @@ updateRoutes.post('/', async c => {
     const child = spawn(process.execPath, [process.argv[1]!, 'update', ...(artifact ? artifactArgs(artifact) : [])], {
         detached: true,
         stdio: ['ignore', logFd, logFd],
-        env: { ...process.env, CI: 'true' },
+        // The updater never needs the key. It does need the data folder and the service name.
+        env: childProcessEnv({}, { CI: 'true', RERUN_DATA_DIR: dataDir(), ...(process.env.RERUN_SERVICE ? { RERUN_SERVICE: process.env.RERUN_SERVICE } : {}) }),
     })
     child.on('error', err => {
         updating = false

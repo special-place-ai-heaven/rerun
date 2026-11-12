@@ -372,6 +372,13 @@ class Runner:
             self.st.enqueue(job, "review", "", {"job": job, "stage": "review", "owner": o, "head": head})
         return new
 
+    def after_reject(self, job, chunk, owners):
+        """A REJECT of a chunk: limits.after_reject rules; ARBITER queues the arbiter stage, FIX queues nothing here."""
+        what, why = L.after_reject(owners)
+        if what == "ARBITER":
+            self.st.enqueue(job, "arbiter", chunk, {"job": job, "stage": "arbiter", "chunk": chunk, "why": why})
+        return what
+
     def start_ready(self):
         """Fire ready chunks (stage 'build') that readyq.eligible allows; running plain stages share the slot count."""
         ent = self.by_stage.get("build")

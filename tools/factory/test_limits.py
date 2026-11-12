@@ -48,17 +48,43 @@ class TestLimits(unittest.TestCase):
 
 class TestRuns(unittest.TestCase):
     def test_45_minutes(self):
+        # meaning changed: OVERDUE (blocked, stop it in the UI) is now CANCEL (the caller cancels through engine.py)
         start = "2026-11-12T08:00:00.123Z"
         self.assertEqual(M.run_outcome({"id": "r1", "status": "running", "started_at": start}, at(45 * 60)), ("RUNNING", None))
         action, why = M.run_outcome({"id": "r1", "status": "running", "started_at": start}, at(45 * 60 + 1))
-        self.assertEqual(action, "OVERDUE")
-        self.assertIn("Run r1 may still be running and burning tokens: stop it in the UI.", why)
+        self.assertEqual(action, "CANCEL")
+        self.assertIn("run r1 still running", why)
+
+    def test_wall_time_configurable(self):
+        row = {"id": "r2", "status": "running", "started_at": T0}
+        self.assertEqual(M.run_outcome(row, at(90), cfg={"run_limit_s": 90}), ("RUNNING", None))
+        self.assertEqual(M.run_outcome(row, at(91), cfg={"run_limit_s": 90})[0], "CANCEL")
+        self.assertEqual(M.run_outcome(row, at(91), cfg={"run_limit_s": None})[0], "RUNNING")  # bad value: default
+
+    def test_stall_cancels(self):
+        row = {"id": "r3", "status": "running", "started_at": T0}
+        steps = {"last_step_at": "2026-11-12T08:05:00Z", "tokens": 0}
+        self.assertEqual(M.run_outcome(row, at(300 + 600), steps), ("RUNNING", None))
+        action, why = M.run_outcome(row, at(300 + 601), steps)
+        self.assertEqual(action, "CANCEL")
+        self.assertIn("stalled", why)
+        self.assertEqual(M.run_outcome(row, at(61), {"last_step_at": None}, {"stall_s": 60})[0], "CANCEL")  # no step yet: from start
+        self.assertEqual(M.run_outcome(row, at(900), steps, {"stall_s": 0})[0], "RUNNING")  # rule off
+
+    def test_token_cap_cancels(self):
+        row = {"id": "r4", "status": "running", "started_at": T0}
+        steps = {"last_step_at": T0, "tokens": 1000}
+        self.assertEqual(M.run_outcome(row, at(5), steps, {"token_cap": 1000}), ("RUNNING", None))
+        action, why = M.run_outcome(row, at(5), dict(steps, tokens=1001), {"token_cap": 1000})
+        self.assertEqual(action, "CANCEL")
+        self.assertIn("tokens", why)
+        self.assertEqual(M.run_outcome(row, at(5), dict(steps, tokens=10**9))[0], "RUNNING")  # no cap by default
 
     def test_outcomes(self):
         now = at(60)
         self.assertEqual(M.run_outcome({"status": "done"}, now), ("DONE", None))
         self.assertEqual(M.run_outcome({"status": "error", "error": "interrupted: engine restarted"}, now), ("RESTARTED", None))
-        self.assertEqual(M.run_outcome({"status": "error", "error": "provider 529"}, now)[0], "FAILED")
+        self.assertEqual(M.run_outcome({"status": "error", "error": "provider 529"}, now)[0], "REFIRE_ONCE")  # was FAILED
         self.assertEqual(M.run_outcome({"status": "cancelled"}, now)[0], "FAILED")
         self.assertEqual(M.run_outcome(None, now)[0], "MISSING")
 

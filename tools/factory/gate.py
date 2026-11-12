@@ -143,6 +143,8 @@ def same(a, b):
     a, b = _norm(a), _norm(b)
     if b.endswith(".py") and a.startswith(b + "::"):  # DONE_TEST names a python file: any test inside it
         return True
+    if re.fullmatch(r"test_\w+", b) and a.startswith(b + "::"):  # a bare python test module (`test_trigger`): any test inside it
+        return True
     if a == b or a.endswith("::" + b) or b.endswith("::" + a):
         return True
     # file paths: jest logs print package-relative paths; match on a "/" boundary, the shorter side must itself contain "/"

@@ -30,5 +30,15 @@ class Occupancy(unittest.TestCase):
         self.assertIsNone(measures.occupancy_measures([], [], [], {}, t(40), cfg)["occupancy"])
 
 
+class Tokens(unittest.TestCase):
+    def test_token_split(self):
+        F = lambda c, i, o, cw=None, cr=None: {"job": "j", "chunk": c, "tokens_in": i, "tokens_out": o, "cache_write": cw, "cache_read": cr}
+        fires = [F("A", 10, 4, 6, 100), F("A", 20, 6), F("B", 30, 10, 2, 300), F("C", 999, 999)]
+        m = measures.token_split(fires, [("j", "A"), ("j", "B")])
+        self.assertEqual((m["changes"], m["fresh_input"], m["output"], m["cache_write"], m["cache_read"]), (2, 30, 10, 4, 200))
+        m = measures.token_split([F("A", 1, 1)], [("j", "A")])
+        self.assertEqual((m["cache_write"], m["cache_read"]), (None, None))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -40,3 +40,18 @@ def occupancy_measures(fires, wakes, commits, green, now, cfg=None):
             "no_commit": sum(1 for f in builds if f.get("ended_at") and (f["job"], f["chunk"]) not in done),
             "early_reviews": sum(1 for f in fires if f["stage"] == "review"
                                  and (f["job"] not in green or L.ts(f["intent_at"]) < L.ts(green[f["job"]])))}
+
+
+TOKEN_FIELDS = (("fresh_input", "tokens_in"), ("output", "tokens_out"), ("cache_write", "cache_write"), ("cache_read", "cache_read"))
+
+
+def token_split(fires, merged):
+    """Tokens per merged change. merged: [(job, chunk)] given by the caller (nothing writes chunk state merged yet).
+    Each field is the mean over the merged changes, None (n/a) when no fire of them carries it."""
+    keep = set(map(tuple, merged))
+    rows = [f for f in fires if (f["job"], f["chunk"]) in keep]
+    out = {"changes": len(keep)}
+    for name, col in TOKEN_FIELDS:
+        vals = [f[col] for f in rows if f.get(col) is not None]
+        out[name] = sum(vals) / len(keep) if vals and keep else None
+    return out

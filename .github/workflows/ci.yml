@@ -49,6 +49,23 @@ jobs:
           version: 2.113.0
       - run: supabase db start
       - run: supabase db reset --local
+      - name: "Engine key replacement: database rehearsal"
+        run: |
+          set -eu
+          # A made-up key for this throwaway database, not a secret: "feed" sixteen times, 64 hex characters.
+          key=feedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed
+          db() { docker exec -i -u postgres supabase_db_rerun psql -X -q -t -A -v ON_ERROR_STOP=1 -d postgres; }
+          printf '%s\n' "insert into public.engine_pool (engine_host, engine_api_key, status) values ('http://engine:3000', '$key', 'claimed');" | db
+          printf "RERUN_ENGINE_API_KEY='%s'\n" "$key" > .env
+          out=$(SUPABASE_DB_CONTAINER=supabase_db_rerun sh deploy/vps/rotate-engine-key.sh check)
+          printf '%s\n' "$out"
+          printf '%s\n' "$out" | grep -Fxq 'db-rows-holding-current-key 1 (expect 1)'
+          printf '%s\n' "$out" | grep -Fxq 'db-rehearsal swapped (rolled back)'
+          # The lookup of triggers and publications must answer with names or "none", never "error".
+          printf '%s\n' "$out" | grep -Eq '^db-triggers-on-engine_pool [A-Za-z0-9_,]+$'
+          printf '%s\n' "$out" | grep -Eq '^db-publications-with-engine_pool [A-Za-z0-9_,]+$'
+          if printf '%s\n' "$out" | grep -Eq '^db-(triggers|publications)-.* error$'; then exit 1; fi
+          test "$(printf '%s\n' "select count(*) from public.engine_pool where engine_api_key = '$key';" | db)" = 1
 
   # The images take ~20 minutes to build: a pull request only builds them when it touches what
   # goes into them beyond the code the other jobs already check, and every push to master and

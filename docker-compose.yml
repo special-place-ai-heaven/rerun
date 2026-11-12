@@ -64,6 +64,9 @@ services:
       - "host.docker.internal:host-gateway"
     # 2 GB of shared memory keeps Chromium from crashing on heavy pages.
     shm_size: 2gb
+    # An init process as PID 1 collects the dead children of every tool a coworker starts; without it
+    # they pile up in the process table for as long as the container lives.
+    init: true
     restart: unless-stopped
 
   # Only with `npx supabase start` on this machine: makes the local Supabase answer on the same

@@ -32,6 +32,9 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+    # An init process as PID 1 collects the dead children of every tool a coworker starts; without it
+    # they pile up in the process table for as long as the container lives.
+    init: true
     restart: unless-stopped
 
 volumes:

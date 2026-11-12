@@ -169,8 +169,8 @@ class ChainFailed(Exception):
 
 
 class Runner:
-    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None, issues=None):
-        self.open_pr, self.evidence, self.issues = open_pr, evidence, issues
+    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None, issues=None, pr_by_head=None):
+        self.open_pr, self.evidence, self.issues, self.pr_by_head = open_pr, evidence, issues, pr_by_head
         self.eng, self.st, self.cfg, self.tokens, self.clock = eng, st, cfg, tokens, clock
         self.by_slug = {e["slug"]: e for e in cfg["triggers"]}
         self.by_stage = {e["stage"]: e for e in cfg["triggers"]}
@@ -184,6 +184,7 @@ class Runner:
                 self.check(f)
             except (E.EngineError, T.TriggerError) as e:
                 log("read of run %s failed, will retry: %s" % (f["run_id"], e))
+        self.see_merges()
         self.sweep_leases()
         self.start_queued()
         self.start_ready()
@@ -310,6 +311,23 @@ class Runner:
             self.st.set(job, "published:" + chunk, "1")
         except (KeyError, ValueError, OSError, subprocess.CalledProcessError) as e:
             raise ChainFailed("publish chain stopped: %s" % type(e).__name__) from e
+
+    def see_merges(self):
+        """A published chunk stays 'running' until its job PR (branch factory/job-<job>) is merged; one merged PR marks every
+        published chunk of that job 'merged'. A GitHub error means not seen yet."""
+        if not self.pr_by_head:
+            return
+        for (job,) in self.st.db.execute("SELECT DISTINCT job FROM ready_chunks WHERE state='running'").fetchall():
+            done = [r[0] for r in self.st.db.execute("SELECT chunk FROM ready_chunks WHERE job=? AND state='running'", (job,))
+                    if "published:" + r[0] in self.st.get_all(job)]
+            try:
+                pr = done and self.pr_by_head("factory/job-%s" % job)
+            except GH.GhError as e:
+                log("merge check of job %s failed, will retry: %s" % (job, e))
+                continue
+            if pr and pr["merged"]:
+                for c in done:
+                    self.st.set_ready_state(job, c, "merged")
 
     def requeue(self, f):
         payload = {"job": f["job"], "stage": f["stage"], "chunk": f["chunk"]}
@@ -467,7 +485,7 @@ def build(cfg=None, eng=None, clock=time.time, gh=None):
     eng = eng or E.Engine()
     tokens = T.ensure_triggers(eng, cfg)
     st = S.Store(store_path(cfg))
-    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr, issues=gh, evidence=lambda f: stage_evidence(gh, st, f))
+    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr, issues=gh, pr_by_head=lambda b: gh.pr_by_head(b), evidence=lambda f: stage_evidence(gh, st, f))
 
 def stage_evidence(gh, st, f):
     """Evidence for an ended run: a build run needs its pushed branch and CI (evidence.stage_check); other stages: OK.

@@ -10,6 +10,8 @@ class Stub(ghclient.Client):
 
     def req(self, method, path, body=None):
         self.sent.append((method, path, body))
+        if path.startswith("/git/ref/"):
+            return {"object": {"sha": "f00d"}}
         return self.pulls if method == "GET" else {"number": 9, "state": "open"}
 
 
@@ -38,6 +40,11 @@ class GhPr(unittest.TestCase):
         c = Stub([pr(4, "closed", "m", "s")])
         self.assertEqual(c.open_pr("t", "b", "dev", body="B")["number"], 9)
         self.assertEqual(c.sent[-1], ("POST", "/pulls", {"title": "t", "head": "b", "base": "dev", "body": "B"}))
+
+    def test_branch_sha_reads_ref(self):
+        c = Stub([])
+        self.assertEqual(c.branch_sha("wave/x"), "f00d")
+        self.assertEqual(c.sent[0][:2], ("GET", "/git/ref/heads/wave/x"))
 
 
 if __name__ == "__main__":

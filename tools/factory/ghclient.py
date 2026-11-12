@@ -84,5 +84,8 @@ class Client:
             return found  # retry-safe: one open PR per head
         return self.req("POST", "/pulls", {"title": title, "head": head, "base": base, "body": body})
 
+    def branch_sha(self, branch):
+        return self.get("/git/ref/heads/" + urllib.parse.quote(branch, safe="/"))["object"]["sha"]
+
     def create_issue(self, title, body=""):
         return self.req("POST", "/issues", {"title": title, "body": body})

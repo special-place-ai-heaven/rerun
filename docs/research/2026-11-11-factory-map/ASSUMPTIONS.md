@@ -89,7 +89,7 @@ with a scratch trigger on an idle coworker (switched off afterwards).
 - Where the weekly allowance percentage can be read from (rerun#40).
 - What uses `/data/work/e2e/mainsrc` and `/data/work/review/linus-191` on the server.
 - How the worktree `terminal-commander/296-1` disappeared on 2026-11-11.
-- What the other 85 GB of the server's disk hold.
+- What else on the server, outside the factory, uses disk.
 - What a Boss run that has been live for over an hour is waiting on, and how to tell from outside.
 
 ## H. Engine-inside design and its challenge (2026-11-12)

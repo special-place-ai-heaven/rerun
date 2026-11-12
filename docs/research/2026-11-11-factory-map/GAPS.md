@@ -38,7 +38,7 @@ Order inside each group is by how much it costs today.
 | L9 | A dead tool connection is invisible and needs a manual reconnect | observed after every tool update | rerun#41, terminal-commander#294 |
 | L10 | CI: 39% of runs end green; red arrives after 17 minutes; two heavy runners are the queue | measured | CI plan changes 2 to 7; carry to every repo |
 | L11 | Only testpilot can run one test file on demand | rerun, terminal-commander, symforge have no such workflow | CI standard for all repos |
-| L12 | The server cannot run anything on a timer, reach Docker, or deploy | measured | one install by Rob in the Hostinger terminal |
+| L12 | The server cannot run anything on a timer, reach Docker, or deploy | measured | one install by Rob in a terminal on the server |
 | L13 | The server has Node 22; testpilot needs 24; builders cannot run a single spec locally | measured | Node 24 under the tools folder, or CI only by rule |
 | L14 | Coworkers cannot be told anything while they run | code: 409 on a busy session | fresh short sessions make it unnecessary; delivery into a live session later |
 | L15 | The handoff file has no protection against being overwritten | happened | append through a script, or drop it for factory jobs |
@@ -103,5 +103,5 @@ Order inside each group is by how much it costs today.
 - What uses `/data/work/e2e/mainsrc` and `/data/work/review/linus-191`.
 - How `terminal-commander/296-1` disappeared.
 - Whether the shared account may merge and push everywhere the runner needs.
-- What 85 GB of the server's disk is used by outside the factory.
+- What else on the server, outside the factory, uses disk.
 - Whether a blind builder (no local test run) needs more attempts than one with a local check.

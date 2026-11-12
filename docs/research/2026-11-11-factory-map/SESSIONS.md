@@ -12,7 +12,7 @@ challenge by Devils Advocate, before anything is built or removed. Points marked
 
 | | Size | Note |
 |---|---:|---|
-| Disk `/data` | 193 GB, 89 GB free | shared with everything else on the VPS |
+| Disk `/data` | not stated here | shared with everything else on the server |
 | Shared clones (`/data/work/repos`) | 2.0 GB | 4 repos |
 | Factory worktrees | 2.8 GB | 5, all clean and pushed; 3 have their tip on `main`; some hold dependency folders (0.4-0.9 GB) and a code index (36-179 MB each) |
 | **Clones outside the factory folder** | **about 8.5 GB, 43 clones** | in coworkers' workspaces and `/tmp`: reviewers and planners clone a whole repo per review or per plan; one reviewer's workspace alone is 3.3 GB |

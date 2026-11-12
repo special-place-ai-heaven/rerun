@@ -489,7 +489,7 @@ class WtRegister(FactoryCase):
         rows = dict(l.split("  ", 1) for l in out.splitlines() if l.startswith(REPO + "/"))
         self.assertRegex(rows[REPO + "/7-3"], r"owner alice  age 0h  ACTIVE builder$")
         self.assertRegex(rows[REPO + "/7-1"], r"owner unknown  age \?  CI green, waits for merge$")
-        self.assertIn("active builders: 1 of 2", out)
+        self.assertIn("active builders: 1 of %d" % F.max_builders(), out)
 
 
 class WtSweep(FactoryCase):

@@ -8,7 +8,25 @@ GH, GIT = "/data/tools/bin/gh", "/data/tools/bin/git"
 OWNERS = ("special-place-ai-heaven", "special-place-administrator")
 WORK = os.environ.get("FACTORY_WORK", "/data/work")
 REPOS, WT, STATE = WORK + "/repos", WORK + "/wt", WORK + "/state"
-MAX_WORK_GB, MIN_FREE_GB, MAX_BUILDERS = 20, 30, 2
+MAX_WORK_GB, MIN_FREE_GB = 20, 30
+MAX_BUILDERS = None  # override (tests); None reads limits.capacity()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import limits
+except Exception:
+    limits = None
+
+
+def max_builders():
+    """Builder capacity from limits.capacity() (runner.json builder_capacity); 3 when limits cannot be imported or read."""
+    if MAX_BUILDERS:
+        return MAX_BUILDERS
+    try:
+        return limits.capacity()
+    except Exception:
+        return 3
+
+
 MIN_FREE_MEM_GB, MEMINFO = 4, "/proc/meminfo"
 LOCK_WAIT_S, LOCK_STALE_S = 60, 900  # stale > the longest hold (`git worktree add`, run() timeout 300 s)
 WT_IDLE_HOURS = 48  # `wt sweep`: no new commit and no `wt new` for this long counts as idle
@@ -284,8 +302,8 @@ def builder_lock():
 
 def cap_check():
     active = [(r, d) for r, d, p in wt_dirs() if not os.path.exists(marker(r, run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=p, check=False).stdout.strip()))]
-    if len(active) >= MAX_BUILDERS:
-        die("%d builders are already active (%s). At most %d at once. Return BLOCKED to @boss." % (len(active), ", ".join("/".join(x) for x in active), MAX_BUILDERS))
+    if len(active) >= max_builders():
+        die("%d builders are already active (%s). At most %d at once. Return BLOCKED to @boss." % (len(active), ", ".join("/".join(x) for x in active), max_builders()))
 
 
 PLAN_RE = re.compile(r"^\s*(PLAN READY|SMALL FIX)\b", re.M)
@@ -374,7 +392,7 @@ def cmd_wt(a):
             print("%s/%s  branch %s  %.2f GB  owner %s  age %s  %s" % (r, d, br, du_gb(p), rec.get("owner", "unknown"),
                                                                      "?" if h is None else "%dh" % h, "CI green, waits for merge" if g else "ACTIVE builder"))
         st = shutil.disk_usage("/data")
-        print("active builders: %d of %d | /data/work %.1f of %d GB | /data free %.0f GB (floor %d)" % (act, MAX_BUILDERS, du_gb(WORK), MAX_WORK_GB, st.free / 2**30, MIN_FREE_GB))
+        print("active builders: %d of %d | /data/work %.1f of %d GB | /data free %.0f GB (floor %d)" % (act, max_builders(), du_gb(WORK), MAX_WORK_GB, st.free / 2**30, MIN_FREE_GB))
         return
     if len(a) < 4:
         die("usage: wt %s <repo> <issue> <chunk>" % a[0])

@@ -467,7 +467,7 @@ def build(cfg=None, eng=None, clock=time.time, gh=None):
     eng = eng or E.Engine()
     tokens = T.ensure_triggers(eng, cfg)
     st = S.Store(store_path(cfg))
-    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr, evidence=lambda f: stage_evidence(gh, st, f))
+    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr, issues=gh, evidence=lambda f: stage_evidence(gh, st, f))
 
 def stage_evidence(gh, st, f):
     """Evidence for an ended run: a build run needs its pushed branch and CI (evidence.stage_check); other stages: OK.

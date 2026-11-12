@@ -28,5 +28,19 @@ class Claim(WakeBase):
         self.assertTrue(W.claim_wake(self.st, self.ev, "ada", "abc"))
 
 
+class Release(WakeBase):
+    def test_failed_review_refires_same_head(self):
+        for status in W.ENDED_BAD:
+            self.assertTrue(W.claim_wake(self.st, self.ev, "linus", "abc"))
+            self.assertTrue(W.end_wake(self.st, self.ev, "linus", "abc", status))
+            self.assertTrue(W.claim_wake(self.st, self.ev, "linus", "abc"))
+            self.st.release_wake(self.ev, "linus", "abc")
+
+    def test_done_review_keeps_claim(self):
+        self.assertTrue(W.claim_wake(self.st, self.ev, "linus", "abc"))
+        self.assertFalse(W.end_wake(self.st, self.ev, "linus", "abc", "done"))
+        self.assertFalse(W.claim_wake(self.st, self.ev, "linus", "abc"))
+
+
 if __name__ == "__main__":
     unittest.main()

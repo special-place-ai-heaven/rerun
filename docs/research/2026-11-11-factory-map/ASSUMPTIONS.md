@@ -116,7 +116,6 @@ Rows N1 to N18 come from the Advisor's design (issue #42, comment 6818876939), r
 | N16 | Memory and CPU limits on the dev container stop it from starving the live engine | unproven | P6 |
 | N17 | Fixed temp paths (`rerun-desktop`) and screen ports from 5900 would collide for two engines in one container | proven (code, one reader) | `desktop/session.ts:15-16,131`, `tools/builtin/computer.ts:172`, `ee15f5a` |
 | N18 | Line numbers from `3011933` still hold on `ee15f5a` | unproven | a second reader before M2 is planned |
-
 | X1 | `settle` is the single end of every run, so one event from it is enough to wait on | **refuted (one reader)** | the cancel route with no live loop (`http/routes/runs.ts:33-35`, `db/repos/runs.ts:139-142`) and boot reconcile (`runtime/reconcile.ts:25`) close run rows without it; the runs table is the truth, an event only a hint |
 | X2 | A process beside the engine cannot stop a run | unproven | the cancel route calls `abortRun` (`runs.ts:28-33`); B2 was refuted for one coworker's key only; probe P6 of #56 tries the engine key |
 | X3 | A fault in runner code inside the engine cannot end the engine process | unproven, likely false | no process-wide handler for unhandled rejections in the engine source; probe P5 of #56 |

@@ -23,3 +23,20 @@ def queue_measures(ready, fires, now, cfg=None):
             stalled += b - a
     return {"depth": sum(1 for r in ready if (r["job"], r["chunk"]) not in start),
             "wait_s": [e - s for s, e in spans], "stalled_s": stalled}
+
+
+def occupancy_measures(fires, wakes, commits, green, now, cfg=None):
+    """fires as above (+coworker); wakes: rows {coworker, at}; commits: [(job, chunk)] with a commit; green: {job: time CI went
+    green}. Returns occupancy (builder-seconds / capacity-seconds since the first build), quiet_wake_rate (wakes with no
+    fire by that coworker after them; None without wakes), no_commit (ended builds whose chunk has no commit) and
+    early_reviews (reviews started before their job's green; a job with no green counts)."""
+    end, builds = L.ts(now), [f for f in fires if f["stage"] == "build"]
+    spans = [(L.ts(f["intent_at"]), L.ts(f["ended_at"]) if f.get("ended_at") else end) for f in builds]
+    window = (end - min(s for s, _ in spans)) * L.capacity(cfg) if spans else 0
+    quiet = sum(1 for w in wakes if not any(f["coworker"] == w["coworker"] and L.ts(f["intent_at"]) >= L.ts(w["at"]) for f in fires))
+    done = set(map(tuple, commits))
+    return {"occupancy": sum(e - s for s, e in spans) / window if window else None,
+            "quiet_wake_rate": quiet / len(wakes) if wakes else None,
+            "no_commit": sum(1 for f in builds if f.get("ended_at") and (f["job"], f["chunk"]) not in done),
+            "early_reviews": sum(1 for f in fires if f["stage"] == "review"
+                                 and (f["job"] not in green or L.ts(f["intent_at"]) < L.ts(green[f["job"]])))}

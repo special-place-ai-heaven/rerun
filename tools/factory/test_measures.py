@@ -19,5 +19,16 @@ class Queue(unittest.TestCase):
         self.assertEqual(m["stalled_s"], 20)
 
 
+class Occupancy(unittest.TestCase):
+    def test_occupancy_quiet_nocommit_early_review(self):
+        cfg = {"builder_capacity": 2}
+        F = lambda c, st, a, b, who="x": {"job": "j", "chunk": c, "stage": st, "coworker": who, "intent_at": t(a), "ended_at": t(b) if b else None}
+        fires = [F("A", "build", 0, 20), F("B", "build", 10, 30), F("A", "review", 25, 28, "rev")]
+        wakes = [{"coworker": "rev", "at": t(24)}, {"coworker": "rev", "at": t(40)}]
+        m = measures.occupancy_measures(fires, wakes, [("j", "A")], {"j": t(26)}, t(40), cfg)
+        self.assertEqual((m["occupancy"], m["quiet_wake_rate"], m["no_commit"], m["early_reviews"]), (40 / 80, 0.5, 1, 1))
+        self.assertIsNone(measures.occupancy_measures([], [], [], {}, t(40), cfg)["occupancy"])
+
+
 if __name__ == "__main__":
     unittest.main()

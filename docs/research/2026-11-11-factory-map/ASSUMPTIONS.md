@@ -122,3 +122,21 @@ Rows N1 to N18 come from the Advisor's design (issue #42, comment 6818876939), r
 | X4 | A stage that is fired again after an engine restart does no harm | unproven | a builder that already pushed or opened a pull request is not repeatable; A9 was never tried live |
 
 Open again after the challenge: whether the runner lives inside the engine process or beside it. It is decided after P5 and P6 of #56 are read.
+
+## I. Milestone 1 results (2026-11-12, issue #56)
+
+The status script was run on the server by Rob; its output is on issue #42. Earlier rows keep their text; these lines are their new answers.
+
+| Row | New status | From |
+|---|---|---|
+| B6 a second engine runs on the same server without disturbing the first | **proven** | P0 to P7; live engine start time and restart count unchanged |
+| B2 the cancel route refuses a caller on the server | **proven accepted for the engine key** (was refuted for one coworker's key only) | P6: 404 for a run that does not exist, not 401 |
+| X2 a process beside the engine cannot stop a run | **refuted** | P6 |
+| X3 a stray rejected promise cannot end the engine process | **refuted for the Node in the engine image** | P5: exit code 1 |
+| N4 own volume, not privileged, no socket | proven | P1 |
+| N5 the engine boots and serves with no hub and no model | proven | P3, P4 |
+| N8 a coworker and a trigger can be created over HTTP with no hub | proven | P4 (the run ends in `error` for the missing model, as expected) |
+| N2 no hub configuration reaches the development engine | supported | P1, P2 |
+
+
+Still open: N3 (the development engine survives the next normal live update) and one deliberate remove and start again.

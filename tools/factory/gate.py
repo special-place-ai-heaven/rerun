@@ -12,6 +12,9 @@ REVIEW_RE = re.compile(r"^\s*Review (ACCEPT|REJECT) @([0-9a-f]{8}): ([A-Za-z][A-
 ANSI = re.compile(r"(?:\x1b|\^\[)\[[0-9;]*m")  # real ESC, or the caret form (^[) some log paths show
 
 
+LAST = {}  # repo and head of the PR the last gate() read, for the status post
+
+
 class NoAnswer(Exception):
     pass
 
@@ -429,6 +432,7 @@ def gate(repo, n):
     put("HANDOFF", not miss, "missing sections: " + ", ".join(miss) if miss else "all %d PR_HEADS sections present in PR body" % len(F.PR_HEADS))
 
     failed = [k for k, v in res.items() if not v["ok"]]
+    LAST.update(full=full, head=head)
     head_line = "GATE %s %s#%s @%s%s" % ("FAIL" if failed else "PASS", F.short(full), n, s8, (": " + ", ".join(failed)) if failed else "")
     print(head_line)
     for k, v in res.items():
@@ -437,6 +441,23 @@ def gate(repo, n):
     json.dump({"repo": full, "pr": int(n), "head": head, "verdict": "FAIL" if failed else "PASS", "checks": res},
               open(F.STATE + "/gate/%s-%s-%s.json" % (F.short(full), n, head), "w"), indent=1)
     return 3 if failed else 0
+
+
+def _post(full, sha, state, context, desc):
+    r = subprocess.run([GH, "api", "repos/%s/statuses/%s" % (full, sha), "-f", "state=" + state, "-f", "context=" + context, "-f", "description=" + desc],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode:
+        raise NoAnswer((r.stderr or r.stdout).strip()[-200:])
+
+
+def post_status(code, post=_post):
+    """After gate(): the factory/review status at the head it read (exit 0 success, 3 failure). Adds only; any error goes to stderr and changes nothing."""
+    if code not in (0, 3) or "head" not in LAST:
+        return
+    try:
+        post(LAST["full"], LAST["head"], "success" if code == 0 else "failure", "factory/review", "gate %s @%s" % ("PASS" if code == 0 else "FAIL", LAST["head"][:8]))
+    except Exception as e:
+        print("status not posted: %s" % e, file=sys.stderr)
 
 
 def review(a):
@@ -478,7 +499,10 @@ if __name__ == "__main__":
         if len(a) < 2:
             print("usage: gate <repo> <PR>")
             sys.exit(2)
-        sys.exit(gate(a[0], a[1].lstrip("#")))
+        code = gate(a[0], a[1].lstrip("#"))
+        if os.environ.get("GATE_POST_STATUS") == "1":  # the runner sets it; a person running gate posts nothing
+            post_status(code)
+        sys.exit(code)
     except NoAnswer as e:
         print("GATE UNKNOWN: could not answer: %s" % e)
         sys.exit(1)

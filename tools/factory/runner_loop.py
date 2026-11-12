@@ -245,7 +245,7 @@ class Runner:
             ev = self.evidence(f) if self.evidence else ("OK", "")
             if ev[0] != "OK":
                 return  # the run ended but no evidence yet: stays running, read again next tick
-            if f["stage"] == "review" and self.issues:
+            if f["stage"] == "review" and self.issues and isinstance(ev[1], str):
                 self.follow_up(f["job"], ev[1])
             self.st.close_run(rid, "done", iso(self.clock()), tin, tout)
         elif what == "CANCEL":

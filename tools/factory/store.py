@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS queue(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job TEXT NOT NULL, stage TEXT NOT NULL, chunk TEXT NOT NULL DEFAULT '',
   payload TEXT NOT NULL, enqueued_at TEXT NOT NULL, not_before TEXT);
+CREATE TABLE IF NOT EXISTS ready_chunks(
+  job TEXT NOT NULL, chunk TEXT NOT NULL, builder TEXT NOT NULL DEFAULT '',
+  paths TEXT NOT NULL DEFAULT '[]', deps TEXT NOT NULL DEFAULT '[]',
+  state TEXT NOT NULL DEFAULT 'ready', attempts INTEGER NOT NULL DEFAULT 0,
+  added_at TEXT NOT NULL, PRIMARY KEY(job, chunk));
 """
 OPEN = ("intent", "running")
 
@@ -142,6 +147,36 @@ class Store:
             self.db.execute("ROLLBACK")
             raise
         return fid
+
+    def add_ready(self, job, chunk, paths=(), builder="", deps=(), at=None):
+        """Ready-chunk queue: add a chunk (idempotent per job/chunk)."""
+        self.db.execute("INSERT OR IGNORE INTO ready_chunks(job,chunk,builder,paths,deps,added_at) VALUES(?,?,?,?,?,?)",
+                        (job, chunk, builder, json.dumps(list(paths)), json.dumps(list(deps)), at or now()))
+
+    def _ready(self, r):
+        r = dict(r)
+        r["paths"], r["deps"] = json.loads(r["paths"]), json.loads(r["deps"])
+        return r
+
+    def get_ready(self, job, chunk):
+        r = self.db.execute("SELECT * FROM ready_chunks WHERE job=? AND chunk=?", (job, chunk)).fetchone()
+        return self._ready(r) if r else None
+
+    def ready_list(self, job=None):
+        """Chunks in state 'ready', oldest first."""
+        sql = "SELECT * FROM ready_chunks WHERE state='ready'" + (" AND job=?" if job is not None else "") + " ORDER BY rowid"
+        return [self._ready(r) for r in self.db.execute(sql, (job,) if job is not None else ())]
+
+    def set_ready_state(self, job, chunk, state):
+        self.db.execute("UPDATE ready_chunks SET state=? WHERE job=? AND chunk=?", (state, job, chunk))
+
+    def attempts(self, job, chunk):
+        r = self.db.execute("SELECT attempts FROM ready_chunks WHERE job=? AND chunk=?", (job, chunk)).fetchone()
+        return r[0] if r else 0
+
+    def bump_attempt(self, job, chunk):
+        self.db.execute("UPDATE ready_chunks SET attempts=attempts+1 WHERE job=? AND chunk=?", (job, chunk))
+        return self.attempts(job, chunk)
 
     def _rows(self, where, job):
         sql = "SELECT * FROM fires WHERE " + where + (" AND job=?" if job is not None else "") + " ORDER BY id"

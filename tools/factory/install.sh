@@ -18,7 +18,7 @@ done
 [ -n "$PREFIX" ] && [ -n "$KEYFILE" ] || { echo "usage: install.sh --prefix DIR --jev-keyfile P" >&2; exit 2; }
 mkdir -p "$PREFIX/bin" "$PREFIX/factory"
 PREFIX=$(cd "$PREFIX" && pwd)
-for f in gate.py factory.py jobcost.py trigger.py engine.py store.py limits.py runner_loop.py status_report.py runner.json; do
+for f in gate.py factory.py jobcost.py trigger.py engine.py store.py limits.py ledger.py roster.py runner_loop.py status_report.py runner.json; do
   sed -e "s#/data/tools/factory#$PREFIX/factory#g" -e "s#@@JEV_KEYFILE@@#$KEYFILE#g" "$HERE/$f" > "$PREFIX/factory/$f"
 done
 mkdir -p "$PREFIX/factory/triggers"

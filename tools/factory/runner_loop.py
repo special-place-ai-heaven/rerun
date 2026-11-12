@@ -287,6 +287,10 @@ class Runner:
                 log("job %s hit the fire cap, stage %s dropped" % (job, stage))
                 self.st.dequeue(q["id"])
                 continue
+            if L.packet_oversize(json.dumps(q["payload"]), self.cfg):
+                log("job %s stage %s: packet over the cap, refused" % (job, stage))
+                self.st.dequeue(q["id"])
+                continue
             token = self.tokens.get("%s/%s" % (ent["agent"], ent["slug"]))
             if not token:
                 log("no token for %s, skipped" % ent["slug"])

@@ -137,12 +137,14 @@ def render(rows):
 def main(argv):
     import engine as E
     import trigger as T
-    db = argv[argv.index("--db") + 1] if "--db" in argv else os.path.join(os.environ.get("FACTORY_DATA_DIR", "/state"), "ledger.db")
+    import runner_loop as R
     try:
+        cfg = T.load_config()
+        db = argv[argv.index("--db") + 1] if "--db" in argv else R.store_path(cfg)
         fires = read_fires(db)
-        agents = sorted({e["agent"] for e in T.load_config()["triggers"]} | {f["coworker"] for f in fires if f.get("coworker")})
+        agents = sorted({e["agent"] for e in R.load_runtime(cfg, strict=False)["triggers"]})
         sys.stdout.write(render(report(fires, E.Engine(), agents, runner_started_at())))
-    except (E.EngineError, sqlite3.Error, OSError) as e:
+    except (E.EngineError, sqlite3.Error, OSError, RuntimeError) as e:
         sys.stdout.write("status failed: %s\n" % type(e).__name__ + ("" if isinstance(e, sqlite3.Error) else str(e) + "\n"))
         return 1
     return 0

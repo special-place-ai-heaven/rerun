@@ -73,5 +73,15 @@ class TestReport(unittest.TestCase):
         self.assertEqual((rows[0]["run_id"], rows[0]["status"]), ("r9", "running"))
 
 
+class TestSharedStorePath(unittest.TestCase):
+    def test_status_and_runner_read_the_same_store_path(self):
+        import runner_loop as R, trigger as T
+        cfg = T.load_config()
+        self.assertEqual(cfg["store_file"], R.store_path(cfg))
+        import inspect
+        self.assertIn("R.store_path(cfg)", inspect.getsource(S.main))
+        self.assertNotIn("ledger.db", inspect.getsource(S.main))
+
+
 if __name__ == "__main__":
     unittest.main()

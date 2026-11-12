@@ -2,8 +2,7 @@
 
 The exact lines the owner runs, in order, from the clone on the server (rerun#60). Every `sudo` line is its own block.
 The dev engine key is never printed. Status shows one PASS/FAIL row per test with names and ids only.
-Before step 7, `tools/factory/runner.json` must name the dev engine's coworker id and, per stage, the model: `stub-fast` for
-the `challenge` stage, `stub-hold` for a second stage `challenge-hold` (a `triggers/challenge-hold.md` body next to `challenge.md`).
+Step 6 (`setup`) creates the dev engine's two stage coworkers, `challenge` (model `stub-fast`) and `challenge-hold` (model `stub-hold`), and keeps their ids in the runner volume; `tools/factory/runner.json` stays a template with no ids.
 
 ## 1. Update the clone
 
@@ -31,26 +30,20 @@ sudo docker compose -f deploy/vps/stub-model.yml up -d
 
 ## 5. Start the runner
 
-The runner needs to be up to register the stub, since the key reaches only that container.
+The runner needs to be up for step 6, since the key reaches only that container.
 
 ```sh
 sudo docker compose -f deploy/vps/factory-runner.yml up -d
 ```
 
-## 6. Register the stub as the dev engine's `custom` connection and default
-
-Run inside the runner container with engine.py; the key is read from its environment and never echoed.
+## 6. Set up the dev engine (once; safe to repeat)
+Run inside the runner container; the key is read from its environment and never echoed. It registers the stub as the dev engine's `custom` connection and default, creates or reuses the two stage coworkers, writes their ids to `/state/runner-state.json`, and creates the triggers. A second run creates nothing.
 
 ```sh
-sudo docker compose -f deploy/vps/factory-runner.yml exec -T factory-runner python3 - <<'PY'
-import sys; sys.path.insert(0, "/app")
-import engine
-e = engine.Engine()
-c = e._call("POST", "/connections", payload={"name": "stub", "provider": "custom", "baseUrl": "http://stub-model:8080/v1", "models": ["stub-fast", "stub-hold"]})
-e._call("PUT", "/connections/default", payload={"connectionId": c["id"], "model": "stub-fast"})
-print("stub connection", c["id"], "is the default, model stub-fast")
-PY
+sudo docker compose -f deploy/vps/factory-runner.yml exec -T factory-runner python3 /app/runner_loop.py setup
 ```
+
+Until this has run, the runner stays up and logs `waiting for setup`; it starts working by itself within 10 seconds of the ids being written.
 
 ## 7. R1: fire one stage
 

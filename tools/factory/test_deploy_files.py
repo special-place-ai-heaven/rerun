@@ -69,5 +69,26 @@ class StatusScript(unittest.TestCase):
                 self.assertNotIn("docker exec -e", line)
 
 
+class FactoryM2Doc(unittest.TestCase):
+    def setUp(self):
+        self.t = read("FACTORY-M2.md")
+    def test_setup_is_one_sudo_line_in_its_own_block_and_no_heredoc(self):
+        line = "sudo docker compose -f deploy/vps/factory-runner.yml exec -T factory-runner python3 /app/runner_loop.py setup"
+        self.assertIn("```sh\n%s\n```" % line, self.t)
+        self.assertNotIn("<<'PY'", self.t)
+        self.assertNotIn("_call(", self.t)
+    def test_order_up_before_setup_before_first_enqueue(self):
+        up = self.t.index("factory-runner.yml up -d")
+        setup = self.t.index("runner_loop.py setup")
+        self.assertLess(up, setup)
+        self.assertLess(setup, self.t.index("runner_loop.py enqueue"))
+    def test_install_copies_what_the_runner_imports(self):
+        with open(os.path.join(VPS, "..", "..", "tools", "factory", "install.sh"), encoding="utf-8") as f:
+            s = f.read()
+        loop = re.search(r"for f in ([^;]+); do", s).group(1).split()
+        for need in ("trigger.py", "engine.py", "store.py", "limits.py", "runner_loop.py", "status_report.py", "runner.json"):
+            self.assertIn(need, loop)
+
+
 if __name__ == "__main__":
     unittest.main()

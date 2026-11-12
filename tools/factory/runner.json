@@ -4,9 +4,16 @@
     {
       "stage": "challenge",
       "coworker": "DEVILS_ADVOCATE",
-      "agent": "FILL-IN-agent-id",
+      "agent_name": "challenge",
       "slug": "factory-challenge",
-      "model": "FILL-IN-model"
+      "model": "stub-fast"
+    },
+    {
+      "stage": "challenge-hold",
+      "coworker": "DEVILS_ADVOCATE",
+      "agent_name": "challenge-hold",
+      "slug": "factory-challenge-hold",
+      "model": "stub-hold"
     }
   ],
   "poll_s": 30,
@@ -14,5 +21,6 @@
   "stall_s": 600,
   "token_cap": 500000,
   "store_file": "/state/ledger.db",
-  "token_file": "/state/trigger-tokens.json"
+  "token_file": "/state/trigger-tokens.json",
+  "state_file": "/state/runner-state.json"
 }

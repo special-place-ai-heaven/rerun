@@ -142,5 +142,95 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(len(R.queued(self.runner.st)), 1)
 
 
+class SetupEngine:
+    """In-memory dev engine for `setup`: counts every create."""
+    def __init__(self):
+        self.conns, self.agents, self.default, self.posts, self.triggers = [], [], None, [], {}
+    def _call(self, method, path, query=None, payload=None):
+        if method == "POST":
+            self.posts.append(path)
+        if (method, path) == ("GET", "/connections"):
+            return {"connections": list(self.conns), "default": self.default}
+        if (method, path) == ("POST", "/connections"):
+            c = dict(payload, id="conn%d" % (len(self.conns) + 1))
+            self.conns.append(c)
+            return c
+        if (method, path) == ("PUT", "/connections/default"):
+            self.default = dict(payload)
+            return self.default
+        if (method, path) == ("GET", "/agents"):
+            return {"agents": [{"id": a["id"], "name": a["config"]["name"]} for a in self.agents]}
+        if (method, path) == ("POST", "/agents"):
+            a = {"id": "ag-%s" % payload["config"]["name"], "config": payload["config"]}
+            self.agents.append(a)
+            return a
+        raise AssertionError((method, path))
+    def list_triggers(self, agent):
+        return [t for (a, _), t in self.triggers.items() if a == agent]
+    def create_trigger(self, agent, name, body, model=None, **k):
+        self.posts.append("trigger")
+        t = {"slug": name, "token": "tok-" + name, "model": model}
+        self.triggers[(agent, name)] = t
+        return t
+
+
+class TestSetup(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory()
+        os.environ.pop("FACTORY_DATA_DIR", None)
+        self.cfg = {"store_file": os.path.join(self.d.name, "ledger.db"),
+                    "token_file": os.path.join(self.d.name, "tok.json"),
+                    "triggers": [
+                        {"stage": "challenge", "coworker": "DA", "agent_name": "challenge", "slug": "factory-challenge", "model": "stub-fast"},
+                        {"stage": "challenge", "coworker": "DA", "agent_name": "challenge-hold", "slug": "factory-challenge-hold", "model": "stub-hold"}]}
+    def tearDown(self):
+        self.d.cleanup()
+    def test_creates_then_second_run_creates_nothing(self):
+        eng = SetupEngine()
+        R.setup(eng, self.cfg)
+        self.assertEqual(sorted(eng.posts), ["/agents", "/agents", "/connections", "trigger", "trigger"])
+        self.assertEqual(eng.default, {"connectionId": "conn1", "model": "stub-fast"})
+        self.assertEqual({a["config"]["name"]: a["config"]["model"] for a in eng.agents}, {"challenge": "stub-fast", "challenge-hold": "stub-hold"})
+        state = R.read_state(self.cfg)
+        self.assertEqual(state["agents"], {"challenge": "ag-challenge", "challenge-hold": "ag-challenge-hold"})
+        self.assertTrue(state_path_in_volume(self.cfg, self.d.name))
+        eng.posts.clear()
+        out = R.setup(eng, self.cfg)
+        self.assertEqual(eng.posts, [])
+        self.assertTrue(all("created" not in l for l in out), out)
+        self.assertEqual(R.read_state(self.cfg), state)
+    def test_reuses_by_name_when_state_file_is_lost(self):
+        eng = SetupEngine()
+        R.setup(eng, self.cfg)
+        os.unlink(R.state_path(self.cfg))
+        eng.posts.clear()
+        R.setup(eng, self.cfg)
+        self.assertEqual(eng.posts, [])
+        self.assertEqual(len(eng.agents), 2)
+    def test_run_reads_ids_from_state_and_waits_without_it(self):
+        with self.assertRaises(R.NeedsSetup):
+            R.load_runtime(self.cfg)
+        R.setup(SetupEngine(), self.cfg)
+        rt = R.load_runtime(self.cfg)
+        self.assertEqual([e["agent"] for e in rt["triggers"]], ["ag-challenge", "ag-challenge-hold"])
+        self.assertNotIn("agent", self.cfg["triggers"][0])  # the template is not changed
+    def test_store_path_default_is_the_data_dir_and_state_sits_beside_it(self):
+        os.environ["FACTORY_DATA_DIR"] = "/vol"
+        try:
+            self.assertEqual(R.store_path({}), "/vol/ledger.db")
+            self.assertEqual(R.state_path({}), "/vol/runner-state.json")
+        finally:
+            os.environ.pop("FACTORY_DATA_DIR")
+    def test_shipped_runner_json_is_a_template_without_ids(self):
+        import trigger as T
+        for e in T.load_config()["triggers"]:
+            self.assertNotIn("agent", e)
+            self.assertTrue(e["agent_name"] and e["model"].startswith("stub-"))
+
+
+def state_path_in_volume(cfg, d):
+    return os.path.dirname(R.state_path(cfg)) == d == os.path.dirname(R.store_path(cfg))
+
+
 if __name__ == "__main__":
     unittest.main()

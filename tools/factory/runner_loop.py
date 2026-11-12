@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""The factory runner loop (rerun#60 chunk C7). Plain code, no model. Commands: run | once | enqueue JOB STAGE.
+"""The factory runner loop (rerun#60 chunk C7). Plain code, no model. Commands: setup | run | once | enqueue JOB STAGE.
 Start: ensure_triggers, open the store, resolve unfinished fires. Every poll_s: read the run row over HTTP for every
 running fire (the row is the truth, no events), record ends in the store, apply limits.run_outcome (CANCEL -> cancel;
 error/RESTARTED -> fire again at most once per stage, then failed), and start the next queued stage by firing its trigger
 with the packet payload (intent row committed before the fire). The queue lives in the store (kv, keys 'queue:...').
 SIGTERM stops the loop between ticks. The engine key and trigger tokens are never printed."""
-import argparse, json, os, signal, sys, threading, time
+import argparse, json, os, signal, sys, tempfile, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -21,6 +21,109 @@ def log(msg):
 
 def store_path(cfg):
     return cfg.get("store_file") or os.path.join(os.environ.get("FACTORY_DATA_DIR", "/state"), "ledger.db")
+
+STATE_NAME = "runner-state.json"
+STUB = {"name": "stub", "provider": "custom", "baseUrl": "http://stub-model:8080/v1", "models": ["stub-fast", "stub-hold"]}
+DEFAULT_MODEL = "stub-fast"
+
+
+class NeedsSetup(RuntimeError):
+    """runner.json names a coworker the state file has no id for yet."""
+
+
+def state_path(cfg):
+    """The state file (coworker ids written by `setup`): runner.json key state_file, else beside the ledger in the runner volume."""
+    return cfg.get("state_file") or os.path.join(os.path.dirname(store_path(cfg)), STATE_NAME)
+
+
+def read_state(cfg):
+    try:
+        with open(state_path(cfg), encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        raise RuntimeError("cannot read the state file; run setup again") from None
+    return data if isinstance(data, dict) else {}
+
+
+def write_state(cfg, state):
+    path = state_path(cfg)
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".state-", dir=d)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(state, f, sort_keys=True, indent=1)
+    os.replace(tmp, path)
+
+
+def resolve(cfg, state, strict=True):
+    """A copy of cfg whose trigger entries without an `agent` take it from state['agents'][entry['agent_name']].
+    runner.json is a template (no ids); an entry that cannot be resolved raises RuntimeError, or is left out when not strict."""
+    out = dict(cfg)
+    out["triggers"] = []
+    for e in cfg["triggers"]:
+        e = dict(e)
+        if not e.get("agent"):
+            aid = (state.get("agents") or {}).get(e.get("agent_name") or e["stage"])
+            if not aid:
+                if strict:
+                    raise NeedsSetup("no coworker id for stage %s: run `runner_loop.py setup` first" % e["stage"])
+                continue
+            e["agent"] = aid
+        out["triggers"].append(e)
+    return out
+
+
+def load_runtime(cfg=None, strict=True):
+    """runner.json resolved with the state file: what `run`, `once` and status_report all read (one config, one store path)."""
+    cfg = cfg if cfg is not None else T.load_config()
+    return resolve(cfg, read_state(cfg), strict)
+
+
+def setup(eng, cfg):
+    """Create or reuse, in this order: the stub's `custom` connection (set as the box default), one coworker per trigger entry
+    that names an `agent_name`, then the triggers. Ids go to the state file. A second run creates nothing. Returns the lines to print."""
+    out, state = [], read_state(cfg)
+    listing = eng._call("GET", "/connections")
+    conn = next((c for c in listing.get("connections") or [] if c.get("name") == STUB["name"] and c.get("provider") == "custom"), None)
+    if conn is None:
+        conn = eng._call("POST", "/connections", payload=dict(STUB))
+        out.append("stub connection created: %s" % conn["id"])
+        listing = eng._call("GET", "/connections")
+    else:
+        out.append("stub connection reused: %s" % conn["id"])
+    cur = listing.get("default") or {}
+    if cur.get("connectionId") != conn["id"] or cur.get("model") != DEFAULT_MODEL:
+        eng._call("PUT", "/connections/default", payload={"connectionId": conn["id"], "model": DEFAULT_MODEL})
+        out.append("stub connection set as default, model %s" % DEFAULT_MODEL)
+    index = {a.get("id"): a for a in eng._call("GET", "/agents").get("agents") or []}
+    by_name = {a.get("name"): a for a in index.values()}
+    agents = dict(state.get("agents") or {})
+    for e in cfg["triggers"]:
+        name = e.get("agent_name")
+        if e.get("agent") or not name:
+            continue
+        aid = agents.get(name)
+        if aid in index:
+            out.append("coworker %s reused: %s" % (name, aid))
+        elif name in by_name:
+            aid = by_name[name]["id"]
+            out.append("coworker %s reused: %s" % (name, aid))
+        else:
+            row = eng._call("POST", "/agents", payload={"config": {
+                "name": name, "description": "Factory stage coworker (dev engine, stub model)",
+                "connectionId": conn["id"], "provider": "custom", "model": e.get("model") or DEFAULT_MODEL}})
+            aid = row["id"]
+            by_name[name] = row
+            out.append("coworker %s created: %s" % (name, aid))
+        agents[name] = aid
+    state = {"connection": conn["id"], "agents": agents}
+    write_state(cfg, state)
+    T.ensure_triggers(eng, resolve(cfg, state))
+    out.append("triggers ensured")
+    return out
+
 
 
 def iso(epoch):
@@ -196,7 +299,7 @@ class Runner:
 
 
 def build(cfg=None, eng=None, clock=time.time):
-    cfg = cfg if cfg is not None else T.load_config()
+    cfg = load_runtime(cfg)
     eng = eng or E.Engine()
     tokens = T.ensure_triggers(eng, cfg)
     st = S.Store(store_path(cfg))
@@ -219,6 +322,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("run")
     sub.add_parser("once")
+    sub.add_parser("setup")
     en = sub.add_parser("enqueue")
     en.add_argument("job")
     en.add_argument("stage")
@@ -234,18 +338,35 @@ def main(argv=None):
         enqueue_file(store_path(cfg), a.job, a.stage, a.chunk, payload)
         print("queued %s %s" % (a.job, a.stage))
         return 0
-    try:
-        r = build(cfg)
-    except (E.EngineError, T.TriggerError, RuntimeError) as e:
-        print("runner: cannot start: %s" % e, file=sys.stderr)
-        return 1
-    if a.cmd == "once":
-        r.tick()
-        r.st.close()
+    if a.cmd == "setup":
+        try:
+            for line in setup(E.Engine(), cfg):
+                print(line)
+        except (E.EngineError, T.TriggerError, RuntimeError, KeyError, OSError) as e:
+            print("setup failed: %s" % ("unexpected engine answer" if isinstance(e, KeyError) else e), file=sys.stderr)
+            return 1
         return 0
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
+    while True:
+        try:
+            r = build(cfg)
+            break
+        except NeedsSetup as e:
+            if a.cmd == "once":
+                print("runner: %s" % e, file=sys.stderr)
+                return 1
+            log("waiting for setup: %s" % e)  # stay up so `setup` can be exec'd in this container
+            if stop.wait(10):
+                return 0
+        except (E.EngineError, T.TriggerError, RuntimeError) as e:
+            print("runner: cannot start: %s" % e, file=sys.stderr)
+            return 1
+    if a.cmd == "once":
+        r.tick()
+        r.st.close()
+        return 0
     run(r, stop, cfg.get("poll_s", POLL_S))
     r.st.close()
     return 0

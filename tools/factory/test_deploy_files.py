@@ -105,6 +105,29 @@ class FactoryM2Doc(unittest.TestCase):
         self.assertEqual(sorted(missing), [])
 
 
+# Removals that take more than leftovers: tagged images, containers, volumes, networks.
+WIDE = ("system prune", "volume prune", "container prune", "network prune", "--volumes", "image prune -a", "image prune --all")
+
+
+class Leftovers(unittest.TestCase):
+    def test_update_removes_the_images_it_replaced_after_the_restart(self):
+        c = code(read("update.sh"))
+        self.assertLess(c.index("docker compose up -d"), c.index("docker image prune -f"))
+        for bad in WIDE:
+            self.assertNotIn(bad, c)
+
+    def test_tidy_removes_untagged_images_and_build_cache_and_nothing_else(self):
+        c = code(read("tidy.sh"))
+        self.assertEqual([l.strip() for l in c.splitlines() if " prune" in l], ["docker image prune -f", "docker builder prune -af"])
+        for bad in WIDE + ("docker rm", "docker rmi", "docker volume rm"):
+            self.assertNotIn(bad, c)
+
+    def test_tidy_timer_runs_a_root_owned_copy_weekly_and_catches_up(self):
+        c = code(read("tidy.sh"))
+        for need in ("ExecStart=$BIN run", "OnCalendar=Sun 04:30", "Persistent=true", "install -m 755"):
+            self.assertIn(need, c)
+
+
 class ClaudeScript(unittest.TestCase):
     def setUp(self):
         self.c = code(read("dev-engine-claude.sh"))

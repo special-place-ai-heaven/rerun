@@ -1,6 +1,6 @@
 #!/bin/sh
 # Updates Rerun on the server in one go: new code, the images GitHub built, the database migrations
-# that came with them, then a restart. Run from the clone:
+# that came with them, then a restart, then the images it replaced are removed. Run from the clone:
 #   sudo sh deploy/vps/update.sh
 # Every step prints as it goes. Nothing secret is printed: the database password is read into a
 # variable and only handed to the migration container.
@@ -33,3 +33,6 @@ unset PW
 echo "== 4/4 restart"
 docker compose up -d
 docker compose ps
+# The pull left the images it replaced without a tag. Remove untagged images that no container uses, and
+# nothing else: an older build comes back from the registry with RERUN_IMAGE_TAG=sha-<commit>.
+docker image prune -f

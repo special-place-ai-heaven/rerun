@@ -509,9 +509,10 @@ def intake_issue(st, gh, repo, n, base_branch="dev"):
     issue = gh.issue(n)
     text = "\n".join([issue.get("body") or ""] + [c.get("body") or "" for c in gh.comments(n)])
     meta = {"repo_url": "https://github.com/" + repo, "title": issue["title"], "base_branch": base_branch}
+    sha = gh.branch_sha(base_branch)  # resolved before register: a GitHub error then stores no job
     state, errors = IN.register(st, str(n), meta, text)
     if state:
-        st.set(str(n), "base", gh.branch_sha(base_branch))
+        st.set(str(n), "base", sha)
     return state, errors
 
 def run(r, stop, poll_s):

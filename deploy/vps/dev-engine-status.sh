@@ -53,11 +53,11 @@ AG=$(dev curl -s -m 20 -X POST http://localhost:3000/agents -H 'content-type: ap
     -d '{"config":{"name":"dev-probe"}}' | devi jq -r '.id // empty' || true)
 if [ -n "$AG" ]; then
     TR=$(dev curl -s -m 20 -X POST "http://localhost:3000/agents/$AG/triggers" -H 'content-type: application/json' \
-        -d '{"name":"probe","body":"Say hello."}')
+        -d '{"name":"probe","body":"Say hello."}' || true)
     SLUG=$(printf '%s' "$TR" | devi jq -r '.slug // empty' || true)
     TOK=$(printf '%s' "$TR" | devi jq -r '.token // empty' || true)
     FIRE=$(dev curl -s -m 30 -X POST "http://localhost:3000/agents/$AG/triggers/$SLUG/fire" -H 'content-type: application/json' \
-        -d "{\"token\":\"$TOK\",\"method\":\"POST\"}")
+        -d "{\"token\":\"$TOK\",\"method\":\"POST\"}" || true)
     TOK=
     RUN=$(printf '%s' "$FIRE" | devi jq -r '.runId // empty' || true)
     SES=$(printf '%s' "$FIRE" | devi jq -r '.sessionId // empty' || true)

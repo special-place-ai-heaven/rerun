@@ -198,3 +198,11 @@ def failure(attempts, cfg=None, tail=""):
     if attempts < n:
         return "RETRY", tail
     return "NEEDS_BOSS", "failed after %d attempt(s), retries %d: %s" % (attempts + 1, n, (tail or "-")[-200:])
+
+
+def after_reject(owners):
+    """After a REJECT of a chunk. owners lists who built each rejected commit, oldest first. A second REJECT in a row of
+    the same owner returns ARBITER (the arbiter rules), not a third build; otherwise FIX."""
+    if len(owners) >= 2 and owners[-1] == owners[-2]:
+        return "ARBITER", "second REJECT in a row of %s's work" % owners[-1]
+    return "FIX", None

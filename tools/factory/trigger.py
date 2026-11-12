@@ -97,6 +97,10 @@ def ensure_triggers(eng, cfg=None, stages=None):
             row = eng.create_trigger(agent, slug, stage_body(e["stage"]), model=e.get("model"))
             if row.get("slug") != slug:
                 raise TriggerError("the engine derived another slug than %s from the trigger name" % slug)
+            if e.get("model") and model_of(row) != e["model"]:  # create did not keep the model: set it by the update route
+                row = dict(row, **eng._call("PATCH", "/agents/%s/triggers/%s" % (E._q(agent), E._q(slug)), payload={"model": e["model"]}))
+                if model_of(row) != e["model"]:
+                    raise TriggerError("trigger %s did not take the model" % slug)
             listed[agent][slug] = row
         if not row.get("token"):
             raise TriggerError("trigger %s has no token" % slug)

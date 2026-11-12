@@ -5,11 +5,11 @@ running fire (the row is the truth, no events), record ends in the store, apply 
 error/RESTARTED -> fire again at most once per stage, then failed), and start the next queued stage by firing its trigger
 with the packet payload (intent row committed before the fire). The queue is the store's queue table; `enqueue` only drops a JSON request file in the inbox dir of the runner volume (atomic rename) and the loop ingests it each tick, so the loop is the only process that opens the store. A trigger entry may carry its own run_limit_s/stall_s/token_cap.
 SIGTERM stops the loop between ticks. The engine key and trigger tokens are never printed."""
-import argparse, json, os, signal, sys, tempfile, threading, time, uuid
+import argparse, json, os, signal, subprocess, sys, tempfile, threading, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import engine as E, limits as L, readyq as RQ, store as S, trigger as T
+import applypatch as AP, checkout as CO, engine as E, limits as L, publish as PB, readyq as RQ, store as S, testrun as TR, trigger as T
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -165,7 +165,8 @@ def ingest(st, inbox):
     return n
 
 class Runner:
-    def __init__(self, eng, st, cfg, tokens, clock=time.time):
+    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None):
+        self.open_pr, self.evidence = open_pr, evidence
         self.eng, self.st, self.cfg, self.tokens, self.clock = eng, st, cfg, tokens, clock
         self.by_slug = {e["slug"]: e for e in cfg["triggers"]}
         self.by_stage = {e["stage"]: e for e in cfg["triggers"]}
@@ -239,6 +240,10 @@ class Runner:
             self.st.close_run(rid, "discarded", iso(self.clock()), tin, tout, "result under a closed lease")
             log("run %s result discarded: lease of chunk %s closed" % (rid, f["chunk"]))
         elif what == "DONE":
+            if f["stage"] == "build" and f["chunk"] and "published:" + f["chunk"] not in self.st.get_all(f["job"]):
+                self.finish_build(f)
+            if self.evidence and self.evidence(f)[0] != "OK":
+                return  # the run ended but no evidence yet: stays running, read again next tick
             self.st.close_run(rid, "done", iso(self.clock()), tin, tout)
         elif what == "CANCEL":
             self.eng.cancel(agent, rid)
@@ -257,6 +262,23 @@ class Runner:
                 log("run %s failed: refire already used" % rid)
         else:  # FAILED, MISSING
             self.st.close_run(rid, "failed", iso(self.clock()), tin, tout, why)
+
+    def finish_build(self, f):
+        """A build run ended: check out base and head, apply the chunk's patch, run its done-test (fails on base, passes on
+        head), publish only the chunk's paths. Job kv keys: repo_url, base, base_branch, title, patch:<chunk>, test:<chunk>."""
+        job, chunk = f["job"], f["chunk"]
+        kv, paths = self.st.get_all(job), self.st.get_ready(job, chunk)["paths"]
+        d = self.cfg.get("work_dir") or os.path.join(os.path.dirname(store_path(self.cfg)), "work")
+        try:
+            base, head = (CO.Checkout(os.path.join(d, job, n), kv["repo_url"], kv["base"]).ensure() for n in ("base", "head"))
+            if (r := AP.apply(head, kv["patch:" + chunk], paths)) != "applied":
+                return log("chunk %s: patch %s" % (chunk, r))
+            if (r := TR.run(base, head, kv["test:" + chunk].split())["verdict"]) != "ok":
+                return log("chunk %s: done-test %s" % (chunk, r))
+            PB.publish(head, job, kv["title"], kv["base_branch"], self.open_pr, paths)
+            self.st.set(job, "published:" + chunk, "1")
+        except (KeyError, ValueError, OSError, subprocess.CalledProcessError) as e:
+            log("chunk %s: publish chain stopped: %s" % (chunk, type(e).__name__))
 
     def requeue(self, f):
         payload = {"job": f["job"], "stage": f["stage"], "chunk": f["chunk"]}

@@ -263,10 +263,14 @@ class Runner:
         st = self.st.get_all(f["job"]).get("payload:" + f["stage"])
         if st:
             payload = json.loads(st)
-        self.st.enqueue(f["job"], f["stage"], f["chunk"], payload)
-        if f["chunk"]:
+        if f["chunk"]:  # a chunk refire takes the ready path only: no queue row, the old attempt's lease is closed
+            for l in self.st.open_leases():
+                if l["job"] == f["job"] and l["chunk"] == f["chunk"] and l.get("attempt", 0) == f["refire"]:
+                    self.st.close_lease(l["id"], "requeued", at=iso(self.clock()))
             self.st.bump_attempt(f["job"], f["chunk"])
             self.st.set_ready_state(f["job"], f["chunk"], "ready")
+        else:
+            self.st.enqueue(f["job"], f["stage"], f["chunk"], payload)
 
     def start_queued(self):
         busy = {f["job"] for f in self.st.pending() + self.st.running()}

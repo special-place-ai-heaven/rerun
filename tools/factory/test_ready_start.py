@@ -37,6 +37,15 @@ class ReadyStart(unittest.TestCase):
         self.r.requeue(f)
         self.assertEqual(self.r.st.attempts("j", "A"), 1)
 
+    def test_requeue_one_path_and_closes_lease(self):
+        self.r.st.add_ready("j", "A")
+        self.r.tick()
+        f = self.r.st.running()[0]
+        self.r.st.grant_lease("j", "A", ["A.py"], "2099-01-01T00:00:00Z", attempt=f["refire"])
+        self.r.requeue(f)
+        self.assertEqual(self.r.st.db.execute("SELECT COUNT(*) FROM queue").fetchone()[0], 0)
+        self.assertEqual(self.r.st.open_leases(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

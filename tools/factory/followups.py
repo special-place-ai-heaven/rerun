@@ -21,3 +21,13 @@ def known(bodies):
     """Keys already present in issue bodies."""
     return {k for b in bodies for k in MARK.findall(b or "")}
 
+
+def create(client, found, existing=()):
+    """Open one issue per note whose key is not in `existing`; returns the keys opened."""
+    seen, opened = set(existing), []
+    for key, title, body in found:
+        if key not in seen:
+            client.create_issue(title, body)
+            seen.add(key)
+            opened.append(key)
+    return opened

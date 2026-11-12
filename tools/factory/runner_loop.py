@@ -164,6 +164,10 @@ def ingest(st, inbox):
         n += 1
     return n
 
+class ChainFailed(Exception):
+    """The publish chain of a finished build did not complete."""
+
+
 class Runner:
     def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None, issues=None):
         self.open_pr, self.evidence, self.issues = open_pr, evidence, issues
@@ -241,7 +245,10 @@ class Runner:
             log("run %s result discarded: lease of chunk %s closed" % (rid, f["chunk"]))
         elif what == "DONE":
             if f["stage"] == "build" and f["chunk"] and "published:" + f["chunk"] not in self.st.get_all(f["job"]):
-                self.finish_build(f)
+                try:
+                    self.finish_build(f)
+                except ChainFailed as e:
+                    return self.chain_failed(f, str(e), tin, tout)
             ev = self.evidence(f) if self.evidence else ("OK", "")
             if ev[0] != "OK":
                 return  # the run ended but no evidence yet: stays running, read again next tick
@@ -276,22 +283,33 @@ class Runner:
         except (OSError, RuntimeError) as e:
             log("follow-up issues for %s stopped: %s" % (job, type(e).__name__))
 
+    def chain_failed(self, f, why, tin, tout):
+        """A failed publish chain is a failed attempt, never done: limits.failure says RETRY (requeue) or NEEDS_BOSS (escalate)."""
+        what, note = L.failure(self.st.attempts(f["job"], f["chunk"]), self.cfg, why)
+        self.st.close_run(f["run_id"], "error" if what == "RETRY" else "failed", iso(self.clock()), tin, tout, note or why)
+        if what == "RETRY":
+            return self.requeue(f)
+        self.st.set_ready_state(f["job"], f["chunk"], "needs_boss")
+        log("chunk %s of job %s escalated: %s" % (f["chunk"], f["job"], note))
+
     def finish_build(self, f):
         """A build run ended: check out base and head, apply the chunk's patch, run its done-test (fails on base, passes on
         head), publish only the chunk's paths. Job kv keys: repo_url, base, base_branch, title, patch:<chunk>, test:<chunk>."""
         job, chunk = f["job"], f["chunk"]
         kv, paths = self.st.get_all(job), self.st.get_ready(job, chunk)["paths"]
+        if "repo_url" not in kv:  # a job never registered for publishing has no chain to fail
+            return log("chunk %s: job %s has no repo_url, nothing to publish" % (chunk, job))
         d = self.cfg.get("work_dir") or os.path.join(os.path.dirname(store_path(self.cfg)), "work")
         try:
             base, head = (CO.Checkout(os.path.join(d, job, n), kv["repo_url"], kv["base"]).ensure() for n in ("base", "head"))
             if (r := AP.apply(head, kv["patch:" + chunk], paths)) != "applied":
-                return log("chunk %s: patch %s" % (chunk, r))
+                raise ChainFailed("patch %s" % r)
             if (r := TR.run(base, head, kv["test:" + chunk].split())["verdict"]) != "ok":
-                return log("chunk %s: done-test %s" % (chunk, r))
+                raise ChainFailed("done-test %s" % r)
             PB.publish(head, job, kv["title"], kv["base_branch"], self.open_pr, paths)
             self.st.set(job, "published:" + chunk, "1")
         except (KeyError, ValueError, OSError, subprocess.CalledProcessError) as e:
-            log("chunk %s: publish chain stopped: %s" % (chunk, type(e).__name__))
+            raise ChainFailed("publish chain stopped: %s" % type(e).__name__) from e
 
     def requeue(self, f):
         payload = {"job": f["job"], "stage": f["stage"], "chunk": f["chunk"]}

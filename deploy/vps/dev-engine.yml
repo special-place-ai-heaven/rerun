@@ -14,6 +14,7 @@
 # Deliberately absent: published ports, env_file, the live engine key, any hub or pairing variable, a
 # model connection, GitHub access, privileged mode, added capabilities, the docker socket and host
 # paths. The image is the one images.yml already builds; pick another tag with RERUN_DEV_IMAGE_TAG.
+# A real model is added only on purpose and at run time, never here: deploy/vps/dev-engine-claude.sh.
 name: rerun-dev
 
 services:

@@ -90,5 +90,21 @@ class FactoryM2Doc(unittest.TestCase):
             self.assertIn(need, loop)
 
 
+class ClaudeScript(unittest.TestCase):
+    def setUp(self):
+        self.c = code(read("dev-engine-claude.sh"))
+
+    def test_token_goes_only_through_one_pipe(self):
+        uses = [l.strip() for l in self.c.splitlines() if "TOKEN" in l]
+        self.assertEqual(uses, ["read -r TOKEN || TOKEN=''", '[ -n "$TOKEN" ] || { echo "Cancelled: nothing sent."; exit 0; }',
+                                "printf '%s\\n' \"$TOKEN\" | realmodel connect", "TOKEN="])
+
+    def test_no_file_no_trace_no_live_key(self):
+        for bad in ("set -x", ".env", "RERUN_ENGINE_API_KEY", "docker exec -e", "tee "):
+            self.assertNotIn(bad, self.c)
+        self.assertIn("stty -echo", self.c)
+        self.assertIn("-f deploy/vps/factory-runner.yml exec -T factory-runner python3 /app/realmodel.py", self.c)
+
+
 if __name__ == "__main__":
     unittest.main()

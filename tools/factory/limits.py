@@ -50,21 +50,41 @@ def may_fire(fired_total):
     return "FIRE", None
 
 
-def run_outcome(row, now):
-    """A runs row (trigger.read_run) -> RUNNING, OVERDUE (BLOCKED: never fired again, never cancelled), DONE, RESTARTED,
-    FAILED or MISSING. now is epoch seconds."""
+def run_limits(cfg=None):
+    """Run limits from the runner.json keys run_limit_s, stall_s, token_cap (seconds, seconds, tokens), with defaults.
+    A missing, null or non-positive stall_s or token_cap switches that rule off."""
+    cfg = cfg or {}
+    def num(key, default):
+        v = cfg.get(key, default)
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else None
+    return {"run_limit_s": num("run_limit_s", RUN_LIMIT_S) or RUN_LIMIT_S, "stall_s": num("stall_s", STALL_S), "token_cap": num("token_cap", None)}
+
+def run_outcome(row, now, steps=None, cfg=None):
+    """A runs row (trigger.read_run) -> RUNNING, CANCEL (a running run over its wall time, stalled or over its token
+    cap: the caller cancels it through engine.py), DONE, RESTARTED, REFIRE_ONCE (error row: fired again once, the store
+    counts refires), FAILED or MISSING. steps is {"last_step_at": ISO or None, "tokens": int} (optional), cfg the
+    runner.json dict (optional). now is epoch seconds. Pure: no I/O."""
     if not row or not row.get("status"):
         return "MISSING", "run not found in system.db"
     st, rid = row["status"], row.get("id")
     if st == "running":
-        if now - ts(row["started_at"]) > RUN_LIMIT_S:
-            return "OVERDUE", ("run %s still running after %d min. Run %s may still be running and burning tokens: stop it in the UI."
-                               % (rid, RUN_LIMIT_S // 60, rid))
+        lim, steps = run_limits(cfg), steps or {}
+        started = ts(row["started_at"])
+        if now - started > lim["run_limit_s"]:
+            return "CANCEL", "run %s still running after %d s (limit %d s)" % (rid, now - started, lim["run_limit_s"])
+        if lim["token_cap"] is not None and (steps.get("tokens") or 0) > lim["token_cap"]:
+            return "CANCEL", "run %s used %d tokens (cap %d)" % (rid, steps["tokens"], lim["token_cap"])
+        if steps and lim["stall_s"] is not None:
+            last = ts(steps["last_step_at"]) if steps.get("last_step_at") else started
+            if now - last > lim["stall_s"]:
+                return "CANCEL", "run %s stalled: no new step for %d s (limit %d s)" % (rid, now - last, lim["stall_s"])
         return "RUNNING", None
     if st == "done":
         return "DONE", None
-    if st == "error" and RESTARTED in (row.get("error") or ""):
-        return "RESTARTED", None
+    if st == "error":
+        if RESTARTED in (row.get("error") or ""):
+            return "RESTARTED", None
+        return "REFIRE_ONCE", "run %s ended error: %s" % (rid, (row.get("error") or "-")[:200])
     return "FAILED", "run %s ended %s: %s" % (rid, st, (row.get("error") or "-")[:200])
 
 

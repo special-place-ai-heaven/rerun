@@ -2,7 +2,7 @@
 An intent row is written and committed BEFORE a stage is fired; fired() adds the run id after.
 A crash in between leaves an intent with no run id: pending() lists it, the caller decides
 (resolve it against the engine, or refire once: refire count). No network, no engine key here."""
-import fcntl, os, sqlite3, time
+import fcntl, json, os, sqlite3, time
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS fires(
@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS fires(
   error TEXT, refire INTEGER NOT NULL DEFAULT 0);
 CREATE UNIQUE INDEX IF NOT EXISTS fires_run ON fires(run_id) WHERE run_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS kv(job TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, PRIMARY KEY(job, k));
+CREATE TABLE IF NOT EXISTS queue(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job TEXT NOT NULL, stage TEXT NOT NULL, chunk TEXT NOT NULL DEFAULT '',
+  payload TEXT NOT NULL, enqueued_at TEXT NOT NULL, not_before TEXT);
 """
 OPEN = ("intent", "running")
 
@@ -97,6 +101,47 @@ class Store:
 
     def get_all(self, job):
         return {r["k"]: r["v"] for r in self.db.execute("SELECT k,v FROM kv WHERE job=?", (job,))}
+
+    def enqueue(self, job, stage, chunk="", payload=None, not_before=None, at=None):
+        """Queue a stage (the runner's own table). payload is a dict (default {job, stage, chunk}); not_before an ISO time
+        before which the row is not offered by queued(). Returns the queue id."""
+        payload = payload or {"job": job, "stage": stage, "chunk": chunk}
+        cur = self.db.execute("INSERT INTO queue(job,stage,chunk,payload,enqueued_at,not_before) VALUES(?,?,?,?,?,?)",
+                              (job, stage, chunk, json.dumps(payload), at or now(), not_before))
+        return cur.lastrowid
+
+    def queued(self, at=None):
+        """Queue rows in id order, payload decoded. With `at` (ISO), rows whose not_before is later are left out."""
+        rows = []
+        for r in self.db.execute("SELECT * FROM queue ORDER BY id"):
+            r = dict(r)
+            if at is not None and r["not_before"] and r["not_before"] > at:
+                continue
+            r["payload"] = json.loads(r["payload"])
+            rows.append(r)
+        return rows
+
+    def dequeue(self, queue_id):
+        self.db.execute("DELETE FROM queue WHERE id=?", (queue_id,))
+
+    def fire_count(self, job):
+        """Number of fires ever recorded for the job (the fired-runs safety cap counts these)."""
+        return self.db.execute("SELECT COUNT(*) FROM fires WHERE job=?", (job,)).fetchone()[0]
+
+    def known_run_ids(self):
+        return {r[0] for r in self.db.execute("SELECT run_id FROM fires WHERE run_id IS NOT NULL")}
+
+    def dequeue_to_intent(self, queue_id, job, chunk, stage, coworker="", slug=""):
+        """One commit: the intent row in, the queue row out. Committed before the caller fires. Returns the fire id."""
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            fid = self.intent(job, chunk, stage, coworker, slug)
+            self.dequeue(queue_id)
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+        return fid
 
     def _rows(self, where, job):
         sql = "SELECT * FROM fires WHERE " + where + (" AND job=?" if job is not None else "") + " ORDER BY id"

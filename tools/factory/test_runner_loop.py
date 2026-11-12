@@ -51,8 +51,11 @@ class TestRunner(unittest.TestCase):
         self.runner = self.make()
 
     def make(self):
+        return self.make_with(self.cfg)
+
+    def make_with(self, cfg):
         self.eng.now = self.now
-        return R.build(self.cfg, self.eng, clock=lambda: self.now)
+        return R.build(cfg, self.eng, clock=lambda: self.now)
 
     def tearDown(self):
         self.runner.st.close()
@@ -67,7 +70,7 @@ class TestRunner(unittest.TestCase):
         return self.runner.st.db.execute("SELECT * FROM fires ORDER BY id").fetchall()
 
     def test_done_recorded_within_one_tick(self):
-        R.enqueue(self.runner.st, "60", "challenge", "C7")
+        self.runner.st.enqueue("60", "challenge", "C7")
         self.tick()
         self.assertEqual(len(self.eng.fires), 1)
         self.assertEqual(self.eng.fires[0][1]["job"], "60")
@@ -79,7 +82,7 @@ class TestRunner(unittest.TestCase):
         self.assertIsNotNone(f["ended_at"])
 
     def test_long_run_cancelled(self):
-        R.enqueue(self.runner.st, "60", "challenge")
+        self.runner.st.enqueue("60", "challenge")
         self.tick()
         self.tick(700)
         self.assertEqual(self.eng.cancelled, ["run1"])
@@ -88,7 +91,7 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(len(self.eng.fires), 1)  # a cancel is not refired
 
     def test_error_refired_exactly_once(self):
-        R.enqueue(self.runner.st, "60", "challenge")
+        self.runner.st.enqueue("60", "challenge")
         self.tick()
         self.eng.runs["run1"].update(status="error", error="boom")
         self.tick()
@@ -100,14 +103,14 @@ class TestRunner(unittest.TestCase):
         self.assertEqual([f["status"] for f in self.fires()], ["error", "failed"])
 
     def test_engine_restart_row_refired_once(self):
-        R.enqueue(self.runner.st, "60", "challenge")
+        self.runner.st.enqueue("60", "challenge")
         self.tick()
         self.eng.runs["run1"].update(status="error", error=L.RESTARTED)
         self.tick()
         self.assertEqual(len(self.eng.fires), 2)
 
     def test_runner_restart_continues_without_double_fire(self):
-        R.enqueue(self.runner.st, "60", "challenge")
+        self.runner.st.enqueue("60", "challenge")
         self.tick()
         self.runner.st.close()
         self.runner = self.make()  # new process: tokens from file, store from disk
@@ -121,7 +124,7 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(self.fires()[0]["status"], "done")
 
     def test_crash_between_intent_and_fire_resolved_not_refired(self):
-        R.enqueue(self.runner.st, "60", "challenge")
+        self.runner.st.enqueue("60", "challenge")
         orig = self.eng.fire_trigger
 
         def lost(*a):
@@ -137,9 +140,68 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(len(self.eng.fires), 1)
         self.assertEqual(self.fires()[0]["run_id"], "run1")
 
-    def test_enqueue_while_store_locked(self):
-        R.enqueue_file(self.cfg["store_file"], "61", "challenge")
-        self.assertEqual(len(R.queued(self.runner.st)), 1)
+    def test_enqueue_writes_inbox_file_only_and_loop_ingests_it(self):
+        inbox = R.inbox_path(self.cfg)
+        self.assertEqual(os.path.dirname(inbox), self.d.name)
+        R.enqueue(inbox, "61", "challenge", "C1")  # the loop holds the store lock: enqueue never opens the store
+        self.assertEqual(len(os.listdir(inbox)), 1)
+        self.assertEqual(self.runner.st.queued(), [])
+        self.tick()
+        self.assertEqual(os.listdir(inbox), [])
+        self.assertEqual(len(self.eng.fires), 1)
+        self.assertEqual(self.eng.fires[0][1], {"job": "61", "stage": "challenge", "chunk": "C1"})
+        self.assertEqual(self.fires()[0]["chunk"], "C1")
+        self.assertEqual(self.runner.st.queued(), [])
+
+    def test_bad_inbox_file_is_set_aside(self):
+        inbox = R.inbox_path(self.cfg)
+        os.makedirs(inbox)
+        with open(os.path.join(inbox, "0001-x.json"), "w") as f:
+            f.write("{not json")
+        R.enqueue(inbox, "61", "challenge")
+        self.tick()
+        self.assertEqual(len(self.eng.fires), 1)
+        self.assertEqual(os.listdir(inbox), ["0001-x.json.bad"])
+
+    def test_not_before_holds_a_queue_row_back(self):
+        self.runner.st.enqueue("61", "challenge", not_before=R.iso(T0 + 100))
+        self.tick()
+        self.assertEqual(len(self.eng.fires), 0)
+        self.tick(100)
+        self.assertEqual(len(self.eng.fires), 1)
+
+    def test_no_step_stall_counts_from_run_start_not_now(self):
+        self.runner.cfg.update(stall_s=100, run_limit_s=5000)
+        self.runner.st.enqueue("60", "challenge")
+        self.tick(0)
+        self.assertEqual(len(self.eng.fires), 1)
+        self.tick(90)
+        self.assertEqual(self.eng.cancelled, [])
+        self.tick(30)  # 120 s after the start, still no step
+        self.assertEqual(self.eng.cancelled, ["run1"])
+        self.assertIn("stalled", self.fires()[0]["error"])
+
+    def test_r2_challenge_hold_is_cancelled_before_the_stub_would_finish(self):
+        import trigger as T
+        STUB_HOLD = 1800  # deploy/vps/stub-model.yml default
+        shipped = {e["stage"]: e for e in T.load_config()["triggers"]}["challenge-hold"]
+        self.assertLess(shipped["run_limit_s"] * 5, STUB_HOLD)
+        cfg = dict(self.cfg, run_limit_s=2700, stall_s=600)
+        cfg["triggers"] = [dict(cfg["triggers"][0], stage="challenge-hold", slug="factory-challenge", run_limit_s=shipped["run_limit_s"])]
+        self.runner.st.close()
+        self.runner = self.make_with(cfg)
+        self.runner.st.enqueue("r2", "challenge-hold")
+        self.tick(0)
+        elapsed = 0
+        while not self.eng.cancelled and elapsed < STUB_HOLD:  # the stub run stays running the whole time
+            self.tick(30)
+            elapsed += 30
+        self.assertEqual(self.eng.cancelled, ["run1"])
+        self.assertLess(elapsed, STUB_HOLD)
+        self.assertLessEqual(elapsed, shipped["run_limit_s"] + 30)
+        f = self.fires()[0]
+        self.assertEqual(f["status"], "cancelled")
+        self.assertIn("limit %d s" % shipped["run_limit_s"], f["error"])
 
 
 class SetupEngine:

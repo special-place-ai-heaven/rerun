@@ -3,21 +3,19 @@
 Start: ensure_triggers, open the store, resolve unfinished fires. Every poll_s: read the run row over HTTP for every
 running fire (the row is the truth, no events), record ends in the store, apply limits.run_outcome (CANCEL -> cancel;
 error/RESTARTED -> fire again at most once per stage, then failed), and start the next queued stage by firing its trigger
-with the packet payload (intent row committed before the fire). The queue lives in the store (kv, keys 'queue:...').
+with the packet payload (intent row committed before the fire). The queue is the store's queue table; `enqueue` only drops a JSON request file in the inbox dir of the runner volume (atomic rename) and the loop ingests it each tick, so the loop is the only process that opens the store. A trigger entry may carry its own run_limit_s/stall_s/token_cap.
 SIGTERM stops the loop between ticks. The engine key and trigger tokens are never printed."""
-import argparse, json, os, signal, sys, tempfile, threading, time
+import argparse, json, os, signal, sys, tempfile, threading, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import engine as E, limits as L, store as S, trigger as T
 
 POLL_S = 30
-QP = "queue:"
-
+INBOX_NAME = "inbox"
 
 def log(msg):
     print("runner: " + msg, flush=True)
-
 
 def store_path(cfg):
     return cfg.get("store_file") or os.path.join(os.environ.get("FACTORY_DATA_DIR", "/state"), "ledger.db")
@@ -26,15 +24,12 @@ STATE_NAME = "runner-state.json"
 STUB = {"name": "stub", "provider": "custom", "baseUrl": "http://stub-model:8080/v1", "models": ["stub-fast", "stub-hold"]}
 DEFAULT_MODEL = "stub-fast"
 
-
 class NeedsSetup(RuntimeError):
     """runner.json names a coworker the state file has no id for yet."""
-
 
 def state_path(cfg):
     """The state file (coworker ids written by `setup`): runner.json key state_file, else beside the ledger in the runner volume."""
     return cfg.get("state_file") or os.path.join(os.path.dirname(store_path(cfg)), STATE_NAME)
-
 
 def read_state(cfg):
     try:
@@ -46,7 +41,6 @@ def read_state(cfg):
         raise RuntimeError("cannot read the state file; run setup again") from None
     return data if isinstance(data, dict) else {}
 
-
 def write_state(cfg, state):
     path = state_path(cfg)
     d = os.path.dirname(os.path.abspath(path))
@@ -55,7 +49,6 @@ def write_state(cfg, state):
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(state, f, sort_keys=True, indent=1)
     os.replace(tmp, path)
-
 
 def resolve(cfg, state, strict=True):
     """A copy of cfg whose trigger entries without an `agent` take it from state['agents'][entry['agent_name']].
@@ -74,12 +67,10 @@ def resolve(cfg, state, strict=True):
         out["triggers"].append(e)
     return out
 
-
 def load_runtime(cfg=None, strict=True):
     """runner.json resolved with the state file: what `run`, `once` and status_report all read (one config, one store path)."""
     cfg = cfg if cfg is not None else T.load_config()
     return resolve(cfg, read_state(cfg), strict)
-
 
 def setup(eng, cfg):
     """Create or reuse, in this order: the stub's `custom` connection (set as the box default), one coworker per trigger entry
@@ -124,43 +115,54 @@ def setup(eng, cfg):
     out.append("triggers ensured")
     return out
 
-
-
 def iso(epoch):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
 
+# ---- queue (store.queue table; the CLI writes inbox request files) ----
+def inbox_path(cfg):
+    """Where `enqueue` drops request files: <runner volume>/inbox, beside the ledger. The loop is the only store writer."""
+    return cfg.get("inbox_dir") or os.path.join(os.path.dirname(store_path(cfg)), INBOX_NAME)
 
-# ---- queue (rows in kv: job, 'queue:<seq>:<stage>', JSON {chunk, payload}) ----
-def enqueue(st, job, stage, chunk="", payload=None):
-    """Queue a stage. The packet payload defaults to {job, stage, chunk}."""
-    key = "%s%013d:%s" % (QP, int(time.time() * 1000), stage)
-    val = json.dumps({"chunk": chunk, "payload": payload or {"job": job, "stage": stage, "chunk": chunk}})
-    st.set(job, key, val)
-    return key
+def enqueue(inbox, job, stage, chunk="", payload=None):
+    """Queue a stage from the CLI: one small JSON request file in the inbox dir, written to a temp name and renamed
+    (atomic). No store access: the loop ingests the file at its next tick. The packet payload defaults to {job, stage, chunk}."""
+    os.makedirs(inbox, exist_ok=True)
+    body = {"job": job, "stage": stage, "chunk": chunk, "payload": payload or {"job": job, "stage": stage, "chunk": chunk}}
+    name = "%013d-%s.json" % (int(time.time() * 1000), uuid.uuid4().hex[:8])
+    fd, tmp = tempfile.mkstemp(prefix=".req-", dir=inbox)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(body, f)
+    os.replace(tmp, os.path.join(inbox, name))
+    return name
 
-
-def enqueue_file(path, job, stage, chunk="", payload=None):
-    """Queue from the CLI while the loop runs: its own connection (the loop holds the store's writer lock; WAL + busy wait)."""
-    import sqlite3
-    db = sqlite3.connect(path, timeout=30, isolation_level=None)
+def ingest(st, inbox):
+    """Move every request file of the inbox into the store's queue (oldest name first), then delete the file.
+    An unreadable or incomplete file is renamed *.bad and skipped. Returns the number queued."""
     try:
-        db.execute("CREATE TABLE IF NOT EXISTS kv(job TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, PRIMARY KEY(job, k))")
-        key = "%s%013d:%s" % (QP, int(time.time() * 1000), stage)
-        val = json.dumps({"chunk": chunk, "payload": payload or {"job": job, "stage": stage, "chunk": chunk}})
-        db.execute("INSERT INTO kv VALUES(?,?,?) ON CONFLICT(job,k) DO UPDATE SET v=excluded.v", (job, key, val))
-    finally:
-        db.close()
-    return key
-
-
-def queued(st):
-    return [(r["job"], r["k"], json.loads(r["v"])) for r in
-            st.db.execute("SELECT job,k,v FROM kv WHERE k LIKE 'queue:%' ORDER BY k")]
-
-
-def _stage_of(key):
-    return key.split(":", 2)[2]
-
+        names = sorted(n for n in os.listdir(inbox) if n.endswith(".json") and not n.startswith("."))
+    except FileNotFoundError:
+        return 0
+    n = 0
+    for name in names:
+        path = os.path.join(inbox, name)
+        try:
+            with open(path, encoding="utf-8") as f:
+                req = json.load(f)
+            job, stage = str(req["job"]), str(req["stage"])
+            payload = req.get("payload")
+            if payload is not None and not isinstance(payload, dict):
+                raise ValueError("payload is not an object")
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            log("bad request file %s: %s" % (name, type(e).__name__))
+            try:
+                os.replace(path, path + ".bad")
+            except OSError:
+                pass
+            continue
+        st.enqueue(job, stage, str(req.get("chunk") or ""), payload)
+        os.unlink(path)
+        n += 1
+    return n
 
 class Runner:
     def __init__(self, eng, st, cfg, tokens, clock=time.time):
@@ -170,6 +172,7 @@ class Runner:
 
     # -- one tick --
     def tick(self):
+        ingest(self.st, inbox_path(self.cfg))
         self.resolve_pending()
         for f in self.st.running():
             try:
@@ -195,7 +198,7 @@ class Runner:
             except E.EngineError as e:
                 log("cannot list runs of %s: %s" % (agent, e))
                 continue
-            taken = {r[0] for r in self.st.db.execute("SELECT run_id FROM fires WHERE run_id IS NOT NULL")}
+            taken = self.st.known_run_ids()
             rows = [r for r in rows if r and r["id"] not in taken]
             what, val = L.resolve_pending(f["intent_at"], f["slug"], rows, self.clock(), self.cfg.get("poll_s", POLL_S))
             if what == "RUN":
@@ -215,8 +218,8 @@ class Runner:
             ok = True
         except E.EngineError:
             ok = False
-        # unknown step times must not read as a stall: use now
-        return {"last_step_at": last or iso(self.clock()), "tokens": tokens} if ok else {"tokens": tokens}
+        # no step yet: last_step_at stays None and limits counts the stall from the run's start, never from now
+        return {"last_step_at": last, "tokens": tokens} if ok else {"tokens": tokens}
 
     def check(self, f):
         agent = self._agent(f)
@@ -225,7 +228,7 @@ class Runner:
             return
         row = T.read_run(self.eng, agent, f["run_id"])
         steps = self._steps(agent, f, row) if row and row.get("status") == "running" else None
-        what, why = L.run_outcome(row, self.clock(), steps, self.cfg)
+        what, why = L.run_outcome(row, self.clock(), steps, L.stage_cfg(self.cfg, self.by_slug.get(f["slug"])))
         tin, tout = (row or {}).get("input_tokens") or 0, (row or {}).get("output_tokens") or 0
         rid = f["run_id"]
         if what == "RUNNING":
@@ -255,48 +258,37 @@ class Runner:
         st = self.st.get_all(f["job"]).get("payload:" + f["stage"])
         if st:
             payload = json.loads(st)
-        enqueue(self.st, f["job"], f["stage"], f["chunk"], payload)
+        self.st.enqueue(f["job"], f["stage"], f["chunk"], payload)
 
     def start_queued(self):
         busy = {f["job"] for f in self.st.pending() + self.st.running()}
-        for job, key, item in queued(self.st):
+        for q in self.st.queued(iso(self.clock())):
+            job, stage = q["job"], q["stage"]
             if job in busy:
                 continue
-            stage = _stage_of(key)
             ent = self.by_stage.get(stage)
             if not ent:
                 log("no trigger for stage %s of job %s, dropped" % (stage, job))
-                self.st.db.execute("DELETE FROM kv WHERE job=? AND k=?", (job, key))
+                self.st.dequeue(q["id"])
                 continue
-            total = self.st.db.execute("SELECT COUNT(*) FROM fires WHERE job=?", (job,)).fetchone()[0]
-            if L.may_fire(total)[0] != "FIRE":
+            if L.may_fire(self.st.fire_count(job))[0] != "FIRE":
                 log("job %s hit the fire cap, stage %s dropped" % (job, stage))
-                self.st.db.execute("DELETE FROM kv WHERE job=? AND k=?", (job, key))
+                self.st.dequeue(q["id"])
                 continue
             token = self.tokens.get("%s/%s" % (ent["agent"], ent["slug"]))
             if not token:
                 log("no token for %s, skipped" % ent["slug"])
                 continue
-            chunk = item.get("chunk", "")
-            self.st.set(job, "payload:" + stage, json.dumps(item["payload"]))
-            db = self.st.db
-            db.execute("BEGIN IMMEDIATE")  # intent in, queue row out, one commit, before the fire
-            try:
-                fid = self.st.intent(job, chunk, stage, ent.get("coworker", ""), ent["slug"])
-                db.execute("DELETE FROM kv WHERE job=? AND k=?", (job, key))
-                db.execute("COMMIT")
-            except BaseException:
-                db.execute("ROLLBACK")
-                raise
+            self.st.set(job, "payload:" + stage, json.dumps(q["payload"]))
+            fid = self.st.dequeue_to_intent(q["id"], job, q["chunk"], stage, ent.get("coworker", ""), ent["slug"])  # intent in, queue row out, before the fire
             busy.add(job)
             try:
-                run_id, _ = T.fire(self.eng, ent["agent"], ent["slug"], token, item["payload"])
+                run_id, _ = T.fire(self.eng, ent["agent"], ent["slug"], token, q["payload"])
             except T.TriggerError as e:
                 log("fire of %s failed (kept as intent, resolved next tick): %s" % (ent["slug"], e))
                 continue
             self.st.fired(fid, run_id)
             log("fired stage %s of job %s: run %s" % (stage, job, run_id))
-
 
 def build(cfg=None, eng=None, clock=time.time):
     cfg = load_runtime(cfg)
@@ -304,7 +296,6 @@ def build(cfg=None, eng=None, clock=time.time):
     tokens = T.ensure_triggers(eng, cfg)
     st = S.Store(store_path(cfg))
     return Runner(eng, st, cfg, tokens, clock)
-
 
 def run(r, stop, poll_s):
     log("started")
@@ -315,7 +306,6 @@ def run(r, stop, poll_s):
             log("tick failed: %s" % e)
         stop.wait(poll_s)
     log("stopped")
-
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="runner_loop")
@@ -335,7 +325,7 @@ def main(argv=None):
         if a.payload_file:
             with open(a.payload_file, encoding="utf-8") as f:
                 payload = json.load(f)
-        enqueue_file(store_path(cfg), a.job, a.stage, a.chunk, payload)
+        enqueue(inbox_path(cfg), a.job, a.stage, a.chunk, payload)
         print("queued %s %s" % (a.job, a.stage))
         return 0
     if a.cmd == "setup":
@@ -370,7 +360,6 @@ def main(argv=None):
     run(r, stop, cfg.get("poll_s", POLL_S))
     r.st.close()
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -11,7 +11,7 @@ import engine as E
 
 CONFIG = os.path.join(HERE, "runner.json")
 TRIGGERS = os.path.join(HERE, "triggers")
-TOKENS_ENV, TOKENS_DEFAULT = "FACTORY_TRIGGER_TOKENS_FILE", "/data/runner/trigger-tokens.json"
+TOKENS_ENV, TOKENS_DEFAULT = "FACTORY_TRIGGER_TOKENS_FILE", "/state/trigger-tokens.json"
 PROBE_WAIT_S, PROBE_POLL_S, PROBE_MAX_INPUT = 600, 15, 300000
 # the keys limits.py reads (snake_case) <- the engine's run row (camelCase)
 RUN_KEYS = (("id", "id"), ("agent_id", "agentId"), ("session_id", "sessionId"), ("status", "status"),

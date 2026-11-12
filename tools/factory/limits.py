@@ -50,6 +50,17 @@ def may_fire(fired_total):
     return "FIRE", None
 
 
+def stage_cfg(cfg, entry=None):
+    """cfg with the per-stage overrides of a runner.json trigger entry (keys run_limit_s, stall_s, token_cap) laid over
+    the global ones. A stage that must end fast (the R2 proof stage) carries its own short run_limit_s."""
+    out = dict(cfg or {})
+    for k in ("run_limit_s", "stall_s", "token_cap"):
+        if entry and k in entry:
+            out[k] = entry[k]
+    return out
+
+
+
 def run_limits(cfg=None):
     """Run limits from the runner.json keys run_limit_s, stall_s, token_cap (seconds, seconds, tokens), with defaults.
     A missing, null or non-positive stall_s or token_cap switches that rule off."""

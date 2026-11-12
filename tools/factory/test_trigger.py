@@ -241,7 +241,7 @@ class TestFiles(unittest.TestCase):
         self.assertIn("`PLAN READY`", body)
         self.assertIn("`PLAN REJECT: <n> points open`", body)
         cfg = T.load_config()
-        self.assertEqual(cfg["tick_seconds"], 120)
+        self.assertNotIn("tick_seconds", cfg)
         self.assertIn(("challenge", "DEVILS_ADVOCATE", "factory-challenge"), [(e["stage"], e["coworker"], e["slug"]) for e in cfg["triggers"]])
 
 

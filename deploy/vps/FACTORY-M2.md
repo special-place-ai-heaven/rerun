@@ -63,7 +63,7 @@ sudo sh deploy/vps/factory-status.sh
 sudo docker compose -f deploy/vps/factory-runner.yml exec -T factory-runner python3 /app/runner_loop.py enqueue r2 challenge-hold
 ```
 
-Wait past the run wall-time limit in `limits.py` (the runner cancels it), then:
+Wait 3 minutes (the `challenge-hold` stage has its own 120 s run limit in `runner.json`; the stub would hold it for 1800 s, so only the runner can end it), then:
 
 ```sh
 sudo sh deploy/vps/factory-status.sh

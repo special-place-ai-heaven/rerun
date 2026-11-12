@@ -1,5 +1,4 @@
 {
-  "tick_seconds": 120,
   "triggers": [
     {
       "stage": "challenge",
@@ -13,7 +12,8 @@
       "coworker": "DEVILS_ADVOCATE",
       "agent_name": "challenge-hold",
       "slug": "factory-challenge-hold",
-      "model": "stub-hold"
+      "model": "stub-hold",
+      "run_limit_s": 120
     }
   ],
   "poll_s": 30,

@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS ready_chunks(
   paths TEXT NOT NULL DEFAULT '[]', deps TEXT NOT NULL DEFAULT '[]',
   state TEXT NOT NULL DEFAULT 'ready', attempts INTEGER NOT NULL DEFAULT 0,
   added_at TEXT NOT NULL, PRIMARY KEY(job, chunk));
+CREATE TABLE IF NOT EXISTS leases(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT NOT NULL, chunk TEXT NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 0, paths TEXT NOT NULL DEFAULT '[]',
+  granted_at TEXT NOT NULL, expires_at TEXT NOT NULL, closed_at TEXT, reason TEXT);
 """
 OPEN = ("intent", "running")
 
@@ -177,6 +181,36 @@ class Store:
     def bump_attempt(self, job, chunk):
         self.db.execute("UPDATE ready_chunks SET attempts=attempts+1 WHERE job=? AND chunk=?", (job, chunk))
         return self.attempts(job, chunk)
+
+    def grant_lease(self, job, chunk, paths, expires_at, attempt=0, at=None):
+        """Open a lease on a chunk's paths until expires_at (ISO). Returns the lease id."""
+        cur = self.db.execute("INSERT INTO leases(job,chunk,attempt,paths,granted_at,expires_at) VALUES(?,?,?,?,?,?)",
+                              (job, chunk, attempt, json.dumps(list(paths)), at or now(), expires_at))
+        return cur.lastrowid
+
+    def _lease(self, r):
+        r = dict(r)
+        r["paths"] = json.loads(r["paths"])
+        return r
+
+    def get_lease(self, lease_id):
+        r = self.db.execute("SELECT * FROM leases WHERE id=?", (lease_id,)).fetchone()
+        return self._lease(r) if r else None
+
+    def open_leases(self):
+        return [self._lease(r) for r in self.db.execute("SELECT * FROM leases WHERE closed_at IS NULL ORDER BY id")]
+
+    def close_lease(self, lease_id, reason, at=None):
+        """Close with a reason; a lease that is already closed keeps its first reason."""
+        self.db.execute("UPDATE leases SET closed_at=?, reason=? WHERE id=? AND closed_at IS NULL",
+                        (at or now(), reason, lease_id))
+
+    def expire_leases(self, at):
+        """Close every open lease whose expires_at is before `at`; returns the leases closed."""
+        out = [l for l in self.open_leases() if l["expires_at"] < at]
+        for l in out:
+            self.close_lease(l["id"], "expired", at=at)
+        return out
 
     def _rows(self, where, job):
         sql = "SELECT * FROM fires WHERE " + where + (" AND job=?" if job is not None else "") + " ORDER BY id"

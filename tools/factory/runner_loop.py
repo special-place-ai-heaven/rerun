@@ -310,8 +310,8 @@ class Runner:
             if res["verdict"] != "ok":
                 raise ChainFailed("done-test %s" % res["verdict"])
             self.st.set(job, "receipt:" + chunk, json.dumps(res))
-            recs = {k[8:]: json.loads(v) for k, v in self.st.get_all(job).items() if k.startswith("receipt:")}
-            text = pr_body("%s#%s" % (self.cfg.get("repo", "special-place-ai-heaven/rerun"), job), recs)
+            repo = kv["repo_url"].replace("https://github.com/", "", 1)
+            text = pr_body("%s#%s" % (repo, job), unmerged_receipts(self.st, job))
             PB.publish(head, job, kv["title"], kv["base_branch"], lambda t, h, b, _="": self.open_pr(t, h, b, text), paths)
             self.st.set(job, "published:" + chunk, "1")
         except (KeyError, ValueError, OSError, subprocess.CalledProcessError) as e:
@@ -491,6 +491,11 @@ def build(cfg=None, eng=None, clock=time.time, gh=None):
     tokens = T.ensure_triggers(eng, cfg)
     st = S.Store(store_path(cfg))
     return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr, issues=gh, pr_by_head=lambda b: gh.pr_by_head(b), evidence=lambda f: stage_evidence(gh, st, f))
+
+def unmerged_receipts(st, job):
+    """Receipts of the job's chunks not yet merged: the body of this PR lists only those."""
+    merged = {c for (c,) in st.db.execute("SELECT chunk FROM ready_chunks WHERE job=? AND state='merged'", (job,))}
+    return {k[8:]: json.loads(v) for k, v in st.get_all(job).items() if k.startswith("receipt:") and k[8:] not in merged}
 
 def stage_evidence(gh, st, f):
     """Evidence for an ended run: a build run needs its pushed branch and CI (evidence.stage_check); other stages: OK.

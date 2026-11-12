@@ -40,7 +40,7 @@ describe('trigger create and fire with the engine key set', () => {
         const wrong = await app.request('/agents/a1/triggers/stage/fire', { method: 'POST', headers: auth, body: JSON.stringify({ token: 'wrong', method: 'POST' }) })
         expect(wrong.status).toBe(404)
 
-        const fire = await app.request('/agents/a1/triggers/stage/fire', { method: 'POST', headers: auth, body: JSON.stringify({ token: trigger.token, method: 'POST', body: { packet: 1 } }) })
+        const fire = await app.request('/agents/a1/triggers/stage/fire', { method: 'POST', headers: auth, body: JSON.stringify({ token: trigger.token, method: 'POST', body: '{"packet":1}' }) })
         expect(fire.status).toBe(202)
         expect(await fire.json()).toEqual({ runId: 'run-1', sessionId: 'sess-1', triggerSlug: 'stage' })
         expect(fired.calls).toHaveLength(1)

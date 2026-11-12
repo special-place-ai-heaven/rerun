@@ -49,6 +49,10 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(SCHEMA)
+        have = {r[1] for r in self.db.execute("PRAGMA table_info(fires)")}
+        for col in ("cache_read", "cache_write", "seconds"):  # old databases: add the cost columns
+            if col not in have:
+                self.db.execute(f"ALTER TABLE fires ADD COLUMN {col} INTEGER")
 
     def close(self):
         self.db.close()
@@ -68,9 +72,19 @@ class Store:
         self.db.execute("UPDATE fires SET run_id=?, status='running' WHERE id=? AND status='intent'",
                         (run_id, fire_id))
 
-    def close_run(self, run_id, status, at=None, tokens_in=0, tokens_out=0, error=None):
-        self.db.execute("UPDATE fires SET status=?, ended_at=?, tokens_in=?, tokens_out=?, error=? WHERE run_id=?",
-                        (status, at or now(), tokens_in, tokens_out, error, run_id))
+    def close_run(self, run_id, status, at=None, tokens_in=0, tokens_out=0, error=None,
+                  cache_read=None, cache_write=None):
+        """Close a run and write its cost: tokens (cache columns stay NULL when the run row has none) and seconds."""
+        at = at or now()
+        self.db.execute("UPDATE fires SET status=?, ended_at=?, tokens_in=?, tokens_out=?, error=?, cache_read=?, "
+                        "cache_write=?, seconds=MAX(0, CAST(strftime('%s', ?) AS INTEGER) - CAST(strftime('%s', intent_at) AS INTEGER)) "
+                        "WHERE run_id=?", (status, at, tokens_in, tokens_out, error, cache_read, cache_write, at, run_id))
+
+    def stage_cost(self, run_id):
+        """The cost row of one run: tokens in/out/cache and seconds (None when the run is unknown)."""
+        r = self.db.execute("SELECT job,chunk,stage,status,tokens_in,tokens_out,cache_read,cache_write,seconds "
+                            "FROM fires WHERE run_id=?", (run_id,)).fetchone()
+        return dict(r) if r else None
 
     def abandon(self, fire_id, error="no run id after intent", at=None):
         """Resolve a pending intent that never fired (decided by the caller)."""

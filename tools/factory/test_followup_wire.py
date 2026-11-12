@@ -40,7 +40,7 @@ class FollowupWire(unittest.TestCase):
         self.r.tick()
         return self.r.st.db.execute("SELECT status FROM fires WHERE run_id=?", (run,)).fetchone()[0]
 
-    def test_review_done_creates_issue_once(self):
+    def test_stage_done_creates_issue_once(self):
         v = "Verdict: pass\n- Follow-up: add a retry test\n"
         self.assertEqual(self.review_done("71", ("OK", v), "run1"), "done")
         self.assertEqual(self.review_done("71", ("OK", v), "run2"), "done")

@@ -9,7 +9,7 @@ import argparse, json, os, signal, sys, tempfile, threading, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import engine as E, limits as L, store as S, trigger as T
+import engine as E, limits as L, readyq as RQ, store as S, trigger as T
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -180,6 +180,7 @@ class Runner:
             except (E.EngineError, T.TriggerError) as e:
                 log("read of run %s failed, will retry: %s" % (f["run_id"], e))
         self.start_queued()
+        self.start_ready()
 
     def _agent(self, f):
         e = self.by_slug.get(f["slug"])
@@ -259,6 +260,9 @@ class Runner:
         if st:
             payload = json.loads(st)
         self.st.enqueue(f["job"], f["stage"], f["chunk"], payload)
+        if f["chunk"]:
+            self.st.bump_attempt(f["job"], f["chunk"])
+            self.st.set_ready_state(f["job"], f["chunk"], "ready")
 
     def start_queued(self):
         busy = {f["job"] for f in self.st.pending() + self.st.running()}
@@ -289,6 +293,34 @@ class Runner:
                 continue
             self.st.fired(fid, run_id)
             log("fired stage %s of job %s: run %s" % (stage, job, run_id))
+
+    def start_ready(self):
+        """Fire ready chunks (stage 'build') that readyq.eligible allows; running plain stages share the slot count."""
+        ent = self.by_stage.get("build")
+        fires = self.st.pending() + self.st.running()
+        busy, stages = [(f["job"], f["chunk"]) for f in fires if f["chunk"]], sum(1 for f in fires if not f["chunk"])
+        merged = {r[0] for r in self.st.db.execute("SELECT chunk FROM ready_chunks WHERE state='merged'")}
+        token = ent and self.tokens.get("%s/%s" % (ent["agent"], ent["slug"]))
+        for it in self.st.ready_list():
+            if not token:
+                return
+            state = {"merged": merged, "busy": busy, "stages": stages, "leases": self.st.open_leases(),
+                     "fired": self.st.fire_count(it["job"]), "cfg": self.cfg}
+            if not RQ.eligible(it, state)[0]:
+                continue
+            job, chunk = it["job"], it["chunk"]
+            payload = {"job": job, "stage": "build", "chunk": chunk}
+            q = self.st.enqueue(job, "build", chunk, payload)
+            fid = self.st.dequeue_to_intent(q, job, chunk, "build", ent.get("coworker", ""), ent["slug"])
+            self.st.set_ready_state(job, chunk, "running")
+            busy.append((job, chunk))
+            try:
+                run_id, _ = T.fire(self.eng, ent["agent"], ent["slug"], token, payload)
+            except T.TriggerError as e:
+                log("fire of chunk %s failed (kept as intent): %s" % (chunk, e))
+                continue
+            self.st.fired(fid, run_id)
+            log("fired chunk %s of job %s: run %s" % (chunk, job, run_id))
 
 def build(cfg=None, eng=None, clock=time.time):
     cfg = load_runtime(cfg)

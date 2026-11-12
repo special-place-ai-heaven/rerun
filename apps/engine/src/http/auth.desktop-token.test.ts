@@ -36,6 +36,12 @@ describe('desktop session token', () => {
         expect((await app.request('/agents/a1/desktop/apps', { method: 'GET', headers: { authorization: `Bearer ${token}` } })).status).toBe(401)
     })
 
+    it('answers 401, not 500, to a malformed escape in the agent segment', async () => {
+        const token = issueDesktopToken('a1')
+        expect((await post('a%ZZ', 'desktop/apps', token)).status).toBe(401)
+        expect((await post('%', 'desktop/apps', token)).status).toBe(401)
+    })
+
     it('still answers the engine key', async () => {
         expect((await post('a1', 'desktop/apps', 'k')).status).toBe(200)
     })

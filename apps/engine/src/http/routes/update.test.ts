@@ -6,6 +6,11 @@ import { vi } from 'vitest'
 
 process.env.RERUN_DATA_DIR = mkdtempSync(resolve(tmpdir(), 'rerun-update-'))
 process.env.RERUN_API_KEY = ''
+process.env.RERUN_DESKTOP = '1'
+process.env.RERUN_CODEX_PATH = '/opt/codex'
+process.env.RERUN_SERVICE_USER = 'rerun'
+process.env.RERUN_LOG_LEVEL = 'warn'
+process.env.RERUN_PAIR_TOKEN = 'pair-secret'
 
 type FakeChild = EventEmitter & { unref: () => void; unrefCalled: boolean }
 
@@ -88,6 +93,7 @@ describe('POST /update', () => {
         expect(options.detached).toBe(true)
         expect(options.env?.CI).toBe('true')
         expect(options.env?.RERUN_DATA_DIR).toBe(process.env.RERUN_DATA_DIR)
+        expect(options.env).toMatchObject({ RERUN_DESKTOP: '1', RERUN_CODEX_PATH: '/opt/codex', RERUN_SERVICE_USER: 'rerun', RERUN_LOG_LEVEL: 'warn' })
         expect(options.env).not.toHaveProperty('RERUN_API_KEY')
         expect(options.env).not.toHaveProperty('RERUN_PAIR_TOKEN')
         expect(child.unrefCalled).toBe(true)

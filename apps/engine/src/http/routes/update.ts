@@ -13,6 +13,19 @@ import { dataDir } from '../../config/paths.js'
 import { logger } from '../../lib/logger.js'
 import { childProcessEnv } from '../../lib/child-env.js'
 
+// The updater never needs the key or the pair token. It does need the data folder and every non-secret
+// setting the update command reads (desktop flag, Codex path, service name and user, log level).
+const UPDATE_CHILD_VARS = ['RERUN_SERVICE', 'RERUN_SERVICE_USER', 'RERUN_DESKTOP', 'RERUN_CODEX_PATH', 'RERUN_LOG_LEVEL'] as const
+
+export function updateChildEnv(): Record<string, string> {
+    const passed: Record<string, string> = {}
+    for (const name of UPDATE_CHILD_VARS) {
+        const value = process.env[name]
+        if (value) passed[name] = value
+    }
+    return childProcessEnv({}, { CI: 'true', RERUN_DATA_DIR: dataDir(), ...passed })
+}
+
 export const updateRoutes = new Hono()
 
 // Checked here, before anything is spawned: the hub waits 15 s for this answer and the download
@@ -48,8 +61,7 @@ updateRoutes.post('/', async c => {
     const child = spawn(process.execPath, [process.argv[1]!, 'update', ...(artifact ? artifactArgs(artifact) : [])], {
         detached: true,
         stdio: ['ignore', logFd, logFd],
-        // The updater never needs the key. It does need the data folder and the service name.
-        env: childProcessEnv({}, { CI: 'true', RERUN_DATA_DIR: dataDir(), ...(process.env.RERUN_SERVICE ? { RERUN_SERVICE: process.env.RERUN_SERVICE } : {}) }),
+        env: updateChildEnv(),
     })
     child.on('error', err => {
         updating = false

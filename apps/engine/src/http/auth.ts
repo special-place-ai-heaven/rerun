@@ -7,8 +7,16 @@ const DESKTOP_APPS_PATH = /^\/agents\/([^/]+)\/desktop\/apps$/
 
 function isDesktopPanelRequest(method: string, path: string, token: string): boolean {
     if (method !== 'POST') return false
-    const agentId = DESKTOP_APPS_PATH.exec(path)?.[1]
-    return agentId !== undefined && desktopTokenMatches(decodeURIComponent(agentId), token)
+    const segment = DESKTOP_APPS_PATH.exec(path)?.[1]
+    if (segment === undefined) return false
+    // A malformed escape is an unknown agent, not a server error.
+    let agentId: string
+    try {
+        agentId = decodeURIComponent(segment)
+    } catch {
+        return false
+    }
+    return desktopTokenMatches(agentId, token)
 }
 
 export const auth: MiddlewareHandler = async (c, next) => {

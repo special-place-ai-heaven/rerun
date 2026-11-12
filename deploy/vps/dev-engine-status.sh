@@ -106,6 +106,14 @@ case "$P8" in
     *) say "P8 FAIL RERUN_API_KEY is set in the environment of $P8 process(es)" ;;
 esac
 
+# P8 also needs PID 1 to be the node process itself (the launcher exec'd node), so the counts above cover the engine.
+P8PID1=$(docker exec "$DEV" sh -c 'cat /proc/1/comm' </dev/null 2>/dev/null || echo err)
+case "$P8PID1" in
+    node) say "P8 pid1-is-node" ;;
+    err) say "P8 FAIL could not read PID 1" ;;
+    *) say "P8 FAIL PID 1 is $P8PID1, not node" ;;
+esac
+
 # P7: the live engine is unchanged since P0.
 AFTER=$(live_state "$LIVE")
 say "P7 live-engine $AFTER"

@@ -91,3 +91,35 @@ with a scratch trigger on an idle coworker (switched off afterwards).
 - How the worktree `terminal-commander/296-1` disappeared on 2026-11-11.
 - What the other 85 GB of the server's disk hold.
 - What a Boss run that has been live for over an hour is waiting on, and how to tell from outside.
+
+## H. Engine-inside design and its challenge (2026-11-12)
+
+Rows N1 to N18 come from the Advisor's design (issue #42, comment 6818876939), read on `dev` at `ee15f5a`. Rows X1 to X4 come from the Devils Advocate's challenge (comment 6819228687); every code line in them had one reader. Milestone 1 (issue #56) is built to settle B6, B2, N2, N3, N4, N5, N8 and X3.
+
+| ID | Statement | Status | Evidence |
+|---|---|---|---|
+| N1 | Every engine data path resolves under `RERUN_DATA_DIR` (default `~/.rerun`; `/data` in the image) | proven (code, one reader) | `config/paths.ts:5-77`, `config/env.ts:6`, `apps/engine/Dockerfile:33`, `ee15f5a` |
+| N2 | With no hub URL or no key, `sendNotification` returns without a request | proven (code, one reader) | `runtime/notify.ts:57-58`, `ee15f5a` |
+| N3 | `update.sh` runs `docker compose pull` and `docker compose up -d` with no project flag and no `--remove-orphans`, so it does not touch another compose project | code proven, effect unproven | `deploy/vps/update.sh:21,34`; P7 |
+| N4 | A non-privileged container with only its own volume and no docker socket cannot write the live engine's data | unproven | P1 |
+| N5 | The engine boots and serves with no hub and no model connection | unproven | P5 |
+| N6 | The engine builds from source inside the engine image (corepack present; native modules unknown) | partly proven (code: `Dockerfile:5-7`), the build unproven | T2 |
+| N7 | A dev rebuild takes under 15 minutes on the server | unproven | T2 |
+| N8 | A coworker and a trigger can be created through engine HTTP with no hub | unproven | P5 |
+| N9 | Live coworkers reach a container on the live network by service name | unproven | P2 |
+| N10 | An in-process abort ends a Claude or Codex CLI run within the 15 s teardown | unproven | M4 |
+| N11 | The engine process can call GitHub with the shared account's credentials | unproven | M3 |
+| N12 | python3 stays present in the engine container for `factory.py` and `gate.py` | proven today, not guaranteed | probe 2026-11-12: `/usr/bin/python3` → 3.13 in the live container; the Dockerfile does not list it (`Dockerfile:20-21`), so it comes in as a side effect of another install. M3 declares it explicitly |
+| N13 | A new built-in side-bot tool works without a change to the hub allow-list | unproven | M5 |
+| N14 | Claude and Codex runs write one step per turn, so live ceilings need an adapter change | unproven (INVENTORY: inferred from a comment) | M4 |
+| N15 | Copying a delegate's run rows before its folder is deleted keeps its cost | unproven | M7 |
+| N16 | Memory and CPU limits on the dev container stop it from starving the live engine | unproven | P6 |
+| N17 | Fixed temp paths (`rerun-desktop`) and screen ports from 5900 would collide for two engines in one container | proven (code, one reader) | `desktop/session.ts:15-16,131`, `tools/builtin/computer.ts:172`, `ee15f5a` |
+| N18 | Line numbers from `3011933` still hold on `ee15f5a` | unproven | a second reader before M2 is planned |
+
+| X1 | `settle` is the single end of every run, so one event from it is enough to wait on | **refuted (one reader)** | the cancel route with no live loop (`http/routes/runs.ts:33-35`, `db/repos/runs.ts:139-142`) and boot reconcile (`runtime/reconcile.ts:25`) close run rows without it; the runs table is the truth, an event only a hint |
+| X2 | A process beside the engine cannot stop a run | unproven | the cancel route calls `abortRun` (`runs.ts:28-33`); B2 was refuted for one coworker's key only; probe P6 of #56 tries the engine key |
+| X3 | A fault in runner code inside the engine cannot end the engine process | unproven, likely false | no process-wide handler for unhandled rejections in the engine source; probe P5 of #56 |
+| X4 | A stage that is fired again after an engine restart does no harm | unproven | a builder that already pushed or opened a pull request is not repeatable; A9 was never tried live |
+
+Open again after the challenge: whether the runner lives inside the engine process or beside it. It is decided after P5 and P6 of #56 are read.

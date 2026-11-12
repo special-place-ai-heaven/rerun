@@ -120,6 +120,70 @@ class EngineTest(unittest.TestCase):
             print(cm.exception)
         self.assertNotIn(KEY, out.getvalue() + err.getvalue())
 
+class Answer:
+    def __init__(self, status, body):
+        self.status, self.body = status, body
+
+    def read(self):
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class TriggerCallsTest(unittest.TestCase):
+    """C3b: trigger list/create/fire against a scripted opener (what the engine would answer)."""
+
+    def engine(self, status, body, sent):
+        def opener(req, timeout):
+            sent.append(req)
+            return Answer(status, json.dumps(body).encode())
+        return engine.Engine("http://x", KEY, urlopen=opener)
+
+    def test_list_and_create(self):
+        sent = []
+        e = self.engine(200, {"triggers": [{"slug": "s1", "token": "t"}]}, sent)
+        self.assertEqual(e.list_triggers("a/1")[0]["slug"], "s1")
+        self.assertEqual((sent[0].get_method(), sent[0].full_url), ("GET", "http://x/agents/a%2F1/triggers"))
+        sent = []
+        e = self.engine(201, {"slug": "s1", "token": "t"}, sent)
+        self.assertEqual(e.create_trigger("a1", "s1", "body", model="m")["slug"], "s1")
+        self.assertEqual(json.loads(sent[0].data), {"name": "s1", "description": "", "body": "body", "provider": None, "model": "m"})
+        self.assertEqual(sent[0].get_header("Authorization"), "Bearer " + KEY)
+        with self.assertRaises(engine.EngineError):
+            self.engine(201, {"slug": "s1"}, []).create_trigger("a1", "s1", "b")
+
+    def test_fire_body_is_a_string_token_in_body_and_not_retried(self):
+        sent = []
+        e = self.engine(202, {"runId": "r1", "sessionId": "s1"}, sent)
+        self.assertEqual(e.fire_trigger("a1", "slug", "tok-1", {"v": 1}), ("r1", "s1"))
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0].full_url, "http://x/agents/a1/triggers/slug/fire")
+        body = json.loads(sent[0].data)
+        self.assertEqual((body["token"], body["method"], body["body"]), ("tok-1", "POST", '{"v":1}'))
+        self.assertNotIn("tok-1", sent[0].full_url)
+        self.assertEqual(sent[0].get_header("Authorization"), "Bearer " + KEY)
+        with self.assertRaises(engine.EngineError):  # 200 is not the 202 of a started run
+            self.engine(200, {"runId": "r1"}, []).fire_trigger("a1", "slug", "tok-1", {})
+
+    def test_fire_errors_hide_key_and_token(self):
+        calls = []
+
+        def opener(req, timeout):
+            calls.append(1)
+            raise TimeoutError("timed out tok-1 " + KEY)
+        with self.assertRaises(engine.EngineError) as cm:
+            engine.Engine("http://x", KEY, urlopen=opener).fire_trigger("a1", "slug", "tok-1", {})
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn(KEY, str(cm.exception))
+        self.assertNotIn("tok-1", str(cm.exception))
+
+
+
+
 
 if __name__ == "__main__":
     unittest.main()

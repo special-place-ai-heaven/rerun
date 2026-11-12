@@ -1,0 +1,33 @@
+# A second, separate Rerun engine for factory work, beside the live one. Own project name, own
+# volume, own network: it never joins the live `rerun` network and has no route to the live app.
+#
+# From the clone on the server:
+#   sudo docker compose -f deploy/vps/dev-engine.yml up -d
+#   sudo sh deploy/vps/dev-engine-status.sh
+# To remove everything it made (container, network, data):
+#   sudo docker compose -f deploy/vps/dev-engine.yml down -v
+#
+# Deliberately absent: published ports, env_file, the engine key, any hub or pairing variable, a
+# model connection, GitHub access, privileged mode, added capabilities, the docker socket and host
+# paths. The image is the one images.yml already builds; pick another tag with RERUN_DEV_IMAGE_TAG.
+name: rerun-dev
+
+services:
+  engine-dev:
+    image: ghcr.io/special-place-ai-heaven/rerun-engine:${RERUN_DEV_IMAGE_TAG:-dev}
+    environment:
+      RERUN_LOG_LEVEL: ${RERUN_LOG_LEVEL:-info}
+    volumes:
+      - engine-dev-data:/data
+    mem_limit: 3g
+    cpus: 2
+    shm_size: 1gb
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    restart: unless-stopped
+
+volumes:
+  engine-dev-data:

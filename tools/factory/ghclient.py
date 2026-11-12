@@ -1,5 +1,5 @@
 """Minimal GitHub REST client. Token is read from the environment per call and sent only in the auth header."""
-import json, os, re, urllib.request, urllib.error
+import json, os, re, urllib.parse, urllib.request, urllib.error
 
 
 class GhError(Exception):
@@ -43,6 +43,8 @@ class Client:
             yield from data
             m = re.search(r'<([^>]+)>;\s*rel="next"', link or "")
             url = m.group(1) if m else None
+            if url and urllib.parse.urlsplit(url)[:2] != urllib.parse.urlsplit(self.base)[:2]:
+                url = None  # never send the token to another host
 
     def issue(self, n):
         return self.get("/issues/%d" % n)

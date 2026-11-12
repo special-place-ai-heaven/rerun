@@ -9,7 +9,7 @@ import argparse, json, os, signal, subprocess, sys, tempfile, threading, time, u
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import applypatch as AP, checkout as CO, engine as E, factory as F, limits as L, publish as PB, readyq as RQ, store as S, testrun as TR, trigger as T
+import applypatch as AP, checkout as CO, engine as E, factory as F, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -165,8 +165,8 @@ def ingest(st, inbox):
     return n
 
 class Runner:
-    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None):
-        self.open_pr, self.evidence = open_pr, evidence
+    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None, issues=None):
+        self.open_pr, self.evidence, self.issues = open_pr, evidence, issues
         self.eng, self.st, self.cfg, self.tokens, self.clock = eng, st, cfg, tokens, clock
         self.by_slug = {e["slug"]: e for e in cfg["triggers"]}
         self.by_stage = {e["stage"]: e for e in cfg["triggers"]}
@@ -242,8 +242,11 @@ class Runner:
         elif what == "DONE":
             if f["stage"] == "build" and f["chunk"] and "published:" + f["chunk"] not in self.st.get_all(f["job"]):
                 self.finish_build(f)
-            if self.evidence and self.evidence(f)[0] != "OK":
+            ev = self.evidence(f) if self.evidence else ("OK", "")
+            if ev[0] != "OK":
                 return  # the run ended but no evidence yet: stays running, read again next tick
+            if f["stage"] == "review" and self.issues:
+                self.follow_up(f["job"], ev[1])
             self.st.close_run(rid, "done", iso(self.clock()), tin, tout)
         elif what == "CANCEL":
             self.eng.cancel(agent, rid)
@@ -262,6 +265,16 @@ class Runner:
                 log("run %s failed: refire already used" % rid)
         else:  # FAILED, MISSING
             self.st.close_run(rid, "failed", iso(self.clock()), tin, tout, why)
+
+    def follow_up(self, job, verdict):
+        """One issue per follow-up note of a done review; the keys already opened live in the job kv (the client cannot list)."""
+        kv = self.st.get_all(job)
+        done = {k[9:] for k in kv if k.startswith("followup:")}
+        try:
+            for k in FU.create(self.issues, FU.notes(verdict, job), done):
+                self.st.set(job, "followup:" + k, "1")
+        except (OSError, RuntimeError) as e:
+            log("follow-up issues for %s stopped: %s" % (job, type(e).__name__))
 
     def finish_build(self, f):
         """A build run ended: check out base and head, apply the chunk's patch, run its done-test (fails on base, passes on

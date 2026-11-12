@@ -33,14 +33,15 @@ def cs(*conc):
 
 class ReviewFire(Base):
     def test_pending_or_red_fires_nothing(self):
-        self.assertEqual(self.r.fire_reviews("j", "abc", cs("success", None), ["A"]), [])
-        self.assertEqual(self.r.fire_reviews("j", "abc", cs("success", "failure"), ["A"]), [])
+        self.assertEqual(self.r.fire_reviews("j", 7, "abc", cs("success", None), ["A"]), [])
+        self.assertEqual(self.r.fire_reviews("j", 7, "abc", cs("success", "failure"), ["A"]), [])
         self.assertEqual(self.queued(), [])
 
     def test_green_one_fire_per_owner(self):
-        self.assertEqual(self.r.fire_reviews("j", "abc", cs("success"), ["B", "A", "A"]), ["A", "B"])
-        self.assertEqual(self.r.fire_reviews("j", "abc", cs("success"), ["A", "B"]), [])
+        self.assertEqual(self.r.fire_reviews("j", 7, "abc", cs("success"), ["B", "A", "A"]), ["A", "B"])
+        self.assertEqual(self.r.fire_reviews("j", 7, "abc", cs("success"), ["A", "B"]), [])
         self.assertEqual(len(self.queued()), 2)
+        self.assertEqual({x[0] for x in self.r.st.db.execute("SELECT event FROM wakes")}, {"review-ready:7"})
 
 
 if __name__ == "__main__":

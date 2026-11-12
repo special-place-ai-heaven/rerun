@@ -9,7 +9,7 @@ import argparse, json, os, signal, subprocess, sys, tempfile, threading, time, u
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import applypatch as AP, checkout as CO, engine as E, factory as F, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T
+import applypatch as AP, checkout as CO, engine as E, factory as F, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T, wake
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -375,12 +375,12 @@ class Runner:
                 continue
             self.st.close_lease(l["id"], "expired", at=at)
 
-    def fire_reviews(self, job, head, checks, owners):
+    def fire_reviews(self, job, pr, head, checks, owners):
         """Queue the review stage once per roster owner, only when every check at head is green; the wake claim
         (job-independent key: event, owner, head) lets a second look at the same head fire nothing."""
         if F.ci_state(checks) != "GREEN":
             return []
-        new = [o for o in sorted(set(owners)) if self.st.add_wake("review", o, head)]
+        new = [o for o in sorted(set(owners)) if wake.claim_wake(self.st, wake.review_event(pr), o, head)]
         for o in new:
             self.st.enqueue(job, "review", "", {"job": job, "stage": "review", "owner": o, "head": head})
         return new

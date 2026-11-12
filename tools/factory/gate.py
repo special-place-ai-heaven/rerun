@@ -232,6 +232,21 @@ def parse_issue(full, jobrepo, jobn, chunk):
     return line, body, f
 
 
+def chunk_limits(full, n, jobrepo, jobn, ids):
+    """LIMITS per chunk of a multi-chunk PR: each chunk's commits ('<id>: ...', '<id> fix: ...') against its own max-lines."""
+    cm = gh_json("repos/%s/pulls/%s/commits?per_page=100" % (full, n), paginate=True)
+    why = []
+    for cid in ids:
+        mx = int(re.sub(r"\D", "", parse_issue(full, jobrepo, jobn, cid)[2].get("max-lines", "")) or 800)
+        shas = [c["sha"] for c in cm if re.match(r"%s( \w+)?:" % re.escape(cid), c["commit"]["message"], re.I)]
+        n_l = sum(f["additions"] + f["deletions"] for s in shas for f in gh_json("repos/%s/commits/%s" % (full, s))["files"])
+        if not shas:
+            why.append("chunk %s: no commit titled '%s: ...'" % (cid, cid))
+        elif n_l > mx:
+            why.append("chunk %s: %d changed lines > max %d" % (cid, n_l, mx))
+    return why
+
+
 def _list(x):
     return x if isinstance(x, list) else []
 
@@ -287,6 +302,7 @@ def gate(repo, n):
     m = re.search(r"Job: ([\w./-]+)#(\d+), chunk (\w+)", pbody)
     mb = re.fullmatch(r"chunk/(\d+)-(\w+)", pr["head"]["ref"])
     jobrepo, jobn, chunk = (m.group(1), m.group(2), m.group(3)) if m else ((full, mb.group(1), mb.group(2)) if mb else (full, None, None))
+    ids = (re.search(r"Job: [\w./-]+#\d+, chunk ([\w, ]+)", pbody) or [0, ""])[1].replace(" ", "").split(",") if m else []
     idconf = None
     if m and mb and (mb.group(1) != m.group(2) or mb.group(2).lower() != m.group(3).lower()):
         idconf = "PR body says %s#%s chunk %s but branch %s says issue %s chunk %s" % (m.group(1), m.group(2), m.group(3), pr["head"]["ref"], mb.group(1), mb.group(2))
@@ -419,7 +435,9 @@ def gate(repo, n):
             globs += [clean_glob(g) for g in re.split(r"do not touch:", l, flags=re.I)[1].split(",") if clean_glob(g)]
     dnt = [f["filename"] for f in files if any(fnmatch.fnmatch(f["filename"], g) for g in globs)]
     why = []
-    if lines > mx:
+    if len(ids) > 1:
+        why += chunk_limits(full, n, jobrepo, jobn, ids)
+    elif lines > mx:
         why.append("%d changed lines > max %d" % (lines, mx))
     if wf:
         why.append("workflow files: " + ", ".join(wf[:3]))

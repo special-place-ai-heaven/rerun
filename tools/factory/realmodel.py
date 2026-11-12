@@ -3,7 +3,8 @@
 Runs inside the runner container, which already holds the dev engine's address and key:
     python3 /app/realmodel.py check            is the connection there; which connection is the default
     python3 /app/realmodel.py connect          reads the subscription token from standard input, creates the connection
-    python3 /app/realmodel.py probe [model]    one short run on the real model: status, model and token counts
+    python3 /app/realmodel.py probe [model]    one short run on the real model: status, model, token counts, then
+                                               proof=PASS or proof=FAIL (exit 1) on its own last line
     python3 /app/realmodel.py remove           deletes the connection
 The token (from `claude setup-token`) is read from standard input only, sent once to the dev engine in a request
 body, and kept nowhere else: no file, no command line, no output. Errors name the step and the HTTP status only."""
@@ -13,6 +14,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # own dir first,
 import engine as E
 
 NAME, PROBE, MODEL = "claude-plan", "real-model-probe", "claude-haiku-5-5"
+# What the connection offers. A connection that lists no model serves none, and a run started by a trigger then
+# falls back to the engine's default model without saying so (apps/engine/src/agents/availability.ts,
+# resolveAutomationModel): the first proof on the server answered from the stand-in for exactly this reason.
+MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
 TOKEN_KEY = "CLAUDE_CODE_OAUTH_TOKEN"
 TOKEN_OK = re.compile(r"[A-Za-z0-9_.~+/=-]{20,}")
 LONG = re.compile(r"[A-Za-z0-9_.~+/=-]{30,}")  # anything shaped like a credential is cut from an error text
@@ -29,7 +34,21 @@ def find(eng):
 
 def check(eng):
     conn, default = find(eng)
-    return ["connection=%s default-is-real-model=%s" % ("present" if conn else "absent", "yes" if conn and default == conn["id"] else "no")]
+    if not conn:
+        return ["connection=absent default-is-real-model=no"]
+    offered = sum(1 for m in MODELS if m in (conn.get("models") or []))
+    return ["connection=present token-held=%s offers-models=%dof%d default-is-real-model=%s" % (
+        "yes" if conn.get("connected") else "no", offered, len(MODELS), "yes" if default == conn["id"] else "no")]
+
+
+def offer(eng, conn):
+    """Make the connection list the models the proof and the stages need. Needs no token."""
+    have = list(conn.get("models") or [])
+    missing = [m for m in MODELS if m not in have]
+    if not missing:
+        return []
+    eng._call("PATCH", "/connections/%s" % E._q(conn["id"]), payload={"models": have + missing})
+    return ["models=added %d" % len(missing)]
 
 
 def connect(eng, token):
@@ -39,19 +58,23 @@ def connect(eng, token):
     conn, _ = find(eng)
     if conn:
         eng._call("PATCH", "/connections/%s/keys" % E._q(conn["id"]), payload={"set": {TOKEN_KEY: token}})
-        return ["connection=updated"]
-    eng._call("POST", "/connections", payload={"name": NAME, "provider": "claude", "keys": {TOKEN_KEY: token}})
+        return ["connection=updated"] + offer(eng, conn)
+    eng._call("POST", "/connections", payload={"name": NAME, "provider": "claude", "models": list(MODELS), "keys": {TOKEN_KEY: token}})
     return ["connection=created"] + check(eng)
 
 
-def probe(eng, model=MODEL, sleep=time.sleep):
-    """One coworker on the real model, one trigger, one run. The coworker is deleted again whatever happens."""
+def probe(eng, model=MODEL, sleep=None):
+    """One coworker on the real model, one trigger, one run. The coworker is deleted again whatever happens.
+    The last line is the verdict: PASS only when the run finished and the subscription connection ran it."""
+    sleep = sleep or time.sleep
     conn, _ = find(eng)
     if not conn:
         raise RuntimeError("no %s connection yet: run connect first" % NAME)
+    out = offer(eng, conn)
     agent = eng._call("POST", "/agents", payload={"config": {
         "name": PROBE, "description": "One-run proof that the real model answers (dev engine)",
         "connectionId": conn["id"], "provider": "claude", "model": model}})
+    gone = "/agents/%s" % E._q(agent["id"])
     try:
         trig = eng.create_trigger(agent["id"], "probe", PROMPT)
         run_id, _ = eng.fire_trigger(agent["id"], trig["slug"], trig["token"], {})
@@ -60,12 +83,21 @@ def probe(eng, model=MODEL, sleep=time.sleep):
             sleep(STEP_S)
             waited += STEP_S
             row = eng.get_run(agent["id"], run_id) or {"status": "missing"}
-    finally:
-        eng._call("DELETE", "/agents/%s" % E._q(agent["id"]))
+    except BaseException:
+        try:
+            eng._call("DELETE", gone)
+        except E.EngineError:
+            pass  # the first error is the one worth reporting
+        raise
+    eng._call("DELETE", gone)
     err = LONG.sub("<cut>", row.get("error") or "")[:160]
-    return ["run=%s status=%s provider=%s model=%s input-tokens=%s output-tokens=%s%s" % (
+    out.append("run=%s status=%s provider=%s model=%s input-tokens=%s output-tokens=%s%s%s" % (
         run_id, row.get("status"), row.get("provider"), row.get("model"), row.get("inputTokens"), row.get("outputTokens"),
-        " error=%s" % err if err else "")]
+        " timeout=yes" if row.get("status") == "running" else "", " error=%s" % err if err else ""))
+    real = row.get("status") == "done" and row.get("provider") == "claude"
+    out.append("proof=PASS" if real else "proof=FAIL: the run did not finish on the subscription connection (status %s, provider %s)" % (
+        row.get("status"), row.get("provider")))
+    return out
 
 
 def remove(eng):
@@ -96,7 +128,7 @@ def main(argv=None, stdin=sys.stdin):
         return 1
     for line in out:
         print(line)
-    return 0
+    return 1 if out and out[-1].startswith("proof=FAIL") else 0
 
 
 if __name__ == "__main__":

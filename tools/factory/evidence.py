@@ -4,6 +4,7 @@ run's own text. Every reader takes the fetcher `get(path, paginate=False)` (the 
 never an answer, never a failed attempt."""
 import fnmatch, os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import factory as F
 import gate as G
 import ledger as L
 from limits import ts
@@ -74,3 +75,29 @@ def review(get, full, pr, head, name, fired):
         if m and m.group(2) == head[:8] and m.group(3).upper() == name.upper() and ts(c["created_at"]) > ts(fired):
             return m.group(4), {"comment": c["id"], "url": c.get("html_url")}
     return "NONE", "no %s verdict @%s after %s" % (name.upper(), head[:8], fired)
+
+
+def ci_at_commit(get, full, branch):
+    """The pushed head of `branch` and the CI result at exactly that commit: OK (green), RED or WAITING with
+    {sha, ci}; NONE when the branch is not pushed or has no check yet. Checks of other commits never count."""
+    refs = get("repos/%s/git/matching-refs/heads/%s" % (full, branch))
+    sha = next((r["object"]["sha"] for r in refs if r.get("ref") == "refs/heads/" + branch), None)
+    if not sha:
+        return "NONE", "%s was not pushed" % branch
+    cs = get("repos/%s/commits/%s/check-runs?per_page=100" % (full, sha)).get("check_runs", [])
+    ci = F.ci_state(cs)
+    return ("NONE", "no check-runs at %s" % sha[:8]) if ci == "NONE" else ("OK" if ci == "GREEN" else ci), {"sha": sha, "ci": ci}
+
+
+def verdict(get, full, pr, name, fired):
+    """`review` with the PR head read from GitHub now. A verdict by `name` that names an older commit is never taken:
+    NONE says which commit it names and which head was needed."""
+    head = get("repos/%s/pulls/%s" % (full, pr))["head"]["sha"]
+    v, d = review(get, full, pr, head, name, fired)
+    if v != "NONE":
+        return v, d
+    for c in reversed(comments(get, full, pr)):
+        m = G.REVIEW_RE.match(c.get("body") or "")
+        if m and m.group(3).upper() == name.upper() and ts(c["created_at"]) > ts(fired):
+            return "NONE", "%s verdict names %s, PR head is %s" % (name.upper(), m.group(2), head[:8])
+    return v, d

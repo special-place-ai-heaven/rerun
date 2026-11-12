@@ -16,9 +16,10 @@ RUN pnpm --filter rerun-engine deploy --prod /out
 
 FROM base AS runtime
 # git and jq for the coworkers' shell, Xvfb and the desktop packages for the screen a person can
-# watch, Chromium's own dependencies for the browser tool.
+# watch, Chromium's own dependencies for the browser tool, tini as PID 1 (the entrypoint execs it: it
+# collects orphaned child processes and forwards stop signals to the engine).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git jq xvfb openbox x11vnc xdotool thunar xfce4-terminal adwaita-icon-theme tint2 hsetroot maim \
+    && apt-get install -y --no-install-recommends ca-certificates curl git jq tini xvfb openbox x11vnc xdotool thunar xfce4-terminal adwaita-icon-theme tint2 hsetroot maim \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --shell /bin/bash rerun && mkdir -p /data && chown rerun:rerun /data
 COPY --from=build --chown=rerun:rerun /out /app

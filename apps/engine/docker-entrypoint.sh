@@ -16,4 +16,4 @@ RERUN_KEY_END
 else
     unset RERUN_API_KEY
 fi
-exec "$@"
+exec /usr/bin/tini -- "$@"

@@ -11,7 +11,8 @@ class BuildWiring(unittest.TestCase):
         class CK:
             def __init__(s, path, url, base): calls.append("checkout")
             def ensure(s): return "p"
-        saved = (R.CO, R.AP, R.TR, R.PB)
+        saved = (R.CO, R.AP, R.TR, R.PB, R.EV)
+        R.EV = NS(stage_check=lambda *a: ("OK", ""))
         R.CO = NS(Checkout=CK)
         R.AP = NS(apply=lambda w, p, a: calls.append("apply %s" % a) or "applied")
         R.TR = NS(run=lambda b, h, c: calls.append("testrun") or {"verdict": "ok"})
@@ -30,7 +31,7 @@ class BuildWiring(unittest.TestCase):
                 eng.runs["run1"]["status"] = "done"
                 r.tick()
             finally:
-                R.CO, R.AP, R.TR, R.PB = saved
+                R.CO, R.AP, R.TR, R.PB, R.EV = saved
                 r.st.close()
         self.assertEqual(calls, ["checkout", "checkout", "apply ['a.py']", "testrun", "publish ['a.py']"])
 

@@ -16,4 +16,6 @@ RERUN_KEY_END
 else
     unset RERUN_API_KEY
 fi
+# tini is in the image; a start from a checkout (tests, no image) has none and runs the command itself.
+if [ -x /usr/bin/tini ]; then exec /usr/bin/tini -- "$@"; fi
 exec "$@"

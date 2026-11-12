@@ -106,12 +106,26 @@ case "$P8" in
     *) say "P8 FAIL RERUN_API_KEY is set in the environment of $P8 process(es)" ;;
 esac
 
-# P8 also needs PID 1 to be the node process itself (the launcher exec'd node), so the counts above cover the engine.
+# P8 also needs PID 1 to be tini (it execs the engine as its child), so the counts above cover the engine.
 P8PID1=$(docker exec "$DEV" sh -c 'cat /proc/1/comm' </dev/null 2>/dev/null || echo err)
 case "$P8PID1" in
-    node) say "P8 pid1-is-node" ;;
+    tini) say "P8 pid1-is-tini" ;;
     err) say "P8 FAIL could not read PID 1" ;;
-    *) say "P8 FAIL PID 1 is $P8PID1, not node" ;;
+    *) say "P8 FAIL PID 1 is $P8PID1, not tini" ;;
+esac
+
+# P8 reaping: a docker exec starts a child that leaves a short-lived grandchild behind and exits. The
+# grandchild must be re-parented to PID 1 while it runs, and be gone (not defunct) a few seconds later.
+P8REAP=$(docker exec "$DEV" sh -c '
+    sh -c "(sleep 2 &)"; sleep 0.5
+    p=$(for f in /proc/[0-9]*/stat; do awk "\$2==\"(sleep)\" && \$4==1 {print \$1}" "$f" 2>/dev/null; done | head -n 1)
+    [ -n "$p" ] || { echo noparent; exit 0; }
+    sleep 3
+    [ ! -e "/proc/$p" ] && echo reaped || echo defunct' </dev/null 2>/dev/null || echo err)
+case "$P8REAP" in
+    reaped) say "P8 orphan-reaped" ;;
+    err) say "P8 FAIL could not run the reaping probe" ;;
+    *) say "P8 FAIL orphaned child $P8REAP" ;;
 esac
 
 # P7: the live engine is unchanged since P0.

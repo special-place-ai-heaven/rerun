@@ -43,5 +43,26 @@ class Core(Base):
         self.assertEqual(self.f.calls, [])
 
 
+class Calls(Base):
+    def setUp(self):
+        super().setUp()
+        self.f.commits["abc"] = {"sha": "abc"}
+        self.f.statuses["abc"] = [{"state": "success"}]
+        self.f.checks["abc"] = {"check_runs": [{"name": "ci"}]}
+
+    def test_calls_hit_fake(self):
+        c = self.c
+        self.assertEqual(c.issue(71)["title"], "m3")
+        self.assertEqual(len(c.comments(71, per_page=2)), 5)
+        self.assertEqual(c.commit("abc")["sha"], "abc")
+        self.assertEqual(c.statuses("abc")[0]["state"], "success")
+        self.assertEqual(c.checks("abc")[0]["name"], "ci")
+        self.assertEqual(c.open_pr("t", "b", "dev", "body")["number"], 72)
+        self.assertEqual(c.create_issue("x", "y")["number"], 73)
+        self.assertEqual(self.f.calls[-2][:3], ("POST", "/repos/o/r/pulls", {"title": "t", "head": "b", "base": "dev", "body": "body"}))
+        self.assertEqual(self.f.calls[-1][2], {"title": "x", "body": "y"})
+        self.assertTrue(all(x[3] == "token " + SECRET for x in self.f.calls))
+
+
 if __name__ == "__main__":
     unittest.main()

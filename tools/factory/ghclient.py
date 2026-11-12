@@ -43,3 +43,24 @@ class Client:
             yield from data
             m = re.search(r'<([^>]+)>;\s*rel="next"', link or "")
             url = m.group(1) if m else None
+
+    def issue(self, n):
+        return self.get("/issues/%d" % n)
+
+    def comments(self, n, per_page=100):
+        return list(self.pages("/issues/%d/comments" % n, per_page))
+
+    def commit(self, sha):
+        return self.get("/commits/" + sha)
+
+    def statuses(self, sha):
+        return self.get("/commits/%s/status" % sha)
+
+    def checks(self, sha):
+        return self.get("/commits/%s/check-runs" % sha)["check_runs"]
+
+    def open_pr(self, title, head, base, body=""):
+        return self.req("POST", "/pulls", {"title": title, "head": head, "base": base, "body": body})
+
+    def create_issue(self, title, body=""):
+        return self.req("POST", "/issues", {"title": title, "body": body})

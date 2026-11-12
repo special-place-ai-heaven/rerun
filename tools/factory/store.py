@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS leases(
   id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT NOT NULL, chunk TEXT NOT NULL,
   attempt INTEGER NOT NULL DEFAULT 0, paths TEXT NOT NULL DEFAULT '[]',
   granted_at TEXT NOT NULL, expires_at TEXT NOT NULL, closed_at TEXT, reason TEXT);
+CREATE TABLE IF NOT EXISTS wakes(
+  event TEXT NOT NULL, coworker TEXT NOT NULL, head TEXT NOT NULL, at TEXT NOT NULL,
+  PRIMARY KEY(event, coworker, head));
 """
 OPEN = ("intent", "running")
 
@@ -231,6 +234,17 @@ class Store:
         for l in out:
             self.close_lease(l["id"], "expired", at=at)
         return out
+
+    def add_wake(self, event, coworker, head, at=None):
+        """Record a wake once per (event, coworker, head). True when new, False when already held."""
+        cur = self.db.execute("INSERT OR IGNORE INTO wakes(event,coworker,head,at) VALUES(?,?,?,?)",
+                              (event, coworker, head, at or now()))
+        return cur.rowcount == 1
+
+    def release_wake(self, event, coworker, head):
+        """Free the key so the same wake can be recorded again. True when a row was held."""
+        return self.db.execute("DELETE FROM wakes WHERE event=? AND coworker=? AND head=?",
+                               (event, coworker, head)).rowcount == 1
 
     def _rows(self, where, job):
         sql = "SELECT * FROM fires WHERE " + where + (" AND job=?" if job is not None else "") + " ORDER BY id"

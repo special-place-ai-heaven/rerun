@@ -9,7 +9,7 @@ import argparse, json, os, signal, subprocess, sys, tempfile, threading, time, u
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import applypatch as AP, batch as BT, checkout as CO, engine as E, evidence as EV, factory as F, ghclient as GH, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T, wake
+import applypatch as AP, batch as BT, checkout as CO, engine as E, evidence as EV, factory as F, ghclient as GH, intake as IN, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T, wake
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -498,6 +498,17 @@ def stage_evidence(gh, st, f):
     except GH.GhError as e:
         return "NONE", str(e)
 
+def intake_issue(st, gh, repo, n, base_branch="dev"):
+    """`intake REPO#N`: the issue (body, then comments) is the plan text; the job kv gets repo_url, title, base_branch and the
+    sha of base_branch as `base`. Nothing is stored when the plan has no valid chunk. Returns (state, errors)."""
+    issue = gh.issue(n)
+    text = "\n".join([issue.get("body") or ""] + [c.get("body") or "" for c in gh.comments(n)])
+    meta = {"repo_url": "https://github.com/" + repo, "title": issue["title"], "base_branch": base_branch}
+    state, errors = IN.register(st, str(n), meta, text)
+    if state:
+        st.set(str(n), "base", gh.branch_sha(base_branch))
+    return state, errors
+
 def run(r, stop, poll_s):
     log("started")
     while not stop.is_set():
@@ -519,8 +530,25 @@ def main(argv=None):
     en.add_argument("stage")
     en.add_argument("--chunk", default="")
     en.add_argument("--payload-file", help="JSON file used as the packet payload")
+    ik = sub.add_parser("intake")
+    ik.add_argument("ref", help="REPO#N, e.g. owner/name#71")
+    ik.add_argument("--base", default="dev")
     a = ap.parse_args(argv)
     cfg = T.load_config()
+    if a.cmd == "intake":
+        repo, _, n = a.ref.rpartition("#")
+        st = S.Store(store_path(cfg))
+        try:
+            state, errors = intake_issue(st, GH.Client(cfg.get("github_api", "https://api.github.com"), repo), repo, int(n), a.base)
+        except (GH.GhError, ValueError) as e:
+            print("intake failed: %s" % e, file=sys.stderr)
+            return 1
+        finally:
+            st.close()
+        for e in errors:
+            print("rejected: " + e, file=sys.stderr)
+        print("job %s: %s" % (n, "registered %d chunks" % len(state["chunks"]) if state else "no valid chunk"))
+        return 0 if state else 1
     if a.cmd == "enqueue":
         payload = None
         if a.payload_file:

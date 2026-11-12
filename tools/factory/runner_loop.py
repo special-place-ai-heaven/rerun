@@ -9,7 +9,7 @@ import argparse, json, os, signal, subprocess, sys, tempfile, threading, time, u
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import applypatch as AP, checkout as CO, engine as E, factory as F, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T, wake
+import applypatch as AP, batch as BT, checkout as CO, engine as E, factory as F, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T, wake
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -444,27 +444,21 @@ class Runner:
         busy, stages = [(f["job"], f["chunk"]) for f in fires if f["chunk"]], sum(1 for f in fires if not f["chunk"])
         merged = {r[0] for r in self.st.db.execute("SELECT chunk FROM ready_chunks WHERE state='merged'")}
         token = ent and self.tokens.get("%s/%s" % (ent["agent"], ent["slug"]))
-        for it in self.st.ready_list():
-            if not token:
+        left = [c for c in self.st.ready_list() if not self.over_total(c["job"])]
+        while token and left:
+            first = next((c for c in left if RQ.eligible(c, self._ready_state(merged, busy, stages, c["job"]))[0]), None)
+            if not first:
                 return
-            state = {"merged": merged, "busy": busy, "stages": stages, "leases": self.st.open_leases(),
-                     "fired": self.st.fire_count(it["job"]), "cfg": self.cfg}
-            if self.over_total(it["job"]) or not RQ.eligible(it, state)[0]:
-                continue
-            job, chunk = it["job"], it["chunk"]
-            payload = {"job": job, "stage": "build", "chunk": chunk}
-            q = self.st.enqueue(job, "build", chunk, payload)
-            fid = self.st.dequeue_to_intent(q, job, chunk, "build", ent.get("coworker", ""), ent["slug"],
-                                              it["paths"], iso(self.clock() + 2 * self.cfg.get("run_limit_s", 600)))
-            self.st.set_ready_state(job, chunk, "running")
-            busy.append((job, chunk))
-            try:
-                run_id, _ = T.fire(self.eng, ent["agent"], ent["slug"], token, payload)
-            except T.TriggerError as e:
-                log("fire of chunk %s failed (kept as intent): %s" % (chunk, e))
-                continue
-            self.st.fired(fid, run_id)
-            log("fired chunk %s of job %s: run %s" % (chunk, job, run_id))
+            same = [c for c in left if c["job"] == first["job"]]  # a batch is one job's chunks
+            batch = BT.pick_batch(same, self._ready_state(merged, busy, stages, first["job"]))
+            run_id = self.fire_batch(batch)
+            left = [c for c in left if c not in batch]
+            busy += [(c["job"], c["chunk"]) for c in batch]
+            log("fired chunks %s of job %s: run %s" % ([c["chunk"] for c in batch], first["job"], run_id))
+
+    def _ready_state(self, merged, busy, stages, job):
+        return {"merged": merged, "busy": busy, "stages": stages, "leases": self.st.open_leases(),
+                "fired": self.st.fire_count(job), "cfg": self.cfg}
 
 def build(cfg=None, eng=None, clock=time.time):
     cfg = load_runtime(cfg)

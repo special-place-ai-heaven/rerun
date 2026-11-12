@@ -157,12 +157,15 @@ class Store:
     def known_run_ids(self):
         return {r[0] for r in self.db.execute("SELECT run_id FROM fires WHERE run_id IS NOT NULL")}
 
-    def dequeue_to_intent(self, queue_id, job, chunk, stage, coworker="", slug=""):
-        """One commit: the intent row in, the queue row out. Committed before the caller fires. Returns the fire id."""
+    def dequeue_to_intent(self, queue_id, job, chunk, stage, coworker="", slug="", lease_paths=None, lease_expires=None):
+        """One commit: the intent row in, the queue row out, and (with lease_paths) the lease granted.
+        Committed before the caller fires. Returns the fire id."""
         self.db.execute("BEGIN IMMEDIATE")
         try:
             fid = self.intent(job, chunk, stage, coworker, slug)
             self.dequeue(queue_id)
+            if lease_paths is not None:
+                self.grant_lease(job, chunk, lease_paths, lease_expires, attempt=self.attempts(job, chunk))
             self.db.execute("COMMIT")
         except BaseException:
             self.db.execute("ROLLBACK")
@@ -230,7 +233,8 @@ class Store:
 
     def expire_leases(self, at):
         """Close every open lease whose expires_at is before `at`; returns the leases closed."""
-        out = [l for l in self.open_leases() if l["expires_at"] < at]
+        held = {(r["job"], r["chunk"]) for r in self.pending()}  # a pending intent keeps its lease
+        out = [l for l in self.open_leases() if l["expires_at"] < at and (l["job"], l["chunk"]) not in held]
         for l in out:
             self.close_lease(l["id"], "expired", at=at)
         return out

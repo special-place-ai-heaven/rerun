@@ -9,6 +9,7 @@ import ledger as L
 FIX_BUILDS, JOB_FIXES, REVIEW_ROUNDS, PLAN_ROUNDS = 2, 2, 2, 3
 FIRED_CAP = 20
 RUN_LIMIT_S, CI_START_LIMIT_S = 45 * 60, 30 * 60
+STALL_S = 10 * 60
 PENDING_TICKS, RESTART_REFIRES = 3, 1
 RESTARTED = "interrupted: engine restarted"
 

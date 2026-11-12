@@ -287,6 +287,10 @@ class Runner:
                 log("job %s hit the fire cap, stage %s dropped" % (job, stage))
                 self.st.dequeue(q["id"])
                 continue
+            if self.over_total(job):
+                log("job %s is over its token total, stage %s dropped" % (job, stage))
+                self.st.dequeue(q["id"])
+                continue
             if L.packet_oversize(json.dumps(q["payload"]), self.cfg):
                 log("job %s stage %s: packet over the cap, refused" % (job, stage))
                 self.st.dequeue(q["id"])
@@ -305,6 +309,12 @@ class Runner:
                 continue
             self.st.fired(fid, run_id)
             log("fired stage %s of job %s: run %s" % (stage, job, run_id))
+
+    def over_total(self, job):
+        """True when the job's closed runs used job_token_cap tokens or more (key missing: no total cap)."""
+        cap = L._pos(self.cfg.get("job_token_cap"))
+        used = self.st.db.execute("SELECT COALESCE(SUM(tokens_in+tokens_out),0) FROM fires WHERE job=?", (job,)).fetchone()[0]
+        return bool(cap) and used >= cap
 
     def lease_closed(self, f):
         """True when the fire's attempt (its refire number) has a lease for its chunk and none of that attempt is open."""
@@ -342,7 +352,7 @@ class Runner:
                 return
             state = {"merged": merged, "busy": busy, "stages": stages, "leases": self.st.open_leases(),
                      "fired": self.st.fire_count(it["job"]), "cfg": self.cfg}
-            if not RQ.eligible(it, state)[0]:
+            if self.over_total(it["job"]) or not RQ.eligible(it, state)[0]:
                 continue
             job, chunk = it["job"], it["chunk"]
             payload = {"job": job, "stage": "build", "chunk": chunk}

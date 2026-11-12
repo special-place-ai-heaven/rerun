@@ -179,6 +179,7 @@ class Runner:
                 self.check(f)
             except (E.EngineError, T.TriggerError) as e:
                 log("read of run %s failed, will retry: %s" % (f["run_id"], e))
+        self.sweep_leases()
         self.start_queued()
         self.start_ready()
 
@@ -294,6 +295,24 @@ class Runner:
             self.st.fired(fid, run_id)
             log("fired stage %s of job %s: run %s" % (stage, job, run_id))
 
+    def sweep_leases(self):
+        """Close an expired lease only after eng.cancel succeeded or the run row is terminal; a failed cancel keeps it open."""
+        at = iso(self.clock())
+        for l in self.st.open_leases():
+            mine = lambda f: f["chunk"] == l["chunk"]
+            if l["expires_at"] >= at or any(mine(f) for f in self.st.pending(l["job"])):
+                continue
+            try:
+                for f in filter(mine, self.st.running(l["job"])):
+                    row = T.read_run(self.eng, self._agent(f), f["run_id"])
+                    if row and row.get("status") == "running":
+                        self.eng.cancel(self._agent(f), f["run_id"])
+                    self.st.close_run(f["run_id"], "cancelled", at, error="lease expired")
+            except (E.EngineError, T.TriggerError) as e:
+                log("lease %s kept open, cancel failed: %s" % (l["id"], e))
+                continue
+            self.st.close_lease(l["id"], "expired", at=at)
+
     def start_ready(self):
         """Fire ready chunks (stage 'build') that readyq.eligible allows; running plain stages share the slot count."""
         ent = self.by_stage.get("build")
@@ -311,7 +330,8 @@ class Runner:
             job, chunk = it["job"], it["chunk"]
             payload = {"job": job, "stage": "build", "chunk": chunk}
             q = self.st.enqueue(job, "build", chunk, payload)
-            fid = self.st.dequeue_to_intent(q, job, chunk, "build", ent.get("coworker", ""), ent["slug"])
+            fid = self.st.dequeue_to_intent(q, job, chunk, "build", ent.get("coworker", ""), ent["slug"],
+                                              it["paths"], iso(self.clock() + 2 * self.cfg.get("run_limit_s", 600)))
             self.st.set_ready_state(job, chunk, "running")
             busy.append((job, chunk))
             try:

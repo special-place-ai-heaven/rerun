@@ -7,12 +7,22 @@ def _git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def publish(worktree, issue, title, base, open_pr, remote="origin"):
-    """Commit all changes on factory/job-<issue>, push it, call open_pr. Returns the pushed commit sha."""
+def _outside(worktree, paths):
+    ok = tuple(p.rstrip("/") for p in paths)
+    changed = [l.split(None, 1)[1] for l in _git(worktree, "status", "--porcelain", "-uall").splitlines()]
+    return [c for c in changed if not any(c == p or c.startswith(p + "/") for p in ok)]
+
+
+def publish(worktree, issue, title, base, open_pr, paths, remote="origin"):
+    """Commit only `paths` on factory/job-<issue>, push it, call open_pr. A changed or new file outside
+    `paths` raises ValueError before anything is committed or pushed. Returns the pushed commit sha."""
     head = "factory/job-%s" % issue
+    extra = _outside(worktree, paths)
+    if extra:
+        raise ValueError("files outside the chunk paths: %s" % ", ".join(extra))
     _git(worktree, "checkout", "-q", "-B", head)
-    _git(worktree, "add", "-A")
-    if _git(worktree, "status", "--porcelain"):
+    _git(worktree, "add", "--", *paths)
+    if _git(worktree, "diff", "--cached", "--name-only"):
         _git(worktree, "commit", "-qm", title)
     _git(worktree, "push", "-q", remote, "%s:refs/heads/%s" % (head, head))
     open_pr(title, head, base)

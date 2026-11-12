@@ -229,6 +229,44 @@ def parse_issue(full, jobrepo, jobn, chunk):
     return line, body, f
 
 
+def _list(x):
+    return x if isinstance(x, list) else []
+
+
+def open_claims(full, n, jobn):
+    """Other open work as roster.overlaps input: files of every open PR, and chunk paths of unchecked chunks of other open issues.
+    The PR itself and everything of the same job (branch chunk/<issue>-<id>) are skipped."""
+    import ledger as L
+    out, same = [], str(jobn) if jobn else None
+    for p in _list(gh_json("repos/%s/pulls?state=open&per_page=100" % full, paginate=True)):
+        num, ref = p.get("number"), (p.get("head") or {}).get("ref", "")
+        if str(num) == str(n) or (same and re.fullmatch(r"chunk/%s-\w+" % same, ref)):
+            continue
+        fl = _list(gh_json("repos/%s/pulls/%s/files?per_page=100" % (full, num), paginate=True))
+        out.append({"ref": "#%s" % num, "files": [f["filename"] for f in fl]})
+    for i in _list(gh_json("repos/%s/issues?state=open&per_page=100" % full, paginate=True)):
+        if i.get("pull_request") or str(i.get("number")) == same:
+            continue
+        globs = []
+        for l in L.chunk_lines(i.get("body")):
+            c = L.chunk(l)
+            if c and re.match(r"\s*- \[ \]", l):
+                globs += c["paths"]
+        if globs:
+            out.append({"ref": "#%s" % i["number"], "globs": globs})
+    return out
+
+
+def claims_line(ro, names, builder, others, verdict):
+    """(ok, receipt) of the CLAIMS check; without a roster it passes."""
+    if not ro:
+        return True, "no roster"
+    import roster as R
+    confl = [(a, r, R.owner(ro, a, builder)) for a, refs in R.overlaps(ro, names, others).items() for r in refs]
+    ok, lines = R.claims_check(confl, verdict)
+    return ok, "; ".join(lines) or "no shared area with %d open PRs or jobs" % len(others)
+
+
 def gate(repo, n):
     full = F.repo_full(repo)
     pr = gh_json("repos/%s/pulls/%s" % (full, n))
@@ -344,7 +382,7 @@ def gate(repo, n):
             if builder and mm.group(3).lower() == builder and mm.group(4) == "ACCEPT":
                 refused.append(mm.group(3).upper())
                 continue
-            verdict[mm.group(3).upper()] = (mm.group(4), cm["html_url"])
+            verdict[mm.group(3).upper()] = (mm.group(4), cm["html_url"], (cm.get("body") or "")[mm.end():])
     bad = sorted(w for w in need if verdict.get(w, ("", ""))[0] != "ACCEPT")
     if roster_err:
         put("REVIEWS", False, "roster unreadable, failing closed: " + roster_err)
@@ -354,6 +392,17 @@ def gate(repo, n):
       put("REVIEWS", not bad, ("%s ACCEPT @%s | %s" % (", ".join(sorted(need)), s8, " ".join(verdict[w][1] for w in sorted(need)))) if not bad else
         "need ACCEPT @%s from: %s (have: %s)%s" % (s8, ", ".join(bad), ", ".join("%s %s" % (k, v[0]) for k, v in verdict.items()) or "none on this head",
                                                     "; ACCEPT by builder %s refused" % ", ".join(sorted(set(refused))) if refused else ""))
+
+    # 4b CLAIMS
+    names = [f["filename"] for f in files]
+    try:
+        others = open_claims(full, n, jobn) if ro and not roster_err else []
+    except NoAnswer as e:
+        others, roster_err = [], str(e)
+    if roster_err:
+        put("CLAIMS", False, "cannot list open work, failing closed: " + roster_err)
+    else:
+        put("CLAIMS", *claims_line(ro, names, builder, others, verdict))
 
     # 5 LIMITS
     mx = int(re.sub(r"\D", "", fld.get("max-lines", "")) or 800)

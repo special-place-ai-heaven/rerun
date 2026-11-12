@@ -148,3 +148,51 @@ def builder(roster, paths):
     if len(picked) > 1:
         raise ValueError("split the chunk: " + "; ".join("%s: %s" % (w, ", ".join(ps[:3])) for w, ps in sorted(picked.items())))
     return next(iter(picked))
+
+
+NO_CLAIM = ("tests", "docs", "default")   # these areas never claim
+
+
+def glob_areas(roster, pattern):
+    """Claiming areas a chunk path glob may touch (approximate: a sample path, or an area glob under the pattern's literal prefix)."""
+    sample, lit = re.sub(r"\*+", "x", pattern), re.split(r"[*?]", pattern)[0]
+    got = set()
+    for a in roster["areas"]:
+        if a["name"] not in NO_CLAIM and (any(r.fullmatch(sample) for r in a["res"]) or (lit and any(g.startswith(lit) for g in a["globs"]))):
+            got.add(a["name"])
+    return got
+
+
+def overlaps(roster, files, others):
+    """{area: [refs]} for the claiming areas `files` share with `others` = [{"ref": "#77", "files": [...]} or {"ref": "#12", "globs": [...]}]."""
+    mine = {n for n in areas(roster, files) if n not in NO_CLAIM}
+    out = {}
+    for o in others:
+        theirs = {n for n in areas(roster, o.get("files") or []) if n not in NO_CLAIM}
+        for g in o.get("globs") or []:
+            theirs |= glob_areas(roster, g)
+        for n in mine & theirs:
+            out.setdefault(n, []).append(o["ref"])
+    return {n: sorted(set(r), key=lambda x: (len(x), x)) for n, r in out.items()}
+
+
+def owner(roster, area, builder=None):
+    """UPPERCASE owner of an area; the chunk builder is replaced by the default owner."""
+    a = {x["name"]: x for x in roster["areas"] + [roster["default"]]}[area]
+    who = a["owner"]
+    return (roster["default"]["owner"] if who == (builder or "").lower() else who).upper()
+
+
+def claims_check(conflicts, verdicts):
+    """conflicts = [(area, ref, OWNER)]; verdicts = {NAME: (word, url, note)} at the head.
+    Returns (ok, lines). A claim clears only when the owner's ACCEPT note holds `ref` (e.g. #77) as a whole token."""
+    lines, ok = [], True
+    for area, ref, who in sorted(conflicts):
+        v = verdicts.get(who)
+        clear = bool(v and v[0] == "ACCEPT" and re.search(r"(?<![\w#])%s(?!\d)" % re.escape(ref), v[2] if len(v) > 2 else ""))
+        if clear:
+            lines.append("CLAIM %s: also %s (cleared by %s)" % (area, ref, who))
+        else:
+            ok = False
+            lines.append("CLAIM %s: also %s (needs %s ACCEPT naming %s)" % (area, ref, who, ref))
+    return ok, lines

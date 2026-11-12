@@ -165,8 +165,8 @@ def ingest(st, inbox):
     return n
 
 class Runner:
-    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None):
-        self.open_pr = open_pr
+    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None):
+        self.open_pr, self.evidence = open_pr, evidence
         self.eng, self.st, self.cfg, self.tokens, self.clock = eng, st, cfg, tokens, clock
         self.by_slug = {e["slug"]: e for e in cfg["triggers"]}
         self.by_stage = {e["stage"]: e for e in cfg["triggers"]}
@@ -240,9 +240,11 @@ class Runner:
             self.st.close_run(rid, "discarded", iso(self.clock()), tin, tout, "result under a closed lease")
             log("run %s result discarded: lease of chunk %s closed" % (rid, f["chunk"]))
         elif what == "DONE":
-            self.st.close_run(rid, "done", iso(self.clock()), tin, tout)
-            if f["stage"] == "build" and f["chunk"]:
+            if f["stage"] == "build" and f["chunk"] and "published:" + f["chunk"] not in self.st.get_all(f["job"]):
                 self.finish_build(f)
+            if self.evidence and self.evidence(f)[0] != "OK":
+                return  # the run ended but no evidence yet: stays running, read again next tick
+            self.st.close_run(rid, "done", iso(self.clock()), tin, tout)
         elif what == "CANCEL":
             self.eng.cancel(agent, rid)
             self.st.close_run(rid, "cancelled", iso(self.clock()), tin, tout, why)
@@ -274,6 +276,7 @@ class Runner:
             if (r := TR.run(base, head, kv["test:" + chunk].split())["verdict"]) != "ok":
                 return log("chunk %s: done-test %s" % (chunk, r))
             PB.publish(head, job, kv["title"], kv["base_branch"], self.open_pr, paths)
+            self.st.set(job, "published:" + chunk, "1")
         except (KeyError, ValueError, OSError, subprocess.CalledProcessError) as e:
             log("chunk %s: publish chain stopped: %s" % (chunk, type(e).__name__))
 

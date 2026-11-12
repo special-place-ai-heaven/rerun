@@ -66,6 +66,8 @@ class Store:
         cur = self.db.execute(
             "INSERT INTO fires(job,chunk,stage,coworker,slug,intent_at,refire) VALUES(?,?,?,?,?,?,?)",
             (job, chunk, stage, coworker, slug, at or now(), n))
+        self._seen(job, chunk)
+        self.db.execute("UPDATE ready_chunks SET attempts=MAX(attempts,?) WHERE job=? AND chunk=?", (n, job, chunk))
         return cur.lastrowid
 
     def fired(self, fire_id, run_id):
@@ -99,10 +101,8 @@ class Store:
         return self._rows("status='running'", job)
 
     def refires(self, job, chunk, stage):
-        """Number of fires beyond the first for this stage (0 = fired once or never)."""
-        n = self.db.execute("SELECT COUNT(*) FROM fires WHERE job=? AND chunk=? AND stage=?",
-                            (job, chunk, stage)).fetchone()[0]
-        return max(0, n - 1)
+        """Number of refires of this chunk (0 = fired once or never): the one counter, ready_chunks.attempts."""
+        return self.attempts(job, chunk)
 
     def resume(self, job):
         """What a restarted runner needs: pending intents, running runs, last fire, saved kv."""
@@ -192,7 +192,13 @@ class Store:
         r = self.db.execute("SELECT attempts FROM ready_chunks WHERE job=? AND chunk=?", (job, chunk)).fetchone()
         return r[0] if r else 0
 
+    def _seen(self, job, chunk):
+        """A row for a chunk that never went through add_ready; state 'seen' keeps it out of ready_list."""
+        self.db.execute("INSERT OR IGNORE INTO ready_chunks(job,chunk,state,added_at) VALUES(?,?,'seen',?)", (job, chunk, now()))
+
     def bump_attempt(self, job, chunk):
+        """Requeue API: one more attempt on the shared counter. Returns the new count."""
+        self._seen(job, chunk)
         self.db.execute("UPDATE ready_chunks SET attempts=attempts+1 WHERE job=? AND chunk=?", (job, chunk))
         return self.attempts(job, chunk)
 

@@ -99,6 +99,20 @@ export async function bumpRunStep(agentId: string, id: string, stepCount: number
     await db.update(runs).set({ stepCount }).where(eq(runs.id, id))
 }
 
+export type RunLivePatch = { stepCount: number; usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number; reasoningTokens?: number; cachedInputTokens?: number } }
+
+// Live progress write. Guarded on status so a late flush can never touch a settled row.
+export async function updateRunLive(agentId: string, id: string, { stepCount, usage }: RunLivePatch): Promise<void> {
+    const { db } = await getSystemDb(agentId)
+    const set: Partial<RunRow> = { stepCount }
+    if (usage?.inputTokens !== undefined) set.inputTokens = usage.inputTokens
+    if (usage?.outputTokens !== undefined) set.outputTokens = usage.outputTokens
+    if (usage?.totalTokens !== undefined) set.totalTokens = usage.totalTokens
+    if (usage?.reasoningTokens !== undefined) set.reasoningTokens = usage.reasoningTokens
+    if (usage?.cachedInputTokens !== undefined) set.cachedInputTokens = usage.cachedInputTokens
+    await db.update(runs).set(set).where(and(eq(runs.id, id), eq(runs.status, 'running')))
+}
+
 type UsageTokens = { inputTokens?: number; outputTokens?: number; totalTokens?: number; reasoningTokens?: number; cachedInputTokens?: number }
 
 export async function finishRun(agentId: string, id: string, usage: UsageTokens | null | undefined, stepCount: number, costMicros: number | null = null, context?: ContextOccupancy): Promise<void> {

@@ -186,3 +186,15 @@ def packet_oversize(text, cfg=None, lane=None):
     """True when the UTF-8 byte length of a packet is above the strictest of PACKET_CAP, cfg packet_cap and lane."""
     cap = min(v for v in (PACKET_CAP, _pos((cfg or {}).get("packet_cap")), _pos(lane)) if v is not None)
     return len(text.encode("utf-8")) > cap
+
+
+RETRIES = 1
+
+
+def failure(attempts, cfg=None, tail=""):
+    """A failed chunk attempt: RETRY (with the failure tail in the next packet) while attempts < settings retries
+    (runner.json, default 1), else NEEDS_BOSS. attempts is the ledger counter, so a restart keeps the count."""
+    n = (_runner_cfg() if cfg is None else cfg).get("retries", RETRIES)
+    if attempts < n:
+        return "RETRY", tail
+    return "NEEDS_BOSS", "failed after %d attempt(s), retries %d: %s" % (attempts + 1, n, (tail or "-")[-200:])

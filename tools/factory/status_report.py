@@ -32,6 +32,31 @@ def read_fires(db_path):
         db.close()
 
 
+def read_table(db_path, table):
+    """Rows of ready_chunks or wakes, read-only; [] when the table is missing."""
+    db = sqlite3.connect("file:%s?mode=ro" % db_path, uri=True)
+    db.row_factory = sqlite3.Row
+    try:
+        return [dict(r) for r in db.execute("SELECT * FROM %s" % table)]
+    except sqlite3.Error:
+        return []
+    finally:
+        db.close()
+
+
+def measure_lines(fires, ready, wakes, now):
+    """One line per measure (measures.py). Commits, CI green times and merged changes are not in the ledger: n/a."""
+    import measures as M
+    q, o, t = M.queue_measures(ready, fires, now), M.occupancy_measures(fires, wakes, [], {}, now), M.token_split(fires, [])
+    na = lambda v: "n/a" if v is None else ("%.2f" % v if isinstance(v, float) else str(v))
+    out = ["queue depth=%d wait_s=%s stalled_s=%d" % (q["depth"], ",".join("%d" % w for w in q["wait_s"]) or "none", q["stalled_s"]),
+           "occupancy=%s quiet_wake_rate=%s no_commit=n/a early_reviews=n/a" % (na(o["occupancy"]), na(o["quiet_wake_rate"])),
+           "tokens per merged change: " + " ".join("%s=%s" % (k, na(t[k])) for k, _ in M.TOKEN_FIELDS)]
+    for job, m in M.review_measures(fires, now).items():
+        out.append("review job %s: runs=%d tokens=%d coworkers=%d peak_chunks=%d" % (job, m["review_runs"], m["review_tokens"], m["coworkers"], m["peak_chunks"]))
+    return out
+
+
 def runner_started_at():
     """Epoch start of PID 1 of this container (the runner), or None when /proc is not readable."""
     try:
@@ -144,6 +169,8 @@ def main(argv):
         fires = read_fires(db)
         agents = sorted({e["agent"] for e in R.load_runtime(cfg, strict=False)["triggers"]})
         sys.stdout.write(render(report(fires, E.Engine(), agents, runner_started_at())))
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        sys.stdout.write("\n".join(measure_lines(fires, read_table(db, "ready_chunks"), read_table(db, "wakes"), now)) + "\n")
     except (E.EngineError, sqlite3.Error, OSError, RuntimeError) as e:
         sys.stdout.write("status failed: %s\n" % type(e).__name__ + ("" if isinstance(e, sqlite3.Error) else str(e) + "\n"))
         return 1

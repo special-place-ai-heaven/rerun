@@ -9,7 +9,7 @@ import argparse, json, os, signal, subprocess, sys, tempfile, threading, time, u
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import applypatch as AP, checkout as CO, engine as E, limits as L, publish as PB, readyq as RQ, store as S, testrun as TR, trigger as T
+import applypatch as AP, checkout as CO, engine as E, factory as F, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T, wake
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -165,8 +165,8 @@ def ingest(st, inbox):
     return n
 
 class Runner:
-    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None):
-        self.open_pr, self.evidence = open_pr, evidence
+    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None, issues=None):
+        self.open_pr, self.evidence, self.issues = open_pr, evidence, issues
         self.eng, self.st, self.cfg, self.tokens, self.clock = eng, st, cfg, tokens, clock
         self.by_slug = {e["slug"]: e for e in cfg["triggers"]}
         self.by_stage = {e["stage"]: e for e in cfg["triggers"]}
@@ -242,8 +242,11 @@ class Runner:
         elif what == "DONE":
             if f["stage"] == "build" and f["chunk"] and "published:" + f["chunk"] not in self.st.get_all(f["job"]):
                 self.finish_build(f)
-            if self.evidence and self.evidence(f)[0] != "OK":
+            ev = self.evidence(f) if self.evidence else ("OK", "")
+            if ev[0] != "OK":
                 return  # the run ended but no evidence yet: stays running, read again next tick
+            if f["stage"] == "review" and self.issues and isinstance(ev[1], str):
+                self.follow_up(f["job"], ev[1])
             self.st.close_run(rid, "done", iso(self.clock()), tin, tout)
         elif what == "CANCEL":
             self.eng.cancel(agent, rid)
@@ -262,6 +265,16 @@ class Runner:
                 log("run %s failed: refire already used" % rid)
         else:  # FAILED, MISSING
             self.st.close_run(rid, "failed", iso(self.clock()), tin, tout, why)
+
+    def follow_up(self, job, verdict):
+        """One issue per follow-up note of a done review; the keys already opened live in the job kv (the client cannot list)."""
+        kv = self.st.get_all(job)
+        done = {k[9:] for k in kv if k.startswith("followup:")}
+        try:
+            for k in FU.create(self.issues, FU.notes(verdict, job), done):
+                self.st.set(job, "followup:" + k, "1")
+        except (OSError, RuntimeError) as e:
+            log("follow-up issues for %s stopped: %s" % (job, type(e).__name__))
 
     def finish_build(self, f):
         """A build run ended: check out base and head, apply the chunk's patch, run its done-test (fails on base, passes on
@@ -361,6 +374,50 @@ class Runner:
                 log("lease %s kept open, cancel failed: %s" % (l["id"], e))
                 continue
             self.st.close_lease(l["id"], "expired", at=at)
+
+    def fire_reviews(self, job, pr, head, checks, owners):
+        """Queue the review stage once per roster owner, only when every check at head is green; the wake claim
+        (job-independent key: event, owner, head) lets a second look at the same head fire nothing."""
+        if F.ci_state(checks) != "GREEN":
+            return []
+        new = [o for o in sorted(set(owners)) if wake.claim_wake(self.st, wake.review_event(pr), o, head)]
+        for o in new:
+            self.st.enqueue(job, "review", "", {"job": job, "stage": "review", "owner": o, "head": head})
+        return new
+
+    def after_reject(self, job, chunk, owners):
+        """A REJECT of a chunk: limits.after_reject rules; ARBITER queues the arbiter stage, FIX queues nothing here."""
+        what, why = L.after_reject(owners)
+        if what == "ARBITER":
+            self.st.enqueue(job, "arbiter", chunk, {"job": job, "stage": "arbiter", "chunk": chunk, "why": why})
+        return what
+
+    def fire_batch(self, batch):
+        """One builder run for a picked batch (batch.pick_batch). Each chunk gets its own lease and attempt; all leases
+        end together, 2 x run_limit_s from now (as start_ready). Returns the run id, None when no token."""
+        ent = self.by_stage.get("build")
+        token = ent and self.tokens.get("%s/%s" % (ent["agent"], ent["slug"]))
+        if not token or not batch:
+            return None
+        job, ids = batch[0]["job"], [c["chunk"] for c in batch]
+        exp = iso(self.clock() + 2 * self.cfg.get("run_limit_s", 600))
+        payload = {"job": job, "stage": "build", "chunks": ids}
+        fid = self.st.dequeue_to_intent(self.st.enqueue(job, "build", ids[0], payload), job, ids[0], "build",
+                                        ent.get("coworker", ""), ent["slug"], batch[0]["paths"], exp)
+        fids = [fid]
+        for c in batch[1:]:
+            self.st.grant_lease(job, c["chunk"], c["paths"], exp, attempt=self.st.attempts(job, c["chunk"]))
+            fids.append(self.st.intent(job, c["chunk"], "build", ent.get("coworker", ""), ent["slug"]))
+        for c in ids:
+            self.st.set_ready_state(job, c, "running")
+        try:
+            run_id, _ = T.fire(self.eng, ent["agent"], ent["slug"], token, payload)
+        except T.TriggerError as e:
+            log("fire of batch %s failed (kept as intents): %s" % (ids, e))
+            return None
+        for f in fids:
+            self.st.fired(f, run_id)
+        return run_id
 
     def start_ready(self):
         """Fire ready chunks (stage 'build') that readyq.eligible allows; running plain stages share the slot count."""

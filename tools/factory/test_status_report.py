@@ -73,6 +73,17 @@ class TestReport(unittest.TestCase):
         self.assertEqual((rows[0]["run_id"], rows[0]["status"]), ("r9", "running"))
 
 
+class Report(unittest.TestCase):
+    def test_three_review_fires_prints_3(self):
+        F = lambda c, st, a, b, i=0: {"job": "j", "chunk": c, "stage": st, "coworker": "w" + c, "intent_at": "2026-01-01T00:00:%02dZ" % a,
+                                      "ended_at": "2026-01-01T00:00:%02dZ" % b, "tokens_in": i, "tokens_out": 1}
+        fires = [F("A", "build", 0, 9)] + [F(c, "review", 10 + n, 12 + n, 4) for n, c in enumerate("ABC")]
+        out = "\n".join(S.measure_lines(fires, [], [], "2026-01-01T00:01:00Z"))
+        self.assertIn("review job j: runs=3 tokens=15 coworkers=3 peak_chunks=1", out)
+        self.assertIn("tokens per merged change: fresh_input=n/a", out)
+        self.assertIn("queue depth=0", out)
+
+
 class TestSharedStorePath(unittest.TestCase):
     def test_status_and_runner_read_the_same_store_path(self):
         import runner_loop as R, trigger as T

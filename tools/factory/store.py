@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS fires(
   intent_at TEXT NOT NULL, run_id TEXT, status TEXT NOT NULL DEFAULT 'intent',
   ended_at TEXT, tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0,
   error TEXT, refire INTEGER NOT NULL DEFAULT 0);
-CREATE UNIQUE INDEX IF NOT EXISTS fires_run ON fires(run_id) WHERE run_id IS NOT NULL;
+DROP INDEX IF EXISTS fires_run;  -- was UNIQUE: chunks of one batch share a run id; an index drop, no row change
+CREATE INDEX IF NOT EXISTS fires_run_id ON fires(run_id) WHERE run_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS kv(job TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, PRIMARY KEY(job, k));
 CREATE TABLE IF NOT EXISTS queue(
   id INTEGER PRIMARY KEY AUTOINCREMENT,

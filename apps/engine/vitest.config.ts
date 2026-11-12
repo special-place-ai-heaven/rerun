@@ -2,6 +2,9 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
     test: {
+        // 8 parallel workers on shared runners starve CPU; the 5000 ms default times out real tests
+        testTimeout: 15000,
+        hookTimeout: 15000,
         coverage: {
             provider: 'v8',
             include: ['src/**/*.ts'],

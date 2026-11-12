@@ -50,13 +50,32 @@ def may_fire(fired_total):
     return "FIRE", None
 
 
+STANDARD_CHUNK_CAP, BUILDER_CAPACITY, PER_JOB_CAP = 400000, 3, 2
+
+
+def _pos(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else None
+
+
+def chunk_cap(cfg=None, entry=None, lane=None):
+    """Per-chunk token cap: the strictest of the standard chunk, the global, the entry and the lane value."""
+    vals = [_pos(v) for v in (STANDARD_CHUNK_CAP, (cfg or {}).get("token_cap"), (entry or {}).get("token_cap"), lane)]
+    return min(v for v in vals if v is not None)
+
+
+def batch_cap(cfg, chunks, entry=None, lane=None):
+    """A batch run's cap: chunks x the per-chunk cap."""
+    return chunks * chunk_cap(cfg, entry, lane)
+
+
 def stage_cfg(cfg, entry=None):
     """cfg with the per-stage overrides of a runner.json trigger entry (keys run_limit_s, stall_s, token_cap) laid over
-    the global ones. A stage that must end fast (the R2 proof stage) carries its own short run_limit_s."""
+    the global ones. token_cap is the strictest of the two: an entry cannot raise the global. A stage that must end
+    fast (the R2 proof stage) carries its own short run_limit_s."""
     out = dict(cfg or {})
     for k in ("run_limit_s", "stall_s", "token_cap"):
         if entry and k in entry:
-            out[k] = entry[k]
+            out[k] = min(entry[k], out[k]) if k == "token_cap" and _pos(out.get(k)) and _pos(entry[k]) else entry[k]
     return out
 
 

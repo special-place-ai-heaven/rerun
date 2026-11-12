@@ -2,8 +2,9 @@
 # Read-and-probe check of the development engine (deploy/vps/dev-engine.yml) beside the live one.
 # Run from the clone, after the development engine is up:
 #   sudo sh deploy/vps/dev-engine-status.sh
-# One labelled line per check. No secret and no environment value is printed: the live engine key is
-# read into a variable, used in one request, and unset.
+# One labelled line per check. No secret and no environment value is printed: the dev engine key is
+# read into a variable, used in one request, and unset. Only the development engine's own key
+# (RERUN_DEV_ENGINE_KEY in deploy/vps/.env) is read; the live key is never read.
 set -eu
 cd "$(dirname "$0")/../.."
 DEV=${DEV_ENGINE_CONTAINER:-rerun-dev-engine-dev-1}
@@ -48,21 +49,26 @@ esac
 # P3: health.
 say "P3 health http=$(dev curl -s -o /dev/null -m 5 -w '%{http_code}' http://localhost:3000/health || true)"
 
-# P4: create a coworker, create a webhook trigger, fire it, read the run row.
-AG=$(dev curl -s -m 20 -X POST http://localhost:3000/agents -H 'content-type: application/json' \
+# P4: create a coworker, create a webhook trigger, fire it, read the run row. The dev key is read from
+# deploy/vps/.env only, sent as a Bearer header to the dev engine only, and never printed.
+DEVKEY=$(sed -n 's/^RERUN_DEV_ENGINE_KEY=//p' deploy/vps/.env 2>/dev/null | tail -n 1)
+[ -n "$DEVKEY" ] || { say "P4 FAIL no RERUN_DEV_ENGINE_KEY in deploy/vps/.env"; exit 1; }
+dcurl() { T=$1; shift; printf 'Authorization: Bearer %s\n' "$DEVKEY" | docker exec -i "$DEV" curl -s -m "$T" -H @- "$@"; }
+say "P4 no-key-request http=$(dev curl -s -o /dev/null -m 5 -w '%{http_code}' http://localhost:3000/agents || true)"
+AG=$(dcurl 20 -X POST http://localhost:3000/agents -H 'content-type: application/json' \
     -d '{"config":{"name":"dev-probe"}}' | devi jq -r '.id // empty' || true)
 if [ -n "$AG" ]; then
-    TR=$(dev curl -s -m 20 -X POST "http://localhost:3000/agents/$AG/triggers" -H 'content-type: application/json' \
+    TR=$(dcurl 20 -X POST "http://localhost:3000/agents/$AG/triggers" -H 'content-type: application/json' \
         -d '{"name":"probe","body":"Say hello."}' || true)
     SLUG=$(printf '%s' "$TR" | devi jq -r '.slug // empty' || true)
     TOK=$(printf '%s' "$TR" | devi jq -r '.token // empty' || true)
-    FIRE=$(dev curl -s -m 30 -X POST "http://localhost:3000/agents/$AG/triggers/$SLUG/fire" -H 'content-type: application/json' \
+    FIRE=$(dcurl 30 -X POST "http://localhost:3000/agents/$AG/triggers/$SLUG/fire" -H 'content-type: application/json' \
         -d "{\"token\":\"$TOK\",\"method\":\"POST\"}" || true)
     TOK=
     RUN=$(printf '%s' "$FIRE" | devi jq -r '.runId // empty' || true)
     SES=$(printf '%s' "$FIRE" | devi jq -r '.sessionId // empty' || true)
     sleep 3
-    ST=$(dev curl -s -m 10 "http://localhost:3000/agents/$AG/runs/$RUN" | devi jq -r '.status // empty' || true)
+    ST=$(dcurl 10 "http://localhost:3000/agents/$AG/runs/$RUN" | devi jq -r '.status // empty' || true)
     say "P4 coworker=${AG:+created} trigger=${SLUG:+created} run-id=${RUN:-none} session-id=${SES:-none} run-status=${ST:-none}"
 else
     say "P4 FAIL coworker not created"
@@ -75,18 +81,12 @@ RC=$?
 set -e
 say "P5 node-unhandled-rejection exit-code=$RC"
 
-# P6: the live engine, from the host: cancel a run that does not exist. 401 means the key is refused.
-KEY=$(sed -n 's/^RERUN_ENGINE_API_KEY=//p' .env | tail -n 1 | sed "s/^'\(.*\)'\$/\1/; s/^\"\(.*\)\"\$/\1/")
-IP=$(docker inspect "$LIVE" -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' | awk '{print $1}')
-if [ -n "$KEY" ] && [ -n "$IP" ]; then
-    P6=$(printf 'Authorization: Bearer %s\n' "$KEY" | curl -s -o /dev/null -m 10 -w '%{http_code}' -X POST -H @- \
-        "http://$IP:3000/agents/none/runs/none/cancel" || true)
-    unset KEY
-    say "P6 live-cancel-missing-run http=${P6:-none}"
-else
-    unset KEY
-    say "P6 FAIL no engine key in .env or no live engine address"
-fi
+# P6: the dev engine: cancel a run that does not exist, with the dev key. 401 means the key is refused;
+# 404 means it was accepted.
+P6=$(dcurl 10 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' \
+    "http://localhost:3000/agents/none/runs/none/cancel" || true)
+say "P6 dev-cancel-missing-run http=${P6:-none}"
+DEVKEY=
 
 # P7: the live engine is unchanged since P0.
 AFTER=$(live_state "$LIVE")

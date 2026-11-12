@@ -1,0 +1,41 @@
+# The factory runner: plain Python, no model of its own, beside the development engine in the same
+# project and network (rerun-dev). It reads run rows over the engine's HTTP routes and acts.
+#
+#   sudo docker compose -f deploy/vps/factory-runner.yml up -d
+# Needs RERUN_DEV_ENGINE_KEY in deploy/vps/.env (see dev-engine.yml). It gets that one variable and
+# nothing of the live setup. Its ledger and trigger tokens live in its own volume.
+#
+# Deliberately absent: published ports, the docker socket, privileged mode, added capabilities,
+# host paths other than the read-only tools/factory mount, the live engine key.
+name: rerun-dev
+
+services:
+  factory-runner:
+    image: python:3.12-slim
+    working_dir: /app
+    command: ["python", "-u", "/app/runner_loop.py"]
+    environment:
+      RERUN_DEV_ENGINE_KEY: ${RERUN_DEV_ENGINE_KEY:?set RERUN_DEV_ENGINE_KEY in deploy/vps/.env}
+      RERUN_DEV_ENGINE_URL: http://engine-dev:3000
+      FACTORY_DATA_DIR: /state
+    volumes:
+      - ../../tools/factory:/app:ro
+      - factory-runner-data:/state
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    restart: unless-stopped
+
+volumes:
+  factory-runner-data:

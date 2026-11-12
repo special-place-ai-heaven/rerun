@@ -467,7 +467,18 @@ def build(cfg=None, eng=None, clock=time.time, gh=None):
     eng = eng or E.Engine()
     tokens = T.ensure_triggers(eng, cfg)
     st = S.Store(store_path(cfg))
-    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr)
+    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr, evidence=lambda f: stage_evidence(gh, st, f))
+
+def stage_evidence(gh, st, f):
+    """Evidence for an ended run: a build run needs its pushed branch and CI (evidence.stage_check); other stages: OK.
+    A job without repo_url never published, so it has nothing to check. A GitHub error means no evidence yet."""
+    kv = st.get_all(f["job"])
+    if f["stage"] != "build" or "repo_url" not in kv:
+        return "OK", ""
+    try:
+        return EV.stage_check(gh.get, f, kv, st.get_ready(f["job"], f["chunk"]))
+    except GH.GhError as e:
+        return "NONE", str(e)
 
 def run(r, stop, poll_s):
     log("started")

@@ -88,6 +88,32 @@ P6=$(dcurl 10 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: applicati
 say "P6 dev-cancel-missing-run http=${P6:-none}"
 DEVKEY=
 
+# P8: the engine key sits in the environment of no process in the dev engine. `-e RERUN_API_KEY=` empties the
+# variable for the probe itself, so only processes that really hold a value are counted. Names only: no value
+# is read into a variable or printed. Our own process tree (this exec, its shell and children) is excluded.
+P8=$(docker exec -e RERUN_API_KEY= "$DEV" sh -c '
+    me=$$; n=0
+    for f in /proc/[0-9]*/environ; do
+        pid=${f#/proc/}; pid=${pid%/environ}
+        [ "$pid" = "$me" ] && continue
+        [ "$(awk "{print \$4}" "/proc/$pid/stat" 2>/dev/null)" = "$me" ] && continue
+        if tr "\0" "\n" < "$f" 2>/dev/null | grep -q "^RERUN_API_KEY=."; then n=$((n+1)); fi
+    done
+    echo "$n"' </dev/null 2>/dev/null || echo err)
+case "$P8" in
+    0) say "P8 key-in-process-environment none" ;;
+    err) say "P8 FAIL could not read process environments" ;;
+    *) say "P8 FAIL RERUN_API_KEY is set in the environment of $P8 process(es)" ;;
+esac
+
+# P8 also needs PID 1 to be the node process itself (the launcher exec'd node), so the counts above cover the engine.
+P8PID1=$(docker exec "$DEV" sh -c 'cat /proc/1/comm' </dev/null 2>/dev/null || echo err)
+case "$P8PID1" in
+    node) say "P8 pid1-is-node" ;;
+    err) say "P8 FAIL could not read PID 1" ;;
+    *) say "P8 FAIL PID 1 is $P8PID1, not node" ;;
+esac
+
 # P7: the live engine is unchanged since P0.
 AFTER=$(live_state "$LIVE")
 say "P7 live-engine $AFTER"

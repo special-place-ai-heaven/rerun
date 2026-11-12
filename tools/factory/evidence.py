@@ -87,3 +87,17 @@ def ci_at_commit(get, full, branch):
     cs = get("repos/%s/commits/%s/check-runs?per_page=100" % (full, sha)).get("check_runs", [])
     ci = F.ci_state(cs)
     return ("NONE", "no check-runs at %s" % sha[:8]) if ci == "NONE" else ("OK" if ci == "GREEN" else ci), {"sha": sha, "ci": ci}
+
+
+def verdict(get, full, pr, name, fired):
+    """`review` with the PR head read from GitHub now. A verdict by `name` that names an older commit is never taken:
+    NONE says which commit it names and which head was needed."""
+    head = get("repos/%s/pulls/%s" % (full, pr))["head"]["sha"]
+    v, d = review(get, full, pr, head, name, fired)
+    if v != "NONE":
+        return v, d
+    for c in reversed(comments(get, full, pr)):
+        m = G.REVIEW_RE.match(c.get("body") or "")
+        if m and m.group(3).upper() == name.upper() and ts(c["created_at"]) > ts(fired):
+            return "NONE", "%s verdict names %s, PR head is %s" % (name.upper(), m.group(2), head[:8])
+    return v, d

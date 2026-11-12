@@ -508,11 +508,18 @@ def stage_evidence(gh, st, f):
     except GH.GhError as e:
         return "NONE", str(e)
 
+TRUSTED_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
+FACTORY_LOGIN = "special-place-administrator"
+
+def _trusted(item):
+    return item.get("author_association") in TRUSTED_ASSOCIATIONS or (item.get("user") or {}).get("login") == FACTORY_LOGIN
+
 def intake_issue(st, gh, repo, n, base_branch="dev"):
     """`intake REPO#N`: the issue (body, then comments) is the plan text; the job kv gets repo_url, title, base_branch and the
     sha of base_branch as `base`. Nothing is stored when the plan has no valid chunk. Returns (state, errors)."""
     issue = gh.issue(n)
-    text = "\n".join([issue.get("body") or ""] + [c.get("body") or "" for c in gh.comments(n)])
+    parts = [issue.get("body") or ""] if _trusted(issue) else []  # only the repo's own people write the plan
+    text = "\n".join(parts + [c.get("body") or "" for c in gh.comments(n) if _trusted(c)])
     meta = {"repo_url": "https://github.com/" + repo, "title": issue["title"], "base_branch": base_branch}
     sha = gh.branch_sha(base_branch)  # resolved before register: a GitHub error then stores no job
     state, errors = IN.register(st, str(n), meta, text)

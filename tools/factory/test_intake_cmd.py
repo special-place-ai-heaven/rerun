@@ -8,8 +8,8 @@ from test_intake import OK1, OK2, plan
 
 
 class FakeGh:
-    def issue(self, n): return {"title": "rerun#%d" % n, "body": "goal"}
-    def comments(self, n): return [{"body": plan(OK1, OK2)}]
+    def issue(self, n): return {"title": "rerun#%d" % n, "body": "goal", "author_association": "OWNER"}
+    def comments(self, n): return [{"body": plan(OK1, OK2), "author_association": "MEMBER"}]
     def branch_sha(self, b): return "sha-of-" + b
 
 
@@ -31,6 +31,13 @@ class IntakeCmd(unittest.TestCase):
             st = store.Store(os.path.join(d, "s.db"))
             self.assertIsNone(R.intake_issue(st, gh, "o/r", 71)[0])
             self.assertEqual(st.get_all("71"), {})
+            st.close()
+
+    def test_stranger_comment_adds_no_chunk(self):
+        gh = FakeGh(); gh.comments = lambda n: [{"body": plan(OK1), "author_association": "NONE", "user": {"login": "x"}}]
+        with tempfile.TemporaryDirectory() as d:
+            st = store.Store(os.path.join(d, "s.db"))
+            self.assertIsNone(R.intake_issue(st, gh, "o/r", 71)[0])
             st.close()
 
     def test_branch_sha_error_exits_1_and_stores_no_job(self):

@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
-"""Trigger client of the factory runner (rerun#53 chunk 1). Fires a coworker's webhook trigger once and reads the run
-from that coworker's system.db, read only. Commands: probe --stage STAGE | check-triggers.
-A trigger URL carries a secret token: no code path here prints, logs or raises the URL or the token."""
-import json, os, pathlib, sqlite3, sys, time, urllib.error, urllib.request
+"""Trigger client of the factory runner (rerun#53 chunk 1, ported to HTTP in rerun#60 chunk C3b). Creates or reuses the
+stage triggers of runner.json over the engine's routes (engine.py), fires one once and reads the run row over HTTP.
+Commands: probe --stage STAGE | check-triggers.
+The engine key and the trigger tokens are secrets: no code path here prints, logs or raises them."""
+import json, os, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-AGENTS = "/data/agents"
-ENV = "/data/factory/runner.env"
+sys.path.insert(0, HERE)
+import engine as E
+
 CONFIG = os.path.join(HERE, "runner.json")
 TRIGGERS = os.path.join(HERE, "triggers")
+TOKENS_ENV, TOKENS_DEFAULT = "FACTORY_TRIGGER_TOKENS_FILE", "/state/trigger-tokens.json"
 PROBE_WAIT_S, PROBE_POLL_S, PROBE_MAX_INPUT = 600, 15, 300000
-RUN_COLS = ("id", "agent_id", "session_id", "status", "step_count", "usage_json", "started_at", "finished_at", "error",
-            "input_tokens", "output_tokens", "cached_input_tokens", "trigger_source", "trigger_slug")
+# the keys limits.py reads (snake_case) <- the engine's run row (camelCase)
+RUN_KEYS = (("id", "id"), ("agent_id", "agentId"), ("session_id", "sessionId"), ("status", "status"),
+            ("step_count", "stepCount"), ("started_at", "startedAt"), ("finished_at", "finishedAt"), ("error", "error"),
+            ("input_tokens", "inputTokens"), ("output_tokens", "outputTokens"),
+            ("cached_input_tokens", "cachedInputTokens"), ("trigger_source", "triggerSource"),
+            ("trigger_slug", "triggerSlug"))
 
 
 class TriggerError(Exception):
-    """Its message never holds the trigger URL or token."""
+    """Its message never holds the engine key or a trigger token."""
 
 
 def load_config(path=None):
@@ -23,60 +30,99 @@ def load_config(path=None):
         return json.load(f)
 
 
-def trigger_url(stage, coworker, path=None):
-    """FACTORY_TRIGGER_<STAGE>_<COWORKER> from the env file (KEY=VALUE lines)."""
-    key = "FACTORY_TRIGGER_%s_%s" % (stage.upper(), coworker.upper())
+def tokens_path(cfg=None):
+    """The token file: runner.json key token_file, else the env var, else the default in the runner volume."""
+    return (cfg or {}).get("token_file") or os.environ.get(TOKENS_ENV) or TOKENS_DEFAULT
+
+
+def _tkey(agent, slug):
+    return "%s/%s" % (agent, slug)
+
+
+def load_tokens(path):
+    """{agent/slug: token} from the token file; {} when it does not exist yet."""
     try:
-        with open(path or ENV, encoding="utf-8") as f:
-            for line in f:
-                k, sep, v = line.strip().partition("=")
-                if sep and k.strip() == key and v.strip():
-                    return v.strip().strip("\"'")
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        raise TriggerError("cannot read the token file (%s)" % type(e).__name__) from None
+    if not isinstance(data, dict):
+        raise TriggerError("the token file is not a JSON object")
+    return {k: v for k, v in data.items() if isinstance(v, str) and v}
+
+
+def save_tokens(path, tokens):
+    """Atomic write, mode 0600 from the first byte."""
+    d = os.path.dirname(os.path.abspath(path))
+    try:
+        os.makedirs(d, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".tokens-", dir=d)  # mkstemp creates the file 0600
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(tokens, f, sort_keys=True)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
     except OSError as e:
-        raise TriggerError("cannot read the env file (%s)" % type(e).__name__) from None
-    raise TriggerError("%s is not set in the env file" % key)
+        raise TriggerError("cannot write the token file (%s)" % type(e).__name__) from None
 
 
-def fire(url, payload, urlopen=urllib.request.urlopen):
-    """POST the payload once as compact JSON; (runId, sessionId) from the 202 answer. Never retried: a timeout may
-    still have started a run. Errors carry the HTTP status or the error class only, never the URL or the answer."""
-    data = json.dumps(payload, separators=(",", ":")).encode()
+def stage_body(stage):
+    with open(os.path.join(TRIGGERS, stage + ".md"), encoding="utf-8") as f:
+        return f.read().replace("\r\n", "\n").strip()
+
+
+def ensure_triggers(eng, cfg=None, stages=None):
+    """Create or reuse (by slug) the trigger of every runner.json entry (only those whose stage is in stages, when given);
+    keeps the tokens in the token file. A trigger that exists is never created a second time. Returns {agent/slug: token}."""
+    cfg = cfg if cfg is not None else load_config()
+    path = tokens_path(cfg)
+    tokens = load_tokens(path)
+    listed = {}
+    for e in cfg["triggers"]:
+        if stages is not None and e["stage"] not in stages:
+            continue
+        agent, slug = e["agent"], e["slug"]
+        if agent not in listed:
+            listed[agent] = {t.get("slug"): t for t in eng.list_triggers(agent)}
+        row = listed[agent].get(slug)
+        if row is None:
+            row = eng.create_trigger(agent, slug, stage_body(e["stage"]), model=e.get("model"))
+            if row.get("slug") != slug:
+                raise TriggerError("the engine derived another slug than %s from the trigger name" % slug)
+            listed[agent][slug] = row
+        if not row.get("token"):
+            raise TriggerError("trigger %s has no token" % slug)
+        tokens[_tkey(agent, slug)] = row["token"]
+    save_tokens(path, tokens)
+    return tokens
+
+
+def fire(eng, agent, slug, token, payload):
+    """Fire the trigger once; (runId, sessionId). Never retried. Errors carry the HTTP status or the class only."""
     try:
-        req = urllib.request.Request(url, data=data, method="POST", headers={"Content-Type": "application/json"})
-        with urlopen(req, timeout=30) as r:
-            code, raw = r.status, r.read()
-    except urllib.error.HTTPError as e:
-        raise TriggerError("trigger answered HTTP %d" % e.code) from None
-    except Exception as e:
-        raise TriggerError("trigger call failed (%s)" % type(e).__name__) from None
-    try:
-        body = json.loads(raw.decode() or "{}")
-    except ValueError:
-        body = None
-    if code != 202 or not isinstance(body, dict) or not body.get("runId"):
-        raise TriggerError("trigger answered HTTP %d without a run id" % code)
-    return body["runId"], body.get("sessionId")
+        return eng.fire_trigger(agent, slug, token, payload)
+    except E.EngineError as e:
+        raise TriggerError(str(e)) from None
 
 
-def db_path(agent):
-    return os.path.join(AGENTS, agent, "data", "system.db")
-
-
-def read_run(agent, run_id, path=None):
-    """The runs row of run_id with RUN_COLS picked by name (a missing column reads as None), or None for no row.
-    Read only: mode=ro and query_only, so the file is never created or written. Raises sqlite3.Error if it cannot open."""
-    con = sqlite3.connect(pathlib.Path(path or db_path(agent)).as_uri() + "?mode=ro", uri=True, timeout=5)
-    try:
-        con.execute("PRAGMA query_only=1")
-        cur = con.execute("SELECT * FROM runs WHERE id = ?", (run_id,))
-        row = cur.fetchone()
-        names = [d[0] for d in cur.description]
-    finally:
-        con.close()
-    if row is None:
+def map_run(row):
+    """An engine run row -> the snake_case keys limits.py expects (a missing key reads as None); None stays None."""
+    if not isinstance(row, dict):
         return None
-    got = dict(zip(names, row))
-    return {k: got.get(k) for k in RUN_COLS}
+    return {snake: row.get(camel, row.get(snake)) for snake, camel in RUN_KEYS}
+
+
+def read_run(eng, agent, run_id):
+    """The run row mapped to snake_case, or None when the engine does not know the run. Raises EngineError."""
+    return map_run(eng.get_run(agent, run_id))
 
 
 def input_tokens(row):
@@ -89,36 +135,26 @@ def input_tokens(row):
         return None
 
 
-def split_front(text):
-    """(front matter lines, body) of a trigger file; the body stripped as the engine's loader does. None if never closed."""
-    lines = text.replace("\r\n", "\n").split("\n")
-    if lines[0].strip() != "---":
-        return [], text.replace("\r\n", "\n").strip()
-    end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
-    if end is None:
-        return None, ""
-    return lines[1:end], "\n".join(lines[end + 1:]).strip()
+def model_of(row):
+    m = row.get("model")
+    return m if isinstance(m, str) and m not in ("", "null", "~") else None
 
 
-def model_of(front):
-    v = next((l.split(":", 1)[1].strip() for l in front if l.startswith("model:")), "")
-    v = v.strip("\"'")
-    return None if v in ("", "null", "~") else v
-
-
-def cmd_check_triggers(a):
-    """<slug> OK|DRIFT per runner.json entry: live body and model against triggers/<stage>.md and runner.json.
-    Nothing else is printed (the front matter holds the token), not even why."""
+def cmd_check_triggers(a, eng=None):
+    """<slug> OK|DRIFT per runner.json entry: live body and model (GET triggers) against triggers/<stage>.md and runner.json.
+    Nothing else is printed (the rows hold the token), not even why."""
     entries = load_config()["triggers"]
     slugs = [e["slug"] for e in entries]
+    live = {}
     bad = 0
     for e in entries:
         try:
-            with open(os.path.join(AGENTS, e["agent"], "triggers", e["slug"] + ".md"), encoding="utf-8") as f:
-                front, body = split_front(f.read())
-            with open(os.path.join(TRIGGERS, e["stage"] + ".md"), encoding="utf-8") as f:
-                want = f.read().replace("\r\n", "\n").strip()
-            ok = front is not None and body == want and model_of(front) == e.get("model")
+            eng = eng or E.Engine()
+            if e["agent"] not in live:
+                live[e["agent"]] = {t.get("slug"): t for t in eng.list_triggers(e["agent"])}
+            row = live[e["agent"]].get(e["slug"])
+            ok = row is not None and (row.get("body") or "").replace("\r\n", "\n").strip() == stage_body(e["stage"]) \
+                and model_of(row) == e.get("model")
         except Exception:
             ok = False
         bad += 0 if ok else 1
@@ -127,22 +163,25 @@ def cmd_check_triggers(a):
     return 1 if bad else 0
 
 
-def cmd_probe(a):
+def cmd_probe(a, eng=None):
     stage = a[a.index("--stage") + 1] if "--stage" in a[:-1] else ""
-    entries = [e for e in load_config()["triggers"] if e["stage"] == stage]
+    cfg = load_config()
+    entries = [e for e in cfg["triggers"] if e["stage"] == stage]
     if len(entries) != 1:
         print("usage: probe --stage STAGE (a stage with exactly one trigger in runner.json)")
         return 2
     e = entries[0]
     try:
-        run_id, sid = fire(trigger_url(stage, e["coworker"]), {"v": 1, "stage": "probe"})
+        eng = eng or E.Engine()
+        tokens = ensure_triggers(eng, cfg, stages=[stage])
+        run_id, sid = fire(eng, e["agent"], e["slug"], tokens[_tkey(e["agent"], e["slug"])], {"v": 1, "stage": "probe"})
         end = time.time() + PROBE_WAIT_S
         while True:
-            row = read_run(e["agent"], run_id) or {}
+            row = read_run(eng, e["agent"], run_id) or {}
             if row.get("status") not in (None, "running") or time.time() >= end:
                 break
             time.sleep(PROBE_POLL_S)
-    except (TriggerError, sqlite3.Error) as x:
+    except (TriggerError, E.EngineError) as x:
         print("PROBE FAIL: %s" % x)
         return 1
     n, st = input_tokens(row), row.get("status")
@@ -160,7 +199,7 @@ def main(argv):
         return 2
     try:
         return CMDS[argv[0]](argv[1:])
-    except Exception as e:  # anything unforeseen: the class name only, a message could quote the URL
+    except Exception as e:  # anything unforeseen: the class name only, a message could quote a secret
         print("FAILED (%s)" % type(e).__name__)
         return 1
 

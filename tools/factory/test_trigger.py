@@ -1,221 +1,229 @@
-"""trigger.py tests: the HTTP call, the env file and system.db are faked or temp files; nothing touches the network or /data."""
-import contextlib, io, json, os, shutil, sqlite3, sys, tempfile, unittest, urllib.error
+"""trigger.py tests (rerun#60 C3b): a local fake engine over HTTP; the engine key and trigger tokens never show in output."""
+import contextlib, io, json, os, shutil, stat, sys, tempfile, threading, unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import engine as E
+import limits
 import trigger as T
 
+KEY = "engine-KEY-0123456789abcdef"
 TOKEN = "tok-SECRET-0123456789abcdef"
-URL = "https://rerun.example/api/t/agent-da/factory-challenge/" + TOKEN
+BODY = "You were started by the factory runner.\nDo the challenge."
 
 
-class Answer:
-    def __init__(self, status, body):
-        self.status, self.body = status, body
-
-    def read(self):
-        return self.body
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
+class State:
+    def __init__(self):
+        self.triggers, self.creates, self.fires, self.runs, self.reject_fire = {}, [], [], {}, False
 
 
-class TempDir(unittest.TestCase):
+class Fake(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _send(self, code, body):
+        raw = json.dumps(body).encode()
+        self.send_response(code)
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _handle(self):
+        st = self.server.state
+        if self.headers.get("Authorization") != "Bearer " + KEY:
+            return self._send(401, {"error": "unauthorized " + KEY})
+        n = int(self.headers.get("Content-Length") or 0)
+        data = json.loads(self.rfile.read(n) or b"{}")
+        p = self.path.split("?")[0].strip("/").split("/")
+        agent = p[1]
+        if p[2:3] == ["triggers"]:
+            mine = st.triggers.setdefault(agent, {})
+            if len(p) == 3 and self.command == "GET":
+                return self._send(200, {"triggers": list(mine.values())})
+            if len(p) == 3 and self.command == "POST":
+                slug = data["name"]
+                st.creates.append((agent, slug))
+                mine[slug] = {"slug": slug, "name": slug, "enabled": True, "token": TOKEN + "-" + slug, "body": data["body"], "model": data["model"]}
+                return self._send(201, mine[slug])
+            if len(p) == 5 and p[4] == "fire":
+                t = mine.get(p[3])
+                st.fires.append((agent, p[3], data))
+                if st.reject_fire or not t or data.get("token") != t["token"]:
+                    return self._send(404, {"error": "trigger not found " + data.get("token", "")})
+                return self._send(202, {"runId": "run-%d" % len(st.fires), "sessionId": "ses-1", "triggerSlug": p[3]})
+        if p[2:3] == ["runs"] and len(p) == 4 and self.command == "GET":
+            row = st.runs.get(p[3])
+            return self._send(200, row) if row else self._send(404, {"error": "run not found"})
+        self._send(404, {"error": "no"})
+
+    do_GET = do_POST = _handle
+
+
+class Base(unittest.TestCase):
     def setUp(self):
+        self.srv = HTTPServer(("127.0.0.1", 0), Fake)
+        self.srv.state = self.st = State()
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.addCleanup(lambda: (self.srv.shutdown(), self.srv.server_close()))
+        self.eng = E.Engine("http://127.0.0.1:%d" % self.srv.server_port, KEY)
         self.tmp = tempfile.mkdtemp(prefix="trigger-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
-
-    def write(self, rel, text):
-        p = os.path.join(self.tmp, rel)
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
-        return p
+        self.tokfile = os.path.join(self.tmp, "vol", "tokens.json")
+        self.cfg = {"tick_seconds": 120, "token_file": self.tokfile, "triggers": [
+            {"stage": "challenge", "coworker": "DEVILS_ADVOCATE", "agent": "agent-da", "slug": "factory-challenge", "model": "claude-x"}]}
+        cfgp = os.path.join(self.tmp, "runner.json")
+        with open(cfgp, "w") as f:
+            json.dump(self.cfg, f)
+        os.makedirs(os.path.join(self.tmp, "triggers"))
+        with open(os.path.join(self.tmp, "triggers", "challenge.md"), "w", newline="\n") as f:
+            f.write(BODY + "\n")
+        for k, v in (("CONFIG", cfgp), ("TRIGGERS", os.path.join(self.tmp, "triggers")), ("PROBE_POLL_S", 0)):
+            p = mock.patch.object(T, k, v)
+            p.start()
+            self.addCleanup(p.stop)
 
     def main(self, argv):
         out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), mock.patch.object(E, "Engine", lambda: self.eng):
             code = T.main(argv)
-        self.assertNotIn(TOKEN, out.getvalue() + err.getvalue())
+        for secret in (KEY, TOKEN):
+            self.assertNotIn(secret, out.getvalue() + err.getvalue())
         return code, out.getvalue()
 
 
-class TestFire(unittest.TestCase):
-    def test_fire_ok(self):
-        sent = []
+class TestEnsure(Base):
+    def test_creates_once_reuses_and_survives_restart(self):
+        tokens = T.ensure_triggers(self.eng, self.cfg)
+        self.assertEqual(self.st.creates, [("agent-da", "factory-challenge")])
+        self.assertEqual(tokens, {"agent-da/factory-challenge": TOKEN + "-factory-challenge"})
+        T.ensure_triggers(self.eng, self.cfg)  # second start: reuse by slug
+        self.assertEqual(len(self.st.creates), 1)
+        self.assertEqual(stat.S_IMODE(os.stat(self.tokfile).st_mode), 0o600)
+        self.assertEqual(T.load_tokens(self.tokfile), tokens)  # a restart reads the file back
+        with open(self.tokfile) as f:
+            self.assertNotIn(KEY, f.read())
 
-        def opener(req, timeout):
-            sent.append(req)
-            return Answer(202, b'{"runId":"run-1","sessionId":"ses-1","triggerSlug":"factory-challenge"}')
-        self.assertEqual(T.fire(URL, {"v": 1, "stage": "probe"}, urlopen=opener), ("run-1", "ses-1"))
-        self.assertEqual(len(sent), 1)
-        self.assertEqual((sent[0].get_method(), sent[0].full_url, sent[0].data), ("POST", URL, b'{"v":1,"stage":"probe"}'))
-        self.assertEqual(sent[0].get_header("Content-type"), "application/json")
+    def test_new_trigger_carries_body_and_model(self):
+        T.ensure_triggers(self.eng, self.cfg)
+        row = self.st.triggers["agent-da"]["factory-challenge"]
+        self.assertEqual((row["body"], row["model"]), (BODY, "claude-x"))
 
-    def test_errors_never_show_url_or_token(self):
-        def raising(e):
-            def opener(req, timeout):
-                raise e
-            return opener
-        cases = [raising(urllib.error.HTTPError(URL, 404, "not found " + TOKEN, {}, None)),
-                 raising(urllib.error.URLError("cannot reach " + URL)),
-                 raising(ValueError("unknown url type: " + URL)),
-                 lambda req, timeout: Answer(200, json.dumps({"error": TOKEN}).encode()),
-                 lambda req, timeout: Answer(202, b"not json " + TOKEN.encode())]
-        for opener in cases:
+    def test_wrong_slug_from_engine_is_an_error_without_secrets(self):
+        self.cfg["triggers"][0]["slug"] = "Factory Challenge"
+        with mock.patch.object(self.eng, "create_trigger", lambda *a, **k: {"slug": "other", "token": TOKEN}):
             with self.assertRaises(T.TriggerError) as cm:
-                T.fire(URL, {"v": 1}, urlopen=opener)
-            self.assertNotIn(TOKEN, str(cm.exception))
-            self.assertNotIn("example", str(cm.exception))
-            self.assertTrue(cm.exception.__suppress_context__ or cm.exception.__context__ is None)
+                T.ensure_triggers(self.eng, self.cfg)
+        self.assertNotIn(TOKEN, str(cm.exception))
 
-    def test_one_call_only_on_timeout(self):
+    def test_bad_token_file_raises_class_only(self):
+        os.makedirs(os.path.dirname(self.tokfile))
+        with open(self.tokfile, "w") as f:
+            f.write("{not json " + TOKEN)
+        with self.assertRaises(T.TriggerError) as cm:
+            T.load_tokens(self.tokfile)
+        self.assertNotIn(TOKEN, str(cm.exception))
+
+
+class TestFire(Base):
+    def test_fire_once_with_bearer_token_and_string_body(self):
+        tokens = T.ensure_triggers(self.eng, self.cfg)
+        run = T.fire(self.eng, "agent-da", "factory-challenge", tokens["agent-da/factory-challenge"], {"v": 1, "stage": "probe"})
+        self.assertEqual(run, ("run-1", "ses-1"))
+        self.assertEqual(len(self.st.fires), 1)
+        sent = self.st.fires[0][2]
+        self.assertEqual((sent["method"], sent["body"]), ("POST", '{"v":1,"stage":"probe"}'))
+        self.assertIsInstance(sent["body"], str)
+
+    def test_rejected_fire_is_one_call_and_hides_secrets(self):
+        self.st.reject_fire = True
+        T.ensure_triggers(self.eng, self.cfg)
+        with self.assertRaises(T.TriggerError) as cm:
+            T.fire(self.eng, "agent-da", "factory-challenge", TOKEN, {})
+        self.assertEqual(len(self.st.fires), 1)
+        self.assertIn("HTTP 404", str(cm.exception))
+        for s in (TOKEN, KEY):
+            self.assertNotIn(s, str(cm.exception))
+
+    def test_timeout_is_one_call(self):
         calls = []
 
         def opener(req, timeout):
             calls.append(1)
-            raise TimeoutError("timed out")
-        with self.assertRaises(T.TriggerError):
-            T.fire(URL, {}, urlopen=opener)
-        self.assertEqual(len(calls), 1)  # a timeout may still have started a run: never fired twice
-
-    def test_url_from_env_file(self):
-        with tempfile.TemporaryDirectory() as d:
-            p = os.path.join(d, "runner.env")
-            with open(p, "w", newline="\n") as f:
-                f.write("# urls\nFACTORY_TRIGGER_PLAN_ADA=https://x/a\nFACTORY_TRIGGER_CHALLENGE_DEVILS_ADVOCATE=\"%s\"\n" % URL)
-            self.assertEqual(T.trigger_url("challenge", "devils_advocate", p), URL)
-            with self.assertRaises(T.TriggerError) as cm:
-                T.trigger_url("build", "larry", p)
-            self.assertIn("FACTORY_TRIGGER_BUILD_LARRY", str(cm.exception))
-            self.assertNotIn(TOKEN, str(cm.exception))
+            raise TimeoutError("timed out " + TOKEN)
+        eng = E.Engine("http://x", KEY, urlopen=opener)
+        with self.assertRaises(T.TriggerError) as cm:
+            T.fire(eng, "a", "s", TOKEN, {})
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn(TOKEN, str(cm.exception))
 
 
-class TestRunReader(TempDir):
-    def db(self, cols):
-        p = os.path.join(self.tmp, "system.db")
-        con = sqlite3.connect(p)
-        con.execute("CREATE TABLE runs (%s)" % ", ".join(cols))
-        return p, con
+class TestRunReader(Base):
+    ROW = {"id": "r1", "agentId": "agent-da", "sessionId": "s1", "status": "error", "stepCount": 2, "startedAt": "2026-11-12T08:00:00.123Z",
+           "finishedAt": "2026-11-12T08:03:00.000Z", "error": "interrupted: engine restarted", "inputTokens": 812, "triggerSource": "trigger",
+           "triggerSlug": "factory-challenge"}
 
-    def test_reads_row_by_id(self):
-        p, con = self.db(["id TEXT PRIMARY KEY", "agent_id TEXT", "session_id TEXT", "status TEXT", "usage_json TEXT", "started_at TEXT",
-                          "finished_at TEXT", "error TEXT", "input_tokens INTEGER", "trigger_source TEXT", "trigger_slug TEXT"])
-        con.execute("INSERT INTO runs VALUES ('r1','a','s1','done','{}','2026-11-12T08:00:00.123Z','2026-11-12T08:03:00.000Z',NULL,812,'trigger','factory-challenge')")
-        con.commit()
-        con.close()
-        row = T.read_run("a", "r1", p)
-        self.assertEqual((row["status"], row["input_tokens"], row["trigger_slug"], row["session_id"]), ("done", 812, "factory-challenge", "s1"))
+    def test_maps_to_snake_case_for_limits(self):
+        self.st.runs["r1"] = dict(self.ROW)
+        row = T.read_run(self.eng, "agent-da", "r1")
+        self.assertEqual((row["status"], row["input_tokens"], row["trigger_slug"], row["session_id"], row["started_at"]),
+                         ("error", 812, "factory-challenge", "s1", "2026-11-12T08:00:00.123Z"))
         self.assertEqual(T.input_tokens(row), 812)
-        self.assertIsNone(T.read_run("a", "other", p))
+        self.assertEqual(limits.run_outcome(row, limits.ts(row["started_at"]) + 5)[0], "RESTARTED")
+        self.assertIsNone(T.read_run(self.eng, "agent-da", "other"))
+        self.assertIsNone(T.map_run(None))
 
-    def test_missing_columns_read_as_null(self):
-        p, con = self.db(["id TEXT", "session_id TEXT", "status TEXT", "usage_json TEXT", "started_at TEXT"])
-        con.execute("INSERT INTO runs VALUES ('r1','s1','done','{\"inputTokens\": 9000}','2026-11-12T08:00:00.000Z')")
-        con.commit()
-        con.close()
-        row = T.read_run("a", "r1", p)
+    def test_missing_keys_read_as_none(self):
+        self.st.runs["r1"] = {"id": "r1", "status": "done"}
+        row = T.read_run(self.eng, "agent-da", "r1")
         self.assertIsNone(row["input_tokens"])
-        self.assertIsNone(row["trigger_slug"])
-        self.assertEqual(T.input_tokens(row), 9000)
-        self.assertIsNone(T.input_tokens({"usage_json": None}))
-
-    def test_read_only_never_creates_the_file(self):
-        p = os.path.join(self.tmp, "absent", "system.db")
-        with self.assertRaises(sqlite3.Error):
-            T.read_run("a", "r1", p)
-        self.assertFalse(os.path.exists(p))
-
-    def test_default_path_is_the_agent_data_dir(self):
-        self.assertEqual(T.db_path("ag1").replace("\\", "/"), T.AGENTS.replace("\\", "/") + "/ag1/data/system.db")
+        self.assertIsNone(T.input_tokens(row))
+        self.assertEqual(row["status"], "done")
 
 
-class TestCheckTriggers(TempDir):
-    BODY = "You were started by the factory runner.\nDo the challenge.\n"
-
-    def setUp(self):
-        super().setUp()
-        self.cfg = self.write("runner.json", json.dumps({"tick_seconds": 120, "triggers": [
-            {"stage": "challenge", "coworker": "DEVILS_ADVOCATE", "agent": "agent-da", "slug": "factory-challenge", "model": "claude-x"}]}))
-        self.write("triggers/challenge.md", self.BODY)
-        for k, v in (("CONFIG", self.cfg), ("TRIGGERS", os.path.join(self.tmp, "triggers")), ("AGENTS", os.path.join(self.tmp, "agents"))):
-            p = mock.patch.object(T, k, v)
-            p.start()
-            self.addCleanup(p.stop)
-
-    def live(self, body, model="claude-x"):
-        front = "---\nname: factory-challenge\nenabled: true\ntoken: %s\nmethods:\n  - POST\nmodel: %s\n---\n" % (TOKEN, model)
-        self.write("agents/agent-da/triggers/factory-challenge.md", front + "\n" + body + "\n")
-
-    def test_same_body_and_model_is_ok(self):
-        self.live(self.BODY.strip())
+class TestCheckTriggers(Base):
+    def test_ok_after_ensure(self):
+        T.ensure_triggers(self.eng, self.cfg)
         self.assertEqual(self.main(["check-triggers"]), (0, "factory-challenge OK\n"))
 
     def test_drift_prints_slug_only(self):
-        for body, model in ((self.BODY + "extra line", "claude-x"), (self.BODY, "claude-y"), (self.BODY, "null")):
-            self.live(body, model)
+        T.ensure_triggers(self.eng, self.cfg)
+        row = self.st.triggers["agent-da"]["factory-challenge"]
+        for body, model in ((BODY + "\nextra", "claude-x"), (BODY, "claude-y"), (BODY, None)):
+            row["body"], row["model"] = body, model
             self.assertEqual(self.main(["check-triggers"]), (1, "factory-challenge DRIFT\n"))
 
-    def test_missing_or_bad_live_file_is_drift(self):
+    def test_missing_trigger_or_engine_down_is_drift(self):
         self.assertEqual(self.main(["check-triggers"]), (1, "factory-challenge DRIFT\n"))
-        self.write("agents/agent-da/triggers/factory-challenge.md", "---\ntoken: %s\n%s" % (TOKEN, self.BODY))  # front matter never closed
+        self.eng = E.Engine("http://127.0.0.1:1", KEY)
         self.assertEqual(self.main(["check-triggers"]), (1, "factory-challenge DRIFT\n"))
 
-    def test_front_matter_split(self):
-        front, body = T.split_front("---\r\ntoken: x\r\nmodel: 'm-1'\r\n---\r\n\r\n  hello\r\n")
-        self.assertEqual((T.model_of(front), body), ("m-1", "hello"))
-        self.assertIsNone(T.model_of(["model: null"]))
-        self.assertEqual(T.split_front("no front\n"), ([], "no front"))
 
-
-class TestProbe(TempDir):
-    def setUp(self):
-        super().setUp()
-        cfg = self.write("runner.json", json.dumps({"triggers": [
-            {"stage": "challenge", "coworker": "DEVILS_ADVOCATE", "agent": "agent-da", "slug": "factory-challenge", "model": None}]}))
-        env = self.write("runner.env", "FACTORY_TRIGGER_CHALLENGE_DEVILS_ADVOCATE=%s\n" % URL)
-        for k, v in (("CONFIG", cfg), ("ENV", env), ("PROBE_POLL_S", 0)):
-            p = mock.patch.object(T, k, v)
-            p.start()
-            self.addCleanup(p.stop)
-        self.fired = []
-
-    def probe(self, rows, wait=600):
-        rows = list(rows)
-
-        def fake_fire(url, payload, urlopen=None):
-            self.fired.append((url, payload))
-            return "run-1", "ses-1"
-        with mock.patch.object(T, "fire", fake_fire), mock.patch.object(T, "PROBE_WAIT_S", wait), \
-                mock.patch.object(T, "read_run", lambda agent, rid, path=None: rows.pop(0) if len(rows) > 1 else rows[0]):
+class TestProbe(Base):
+    def probe(self, run, wait=600):
+        self.st.runs["run-1"] = run
+        with mock.patch.object(T, "PROBE_WAIT_S", wait):
             return self.main(["probe", "--stage", "challenge"])
 
-    def test_done_under_limit_is_ok(self):
-        code, out = self.probe([{"status": "running"}, {"status": "done", "input_tokens": 812}])
-        self.assertEqual((code, out), (0, "PROBE OK run-1 ses-1 input=812\n"))
-        self.assertEqual(self.fired, [(URL, {"v": 1, "stage": "probe"})])
+    def test_done_under_limit_is_ok_and_fires_once(self):
+        self.assertEqual(self.probe({"id": "run-1", "status": "done", "inputTokens": 812}), (0, "PROBE OK run-1 ses-1 input=812\n"))
+        self.assertEqual(len(self.st.fires), 1)
+        self.assertEqual(len(self.st.creates), 1)
+        self.st.runs["run-2"] = {"id": "run-2", "status": "done", "inputTokens": 1}
+        self.main(["probe", "--stage", "challenge"])
+        self.assertEqual(len(self.st.creates), 1)  # the second probe reuses the trigger
 
     def test_too_many_tokens_error_or_still_running_fails(self):
-        for rows, wait in (([{"status": "done", "input_tokens": 300000}], 600), ([{"status": "error", "input_tokens": 5}], 600),
-                           ([{"status": "running"}], 0), ([None], 0)):
-            code, out = self.probe(rows, wait)
+        for run, wait in (({"id": "run-1", "status": "done", "inputTokens": 300000}, 600), ({"id": "run-1", "status": "error", "inputTokens": 5}, 600),
+                          ({"id": "run-1", "status": "running"}, 0)):
+            del self.st.fires[:]  # the fake names the next run run-1 again
+            code, out = self.probe(run, wait)
             self.assertEqual(code, 1, out)
             self.assertTrue(out.startswith("PROBE FAIL run-1 ses-1"), out)
 
-    def test_fire_error_and_unreadable_db_fail_without_token(self):
-        def bad_fire(url, payload, urlopen=None):
-            raise T.TriggerError("trigger answered HTTP 404")
-        with mock.patch.object(T, "fire", bad_fire):
-            self.assertEqual(self.main(["probe", "--stage", "challenge"]), (1, "PROBE FAIL: trigger answered HTTP 404\n"))
-
-        def bad_db(agent, rid, path=None):
-            raise sqlite3.OperationalError("unable to open database file")
-        with mock.patch.object(T, "fire", lambda *a, **k: ("run-1", "ses-1")), mock.patch.object(T, "read_run", bad_db):
-            code, out = self.main(["probe", "--stage", "challenge"])
-        self.assertEqual(code, 1)
-        self.assertIn("unable to open database file", out)
+    def test_fire_error_fails_without_secrets(self):
+        self.st.reject_fire = True
+        code, out = self.main(["probe", "--stage", "challenge"])
+        self.assertEqual((code, out), (1, "PROBE FAIL: engine answered HTTP 404 for POST /agents/agent-da/triggers/factory-challenge/fire\n"))
 
     def test_unknown_stage_refused(self):
         self.assertEqual(self.main(["probe", "--stage", "build"])[0], 2)
@@ -233,7 +241,7 @@ class TestFiles(unittest.TestCase):
         self.assertIn("`PLAN READY`", body)
         self.assertIn("`PLAN REJECT: <n> points open`", body)
         cfg = T.load_config()
-        self.assertEqual(cfg["tick_seconds"], 120)
+        self.assertNotIn("tick_seconds", cfg)
         self.assertIn(("challenge", "DEVILS_ADVOCATE", "factory-challenge"), [(e["stage"], e["coworker"], e["slug"]) for e in cfg["triggers"]])
 
 

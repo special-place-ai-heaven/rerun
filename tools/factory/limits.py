@@ -68,6 +68,22 @@ def batch_cap(cfg, chunks, entry=None, lane=None):
     return chunks * chunk_cap(cfg, entry, lane)
 
 
+def _runner_cfg():
+    import json
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner.json")) as f:
+        return json.load(f)
+
+
+def capacity(cfg=None):
+    """Builder capacity (runner.json builder_capacity, default 3); cfg None reads runner.json."""
+    return _pos((_runner_cfg() if cfg is None else cfg).get("builder_capacity")) or BUILDER_CAPACITY
+
+
+def per_job_cap(cfg=None):
+    """Chunks of one job running at once (runner.json per_job_cap, default 2)."""
+    return _pos((_runner_cfg() if cfg is None else cfg).get("per_job_cap")) or PER_JOB_CAP
+
+
 def stage_cfg(cfg, entry=None):
     """cfg with the per-stage overrides of a runner.json trigger entry (keys run_limit_s, stall_s, token_cap) laid over
     the global ones. token_cap is the strictest of the two: an entry cannot raise the global. A stage that must end

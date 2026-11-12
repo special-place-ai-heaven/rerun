@@ -24,6 +24,9 @@ RUN apt-get update \
 RUN useradd --create-home --shell /bin/bash rerun && mkdir -p /data && chown rerun:rerun /data
 COPY --from=build --chown=rerun:rerun /out /app
 COPY --chmod=755 apps/engine/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# Build-time self-test: the real entrypoint chain with a dummy key (apps/engine/scripts).
+COPY --chmod=755 apps/engine/scripts/ /opt/entrypoint-selftest/
+RUN ["/usr/bin/env", "RERUN_API_KEY=dummy", "/usr/local/bin/docker-entrypoint.sh", "/opt/entrypoint-selftest/entrypoint-selftest.sh"]
 RUN npx --yes patchright@1.63.0 install-deps chromium && rm -rf /var/lib/apt/lists/*
 # Codex drives a ChatGPT plan, at CODEX_VERSION (src/runtime/codex-cli.ts). Claude Code ships inside
 # the Agent SDK, already in /app.

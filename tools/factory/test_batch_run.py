@@ -36,6 +36,21 @@ class BatchRun(Batch):
         self.assertEqual(sorted(l["chunk"] for l in ls), ["A", "B"])
         self.assertEqual(len({l["expires_at"] for l in ls}), 1)
         self.assertEqual(len(self.eng.fires), 1)
+        rows = self.r.st.db.execute("SELECT chunk, run_id, status FROM fires ORDER BY chunk").fetchall()
+        self.assertEqual([tuple(x) for x in rows], [("A", "run1", "running"), ("B", "run1", "running")])
+
+    def test_trigger_error_is_caught(self):
+        import trigger as T
+        for c in "AB":
+            self.r.st.add_ready("j", c, paths=[c + ".py"])
+        def boom(*a, **k):
+            raise T.TriggerError("down")
+        old, R.T.fire = R.T.fire, boom
+        try:
+            self.assertIsNone(self.r.fire_batch(self.r.st.ready_list()))
+        finally:
+            R.T.fire = old
+        self.assertEqual(self.r.st.db.execute("SELECT COUNT(*) FROM fires WHERE status='intent'").fetchone()[0], 2)
 
 
 if __name__ == "__main__":

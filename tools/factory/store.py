@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS leases(
   id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT NOT NULL, chunk TEXT NOT NULL,
   attempt INTEGER NOT NULL DEFAULT 0, paths TEXT NOT NULL DEFAULT '[]',
   granted_at TEXT NOT NULL, expires_at TEXT NOT NULL, closed_at TEXT, reason TEXT);
+CREATE TABLE IF NOT EXISTS wakes(
+  event TEXT NOT NULL, coworker TEXT NOT NULL, head TEXT NOT NULL, at TEXT NOT NULL,
+  PRIMARY KEY(event, coworker, head));
 """
 OPEN = ("intent", "running")
 
@@ -66,6 +69,8 @@ class Store:
         cur = self.db.execute(
             "INSERT INTO fires(job,chunk,stage,coworker,slug,intent_at,refire) VALUES(?,?,?,?,?,?,?)",
             (job, chunk, stage, coworker, slug, at or now(), n))
+        self._seen(job, chunk)
+        self.db.execute("UPDATE ready_chunks SET attempts=MAX(attempts,?) WHERE job=? AND chunk=?", (n, job, chunk))
         return cur.lastrowid
 
     def fired(self, fire_id, run_id):
@@ -99,10 +104,11 @@ class Store:
         return self._rows("status='running'", job)
 
     def refires(self, job, chunk, stage):
-        """Number of fires beyond the first for this stage (0 = fired once or never)."""
-        n = self.db.execute("SELECT COUNT(*) FROM fires WHERE job=? AND chunk=? AND stage=?",
-                            (job, chunk, stage)).fetchone()[0]
-        return max(0, n - 1)
+        """Number of refires of this chunk (0 = fired once or never): the one counter, ready_chunks.attempts."""
+        if chunk:
+            return self.attempts(job, chunk)
+        r = self.db.execute("SELECT MAX(refire) FROM fires WHERE job=? AND chunk='' AND stage=?", (job, stage)).fetchone()
+        return r[0] or 0  # plain stages share chunk '': count per stage
 
     def resume(self, job):
         """What a restarted runner needs: pending intents, running runs, last fire, saved kv."""
@@ -154,12 +160,15 @@ class Store:
     def known_run_ids(self):
         return {r[0] for r in self.db.execute("SELECT run_id FROM fires WHERE run_id IS NOT NULL")}
 
-    def dequeue_to_intent(self, queue_id, job, chunk, stage, coworker="", slug=""):
-        """One commit: the intent row in, the queue row out. Committed before the caller fires. Returns the fire id."""
+    def dequeue_to_intent(self, queue_id, job, chunk, stage, coworker="", slug="", lease_paths=None, lease_expires=None):
+        """One commit: the intent row in, the queue row out, and (with lease_paths) the lease granted.
+        Committed before the caller fires. Returns the fire id."""
         self.db.execute("BEGIN IMMEDIATE")
         try:
             fid = self.intent(job, chunk, stage, coworker, slug)
             self.dequeue(queue_id)
+            if lease_paths is not None:
+                self.grant_lease(job, chunk, lease_paths, lease_expires, attempt=self.attempts(job, chunk))
             self.db.execute("COMMIT")
         except BaseException:
             self.db.execute("ROLLBACK")
@@ -168,7 +177,9 @@ class Store:
 
     def add_ready(self, job, chunk, paths=(), builder="", deps=(), at=None):
         """Ready-chunk queue: add a chunk (idempotent per job/chunk)."""
-        self.db.execute("INSERT OR IGNORE INTO ready_chunks(job,chunk,builder,paths,deps,added_at) VALUES(?,?,?,?,?,?)",
+        self.db.execute("INSERT INTO ready_chunks(job,chunk,builder,paths,deps,added_at) VALUES(?,?,?,?,?,?) "
+                        "ON CONFLICT(job,chunk) DO UPDATE SET builder=excluded.builder, paths=excluded.paths, "
+                        "deps=excluded.deps, state='ready' WHERE state='seen'",
                         (job, chunk, builder, json.dumps(list(paths)), json.dumps(list(deps)), at or now()))
 
     def _ready(self, r):
@@ -192,7 +203,13 @@ class Store:
         r = self.db.execute("SELECT attempts FROM ready_chunks WHERE job=? AND chunk=?", (job, chunk)).fetchone()
         return r[0] if r else 0
 
+    def _seen(self, job, chunk):
+        """A row for a chunk that never went through add_ready; state 'seen' keeps it out of ready_list."""
+        self.db.execute("INSERT OR IGNORE INTO ready_chunks(job,chunk,state,added_at) VALUES(?,?,'seen',?)", (job, chunk, now()))
+
     def bump_attempt(self, job, chunk):
+        """Requeue API: one more attempt on the shared counter. Returns the new count."""
+        self._seen(job, chunk)
         self.db.execute("UPDATE ready_chunks SET attempts=attempts+1 WHERE job=? AND chunk=?", (job, chunk))
         return self.attempts(job, chunk)
 
@@ -221,10 +238,22 @@ class Store:
 
     def expire_leases(self, at):
         """Close every open lease whose expires_at is before `at`; returns the leases closed."""
-        out = [l for l in self.open_leases() if l["expires_at"] < at]
+        held = {(r["job"], r["chunk"]) for r in self.pending()}  # a pending intent keeps its lease
+        out = [l for l in self.open_leases() if l["expires_at"] < at and (l["job"], l["chunk"]) not in held]
         for l in out:
             self.close_lease(l["id"], "expired", at=at)
         return out
+
+    def add_wake(self, event, coworker, head, at=None):
+        """Record a wake once per (event, coworker, head). True when new, False when already held."""
+        cur = self.db.execute("INSERT OR IGNORE INTO wakes(event,coworker,head,at) VALUES(?,?,?,?)",
+                              (event, coworker, head, at or now()))
+        return cur.rowcount == 1
+
+    def release_wake(self, event, coworker, head):
+        """Free the key so the same wake can be recorded again. True when a row was held."""
+        return self.db.execute("DELETE FROM wakes WHERE event=? AND coworker=? AND head=?",
+                               (event, coworker, head)).rowcount == 1
 
     def _rows(self, where, job):
         sql = "SELECT * FROM fires WHERE " + where + (" AND job=?" if job is not None else "") + " ORDER BY id"

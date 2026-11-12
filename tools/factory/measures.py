@@ -55,3 +55,16 @@ def token_split(fires, merged):
         vals = [f[col] for f in rows if f.get(col) is not None]
         out[name] = sum(vals) / len(keep) if vals and keep else None
     return out
+
+
+def review_measures(fires, now):
+    """Per job: reviewer runs, review tokens (in+out), distinct coworkers, peak chunks building at once."""
+    end, out = L.ts(now), {}
+    for job in sorted({f["job"] for f in fires}):
+        rows = [f for f in fires if f["job"] == job]
+        rev = [f for f in rows if f["stage"] == "review"]
+        spans = [(L.ts(f["intent_at"]), L.ts(f["ended_at"]) if f.get("ended_at") else end) for f in rows if f["stage"] == "build"]
+        out[job] = {"review_runs": len(rev), "review_tokens": sum((f.get("tokens_in") or 0) + (f.get("tokens_out") or 0) for f in rev),
+                    "coworkers": len({f["coworker"] for f in rows if f.get("coworker")}),
+                    "peak_chunks": max((sum(1 for s, e in spans if s <= a < e) for a, _ in spans), default=0)}
+    return out

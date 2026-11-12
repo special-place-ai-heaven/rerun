@@ -40,5 +40,14 @@ class Tokens(unittest.TestCase):
         self.assertEqual((m["cache_write"], m["cache_read"]), (None, None))
 
 
+class Review(unittest.TestCase):
+    def test_review_measures(self):
+        F = lambda c, st, a, b, who, i=0, o=0: {"job": "j", "chunk": c, "stage": st, "coworker": who, "intent_at": t(a), "ended_at": t(b),
+                                                "tokens_in": i, "tokens_out": o}
+        fires = [F("A", "build", 0, 20, "x"), F("B", "build", 10, 30, "y"), F("A", "review", 25, 28, "r", 5, 2), F("B", "review", 31, 33, "r", 3, None)]
+        m = measures.review_measures(fires, t(40))["j"]
+        self.assertEqual(m, {"review_runs": 2, "review_tokens": 10, "coworkers": 3, "peak_chunks": 2})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -230,7 +230,7 @@ describe('browser_navigate', () => {
     it('falls back to headless without a display', async () => {
         await navigate(ctxWith(), { url: 'https://example.com/' })
         expect(pw.launches[0].options).toMatchObject({ channel: 'chromium', headless: true })
-        expect(pw.launches[0].options).not.toHaveProperty('env')
+        expect((pw.launches[0].options as { env: Record<string, string> }).env).not.toHaveProperty('RERUN_API_KEY')
     })
 
     it('blocks images, media and fonts unless a screenshot is wanted', async () => {

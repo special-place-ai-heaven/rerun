@@ -10,6 +10,7 @@ import { holdDisplay, type DisplayHold } from '../virtual-display.js'
 import { offersTakeover } from './hitl.js'
 import { browserProfileDir } from '../../config/paths.js'
 import { withKeyedLock } from '../../lib/lock.js'
+import { childProcessEnv } from '../../lib/child-env.js'
 import { NonPublicHostError, assertPublicUrl, isHttpUrl, resolvesToPublicAddresses } from '../../lib/public-fetch.js'
 import { PUBLIC_HTTP_URL_MESSAGE, publicHttpUrl } from '../url.js'
 import type { RunContext } from '../../runtime/context.js'
@@ -81,7 +82,7 @@ export async function launchContext(profileDir: string, display: string | null, 
     const options: LaunchOptions = {
         channel: 'chromium',
         headless: !display,
-        ...(display ? { env: { ...process.env, DISPLAY: display } } : {}),
+        env: childProcessEnv({}, display ? { DISPLAY: display } : {}),
         ...extra,
     }
     await mkdir(profileDir, { recursive: true })

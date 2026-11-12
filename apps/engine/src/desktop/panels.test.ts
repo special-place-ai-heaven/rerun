@@ -15,11 +15,12 @@ describe('desktop panels', () => {
         }
     })
 
-    it('reads the key and the agent from the environment, never from the file', () => {
+    it('reads the session token and the agent from the environment, never the engine key or the file', () => {
         process.env.RERUN_API_KEY = 'secret-key'
         const config = dockConfig('/icons') + barConfig()
         expect(config).not.toContain('secret-key')
-        expect(config).toContain('Bearer $RERUN_API_KEY')
+        expect(config).toContain('Bearer $RERUN_DESKTOP_TOKEN')
+        expect(config).not.toContain('RERUN_API_KEY')
         expect(barConfig()).toContain(`printf '%s' "$RERUN_DESKTOP_AGENT_NAME"`)
         delete process.env.RERUN_API_KEY
     })

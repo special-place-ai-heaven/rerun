@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import '../config/key-intake.js'
 import '../lib/process-report.js'
 import { runCommand } from './commands/run.js'
 import { migrateCommand } from './commands/migrate.js'

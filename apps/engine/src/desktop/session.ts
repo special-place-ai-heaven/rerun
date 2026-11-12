@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, resolve } from 'node:path'
@@ -136,12 +137,32 @@ function writeConfig(name: string, content: string): string {
 }
 
 // The dock asks this engine to open what is clicked, so each panel is told whose screen it sits on.
-// The panels are the one child given the engine's key: their click handler authenticates with it.
+// The panels never hold the engine's key. Each desktop session gets a random token that http/auth.ts accepts
+// for one request only: POST /agents/<that agent>/desktop/apps. It is dropped when the desktop stops.
+const desktopTokens = new Map<string, string>()
+
+export function issueDesktopToken(agentId: string): string {
+    const token = randomBytes(32).toString('hex')
+    desktopTokens.set(agentId, token)
+    return token
+}
+
+function dropDesktopToken(agentId: string): void {
+    desktopTokens.delete(agentId)
+}
+
+export function desktopTokenMatches(agentId: string, token: string): boolean {
+    const known = desktopTokens.get(agentId)
+    if (!known || !token) return false
+    const a = Buffer.from(known)
+    const b = Buffer.from(token)
+    return a.length === b.length && timingSafeEqual(a, b)
+}
+
 async function startPanels(agentId: string, display: string, timeZone?: string): Promise<ChildProcess[]> {
-    const apiKey = env().RERUN_API_KEY
     const panelEnv = {
         ...desktopEnv(display),
-        ...(apiKey ? { RERUN_API_KEY: apiKey } : {}),
+        RERUN_DESKTOP_TOKEN: issueDesktopToken(agentId),
         RERUN_DESKTOP_AGENT: agentId,
         RERUN_DESKTOP_AGENT_NAME: await displayNameOf(agentId),
         RERUN_DESKTOP_ENGINE: `http://127.0.0.1:${env().RERUN_PORT}`,
@@ -198,6 +219,7 @@ async function start(agentId: string, { timeZone }: DesktopOptions): Promise<Run
         await waitForVnc(vncPort)
     } catch (err) {
         killAll(children)
+        dropDesktopToken(agentId)
         releaseDisplay()
         throw err
     }
@@ -241,6 +263,7 @@ export function trackDesktopChild(agentId: string, child: ChildProcess): void {
 
 export async function stopDesktop(agentId: string): Promise<void> {
     const screen = screens.get(agentId)
+    dropDesktopToken(agentId)
     if (!screen) return
     const running = await screen.desktop?.catch(() => null)
     screen.desktop = null

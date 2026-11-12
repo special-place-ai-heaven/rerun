@@ -22,6 +22,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --shell /bin/bash rerun && mkdir -p /data && chown rerun:rerun /data
 COPY --from=build --chown=rerun:rerun /out /app
+COPY --chmod=755 apps/engine/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN npx --yes patchright@1.63.0 install-deps chromium && rm -rf /var/lib/apt/lists/*
 # Codex drives a ChatGPT plan, at CODEX_VERSION (src/runtime/codex-cli.ts). Claude Code ships inside
 # the Agent SDK, already in /app.
@@ -36,4 +37,5 @@ ENV PATH="/home/rerun/.local/bin:${PATH}" \
     RERUN_CODEX_PATH=/usr/local/bin/codex
 VOLUME /data
 EXPOSE 3000
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist/cli/bin.js", "run"]

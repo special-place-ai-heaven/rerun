@@ -268,14 +268,19 @@ describe('desktop session', () => {
         expect(state.spawns.slice(3).map(s => s.args[1])).toEqual([expect.stringMatching(/dock\.tint2rc$/), expect.stringMatching(/bar\.tint2rc$/)])
         expect(state.spawns[3]!.env).toMatchObject({
             DISPLAY: ':42',
-            RERUN_API_KEY: 'engine-key',
+            RERUN_DESKTOP_TOKEN: expect.stringMatching(/^[0-9a-f]{64}$/),
             RERUN_DESKTOP_AGENT: 'a1',
             RERUN_DESKTOP_AGENT_NAME: 'Maya',
             RERUN_DESKTOP_ENGINE: 'http://127.0.0.1:3100',
             TZ: 'Europe/Paris',
         })
-        expect(state.spawns[4]!.env.RERUN_API_KEY).toBe('engine-key')
+        expect(state.spawns.slice(3).map(s => s.env.RERUN_API_KEY)).toEqual([undefined, undefined])
+        const token = String(state.spawns[3]!.env.RERUN_DESKTOP_TOKEN)
+        expect(session.desktopTokenMatches('a1', token)).toBe(true)
+        expect(session.desktopTokenMatches('a2', token)).toBe(false)
         expect(session.runningDesktops()).toEqual([{ agentId: 'a1', viewers: 0, dock: true }])
+        await session.stopDesktop('a1')
+        expect(session.desktopTokenMatches('a1', token)).toBe(false)
     })
 
     it('stays up when the wallpaper is painted or the dock dies, and then says it has no dock', async () => {

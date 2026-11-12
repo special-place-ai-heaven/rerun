@@ -9,7 +9,7 @@ import argparse, json, os, signal, sys, tempfile, threading, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import engine as E, limits as L, store as S, trigger as T
+import engine as E, limits as L, readyq as RQ, store as S, trigger as T
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -179,7 +179,9 @@ class Runner:
                 self.check(f)
             except (E.EngineError, T.TriggerError) as e:
                 log("read of run %s failed, will retry: %s" % (f["run_id"], e))
+        self.sweep_leases()
         self.start_queued()
+        self.start_ready()
 
     def _agent(self, f):
         e = self.by_slug.get(f["slug"])
@@ -233,7 +235,10 @@ class Runner:
         rid = f["run_id"]
         if what == "RUNNING":
             return
-        if what == "DONE":
+        if what == "DONE" and self.lease_closed(f):
+            self.st.close_run(rid, "discarded", iso(self.clock()), tin, tout, "result under a closed lease")
+            log("run %s result discarded: lease of chunk %s closed" % (rid, f["chunk"]))
+        elif what == "DONE":
             self.st.close_run(rid, "done", iso(self.clock()), tin, tout)
         elif what == "CANCEL":
             self.eng.cancel(agent, rid)
@@ -258,7 +263,14 @@ class Runner:
         st = self.st.get_all(f["job"]).get("payload:" + f["stage"])
         if st:
             payload = json.loads(st)
-        self.st.enqueue(f["job"], f["stage"], f["chunk"], payload)
+        if f["chunk"]:  # a chunk refire takes the ready path only: no queue row, the old attempt's lease is closed
+            for l in self.st.open_leases():
+                if l["job"] == f["job"] and l["chunk"] == f["chunk"] and l.get("attempt", 0) == f["refire"]:
+                    self.st.close_lease(l["id"], "requeued", at=iso(self.clock()))
+            self.st.bump_attempt(f["job"], f["chunk"])
+            self.st.set_ready_state(f["job"], f["chunk"], "ready")
+        else:
+            self.st.enqueue(f["job"], f["stage"], f["chunk"], payload)
 
     def start_queued(self):
         busy = {f["job"] for f in self.st.pending() + self.st.running()}
@@ -289,6 +301,59 @@ class Runner:
                 continue
             self.st.fired(fid, run_id)
             log("fired stage %s of job %s: run %s" % (stage, job, run_id))
+
+    def lease_closed(self, f):
+        """True when the fire's attempt (its refire number) has a lease for its chunk and none of that attempt is open."""
+        ls = [l for l in self.st.db.execute("SELECT closed_at FROM leases WHERE job=? AND chunk=? AND attempt=?",
+                                            (f["job"], f["chunk"], f["refire"]))] if f["chunk"] else []
+        return bool(ls) and all(l[0] for l in ls)
+
+    def sweep_leases(self):
+        """Close an expired lease only after eng.cancel succeeded or the run row is terminal; a failed cancel keeps it open."""
+        at = iso(self.clock())
+        for l in self.st.open_leases():
+            mine = lambda f: f["chunk"] == l["chunk"]
+            if l["expires_at"] >= at or any(mine(f) for f in self.st.pending(l["job"])):
+                continue
+            try:
+                for f in filter(mine, self.st.running(l["job"])):
+                    row = T.read_run(self.eng, self._agent(f), f["run_id"])
+                    if row and row.get("status") == "running":
+                        self.eng.cancel(self._agent(f), f["run_id"])
+                    self.st.close_run(f["run_id"], "cancelled", at, error="lease expired")
+            except (E.EngineError, T.TriggerError) as e:
+                log("lease %s kept open, cancel failed: %s" % (l["id"], e))
+                continue
+            self.st.close_lease(l["id"], "expired", at=at)
+
+    def start_ready(self):
+        """Fire ready chunks (stage 'build') that readyq.eligible allows; running plain stages share the slot count."""
+        ent = self.by_stage.get("build")
+        fires = self.st.pending() + self.st.running()
+        busy, stages = [(f["job"], f["chunk"]) for f in fires if f["chunk"]], sum(1 for f in fires if not f["chunk"])
+        merged = {r[0] for r in self.st.db.execute("SELECT chunk FROM ready_chunks WHERE state='merged'")}
+        token = ent and self.tokens.get("%s/%s" % (ent["agent"], ent["slug"]))
+        for it in self.st.ready_list():
+            if not token:
+                return
+            state = {"merged": merged, "busy": busy, "stages": stages, "leases": self.st.open_leases(),
+                     "fired": self.st.fire_count(it["job"]), "cfg": self.cfg}
+            if not RQ.eligible(it, state)[0]:
+                continue
+            job, chunk = it["job"], it["chunk"]
+            payload = {"job": job, "stage": "build", "chunk": chunk}
+            q = self.st.enqueue(job, "build", chunk, payload)
+            fid = self.st.dequeue_to_intent(q, job, chunk, "build", ent.get("coworker", ""), ent["slug"],
+                                              it["paths"], iso(self.clock() + 2 * self.cfg.get("run_limit_s", 600)))
+            self.st.set_ready_state(job, chunk, "running")
+            busy.append((job, chunk))
+            try:
+                run_id, _ = T.fire(self.eng, ent["agent"], ent["slug"], token, payload)
+            except T.TriggerError as e:
+                log("fire of chunk %s failed (kept as intent): %s" % (chunk, e))
+                continue
+            self.st.fired(fid, run_id)
+            log("fired chunk %s of job %s: run %s" % (chunk, job, run_id))
 
 def build(cfg=None, eng=None, clock=time.time):
     cfg = load_runtime(cfg)

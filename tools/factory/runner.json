@@ -1,0 +1,6 @@
+{
+  "tick_seconds": 120,
+  "triggers": [
+    {"stage": "challenge", "coworker": "DEVILS_ADVOCATE", "agent": "FILL-IN-agent-id", "slug": "factory-challenge", "model": "FILL-IN-model"}
+  ]
+}

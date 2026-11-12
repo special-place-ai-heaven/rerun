@@ -165,3 +165,15 @@ def keeps_merged(old_text, new_text, merged):
     old, new = by_id(old_text), by_id(new_text)
     bad = sorted(i for i in merged if old.get(i) is None or new.get(i) != old.get(i))
     return ("BLOCKED", "re-plan changes merged chunk(s): " + ", ".join(bad)) if bad else ("OK", None)
+
+
+STAGE_TIER = {**dict.fromkeys(("checks", "ci", "gate", "risk"), "small"), **dict.fromkeys(("build", "fix"), "mid"),
+              **dict.fromkeys(("plan", "challenge", "review", "ruling", "accept"), "large")}
+
+
+def model_for(stage, cfg=None):
+    """Model by stage rule: small for checks/ci/gate/risk, mid for build/fix, large for plan/challenge/review/ruling/accept.
+    Returns runner.json model_tiers[tier] (cfg None reads runner.json); an unknown stage raises ValueError."""
+    if stage not in STAGE_TIER:
+        raise ValueError("unknown stage: %r" % (stage,))
+    return (_runner_cfg() if cfg is None else cfg)["model_tiers"][STAGE_TIER[stage]]

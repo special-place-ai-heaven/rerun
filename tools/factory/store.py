@@ -18,6 +18,15 @@ CREATE TABLE IF NOT EXISTS queue(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job TEXT NOT NULL, stage TEXT NOT NULL, chunk TEXT NOT NULL DEFAULT '',
   payload TEXT NOT NULL, enqueued_at TEXT NOT NULL, not_before TEXT);
+CREATE TABLE IF NOT EXISTS ready_chunks(
+  job TEXT NOT NULL, chunk TEXT NOT NULL, builder TEXT NOT NULL DEFAULT '',
+  paths TEXT NOT NULL DEFAULT '[]', deps TEXT NOT NULL DEFAULT '[]',
+  state TEXT NOT NULL DEFAULT 'ready', attempts INTEGER NOT NULL DEFAULT 0,
+  added_at TEXT NOT NULL, PRIMARY KEY(job, chunk));
+CREATE TABLE IF NOT EXISTS leases(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT NOT NULL, chunk TEXT NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 0, paths TEXT NOT NULL DEFAULT '[]',
+  granted_at TEXT NOT NULL, expires_at TEXT NOT NULL, closed_at TEXT, reason TEXT);
 """
 OPEN = ("intent", "running")
 
@@ -40,6 +49,10 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(SCHEMA)
+        have = {r[1] for r in self.db.execute("PRAGMA table_info(fires)")}
+        for col in ("cache_read", "cache_write", "seconds"):  # old databases: add the cost columns
+            if col not in have:
+                self.db.execute(f"ALTER TABLE fires ADD COLUMN {col} INTEGER")
 
     def close(self):
         self.db.close()
@@ -59,9 +72,19 @@ class Store:
         self.db.execute("UPDATE fires SET run_id=?, status='running' WHERE id=? AND status='intent'",
                         (run_id, fire_id))
 
-    def close_run(self, run_id, status, at=None, tokens_in=0, tokens_out=0, error=None):
-        self.db.execute("UPDATE fires SET status=?, ended_at=?, tokens_in=?, tokens_out=?, error=? WHERE run_id=?",
-                        (status, at or now(), tokens_in, tokens_out, error, run_id))
+    def close_run(self, run_id, status, at=None, tokens_in=0, tokens_out=0, error=None,
+                  cache_read=None, cache_write=None):
+        """Close a run and write its cost: tokens (cache columns stay NULL when the run row has none) and seconds."""
+        at = at or now()
+        self.db.execute("UPDATE fires SET status=?, ended_at=?, tokens_in=?, tokens_out=?, error=?, cache_read=?, "
+                        "cache_write=?, seconds=MAX(0, CAST(strftime('%s', ?) AS INTEGER) - CAST(strftime('%s', intent_at) AS INTEGER)) "
+                        "WHERE run_id=?", (status, at, tokens_in, tokens_out, error, cache_read, cache_write, at, run_id))
+
+    def stage_cost(self, run_id):
+        """The cost row of one run: tokens in/out/cache and seconds (None when the run is unknown)."""
+        r = self.db.execute("SELECT job,chunk,stage,status,tokens_in,tokens_out,cache_read,cache_write,seconds "
+                            "FROM fires WHERE run_id=?", (run_id,)).fetchone()
+        return dict(r) if r else None
 
     def abandon(self, fire_id, error="no run id after intent", at=None):
         """Resolve a pending intent that never fired (decided by the caller)."""
@@ -142,6 +165,66 @@ class Store:
             self.db.execute("ROLLBACK")
             raise
         return fid
+
+    def add_ready(self, job, chunk, paths=(), builder="", deps=(), at=None):
+        """Ready-chunk queue: add a chunk (idempotent per job/chunk)."""
+        self.db.execute("INSERT OR IGNORE INTO ready_chunks(job,chunk,builder,paths,deps,added_at) VALUES(?,?,?,?,?,?)",
+                        (job, chunk, builder, json.dumps(list(paths)), json.dumps(list(deps)), at or now()))
+
+    def _ready(self, r):
+        r = dict(r)
+        r["paths"], r["deps"] = json.loads(r["paths"]), json.loads(r["deps"])
+        return r
+
+    def get_ready(self, job, chunk):
+        r = self.db.execute("SELECT * FROM ready_chunks WHERE job=? AND chunk=?", (job, chunk)).fetchone()
+        return self._ready(r) if r else None
+
+    def ready_list(self, job=None):
+        """Chunks in state 'ready', oldest first."""
+        sql = "SELECT * FROM ready_chunks WHERE state='ready'" + (" AND job=?" if job is not None else "") + " ORDER BY rowid"
+        return [self._ready(r) for r in self.db.execute(sql, (job,) if job is not None else ())]
+
+    def set_ready_state(self, job, chunk, state):
+        self.db.execute("UPDATE ready_chunks SET state=? WHERE job=? AND chunk=?", (state, job, chunk))
+
+    def attempts(self, job, chunk):
+        r = self.db.execute("SELECT attempts FROM ready_chunks WHERE job=? AND chunk=?", (job, chunk)).fetchone()
+        return r[0] if r else 0
+
+    def bump_attempt(self, job, chunk):
+        self.db.execute("UPDATE ready_chunks SET attempts=attempts+1 WHERE job=? AND chunk=?", (job, chunk))
+        return self.attempts(job, chunk)
+
+    def grant_lease(self, job, chunk, paths, expires_at, attempt=0, at=None):
+        """Open a lease on a chunk's paths until expires_at (ISO). Returns the lease id."""
+        cur = self.db.execute("INSERT INTO leases(job,chunk,attempt,paths,granted_at,expires_at) VALUES(?,?,?,?,?,?)",
+                              (job, chunk, attempt, json.dumps(list(paths)), at or now(), expires_at))
+        return cur.lastrowid
+
+    def _lease(self, r):
+        r = dict(r)
+        r["paths"] = json.loads(r["paths"])
+        return r
+
+    def get_lease(self, lease_id):
+        r = self.db.execute("SELECT * FROM leases WHERE id=?", (lease_id,)).fetchone()
+        return self._lease(r) if r else None
+
+    def open_leases(self):
+        return [self._lease(r) for r in self.db.execute("SELECT * FROM leases WHERE closed_at IS NULL ORDER BY id")]
+
+    def close_lease(self, lease_id, reason, at=None):
+        """Close with a reason; a lease that is already closed keeps its first reason."""
+        self.db.execute("UPDATE leases SET closed_at=?, reason=? WHERE id=? AND closed_at IS NULL",
+                        (at or now(), reason, lease_id))
+
+    def expire_leases(self, at):
+        """Close every open lease whose expires_at is before `at`; returns the leases closed."""
+        out = [l for l in self.open_leases() if l["expires_at"] < at]
+        for l in out:
+            self.close_lease(l["id"], "expired", at=at)
+        return out
 
     def _rows(self, where, job):
         sql = "SELECT * FROM fires WHERE " + where + (" AND job=?" if job is not None else "") + " ORDER BY id"

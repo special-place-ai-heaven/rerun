@@ -56,6 +56,29 @@ class Clocks(unittest.TestCase):
         self.assertEqual(C.klass("BLOCKED", blocked="BLOCKED: Plan: x"), "plan")
         self.assertEqual(C.klass("BLOCKED", blocked="BLOCKED: tests fail"), "work")
 
+    def test_a_spent_plan_is_plan_limit_and_the_engines_overloaded_texts_are_transient(self):
+        cases = {"plan_limit": ["AI_APICallError: You've hit your session limit \u00b7 resets 3pm",
+                                "Claude AI usage limit reached|1731500000", "You're out of usage credits"],
+                 "transient": ["Selected model is at capacity. Please try a different model.",
+                               "This model is currently experiencing high demand.", "Too Many Requests", "Overloaded"],
+                 "work": ["OAuth access token has expired", "Fable 5.1 requires usage credits",
+                          "The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account"]}
+        for want, texts in cases.items():
+            for text in texts:
+                self.assertEqual(C.klass("FAILED", run(status="error", error=text)), want, text)
+
+    def test_the_two_patterns_are_the_contracts(self):
+        import re
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "packages", "contracts", "src",
+                                "chat-error.ts"), encoding="utf-8").read()
+        for name, mine in (("PROVIDER_OVERLOADED", C._OVERLOADED), ("SUBSCRIPTION_LIMIT", C._SPENT),
+                           ("MODEL_NOT_IN_PLAN", C._NOT_IN_PLAN)):
+            m = re.search(r"export const " + name + r"\s*=\s*/(.+)/([a-z]*)\s*$", src, re.M)
+            self.assertIsNotNone(m, name)
+            self.assertEqual(m.group(1), mine.pattern, name)
+            self.assertIn("i", m.group(2))
+            self.assertTrue(mine.flags & re.I, name)
+
     def test_a_run_cut_by_a_sign_in_renewal_or_refused_at_the_providers_edge_is_transient(self):
         for text in ("ClaudeSignInRenewedError: interrupted: Claude sign-in renewed during the run",
                      "AI_LoadAPIKeyError: Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"):

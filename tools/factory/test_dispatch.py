@@ -16,6 +16,10 @@ class World:
         self.workflows, self.pr_state, self.clock = {}, "OPEN", 1000.0
         self.cut_off_next_send = False
         self.mergeable, self.unlabelled = "MERGEABLE", set()
+        self.open_numbers = {7, 129, 135}
+
+    def open_list_calls(self):
+        return [c for c in self.gh_calls if c[:2] == ["issue", "list"] and "--label" not in c]
 
     def account(self, tool, args):
         if tool == "send_message":
@@ -39,8 +43,10 @@ class World:
     def gh(self, args):
         a = list(args)
         self.gh_calls.append(a)
+        if a[:2] == ["issue", "list"] and "--label" not in a:
+            return json.dumps([{"number": n} for n in sorted(self.open_numbers)])
         if a[:2] == ["issue", "list"]:
-            return json.dumps([{"number": i["number"], "title": i["title"]} for i in self.issues if i["number"] not in self.unlabelled])
+            return json.dumps([{"number": i["number"], "title": i["title"], "body": i["body"]} for i in self.issues if i["number"] not in self.unlabelled])
         if a[:2] == ["issue", "view"]:
             i = self.issue(a[2])
             return json.dumps({"body": i["body"], "comments": [{"body": c} for c in i["comments"]]})
@@ -132,6 +138,68 @@ class Intake(Base):
         self.tick()
         with open(self.cfg["state_file"]) as f:
             self.assertEqual(sorted(json.load(f)["jobs"]), ["1", "2"])
+
+
+class DependsOn(Base):
+    def one(self, body, n=5):
+        self.w.issues = [{"number": n, "title": "t%d" % n, "body": body, "comments": []}]
+
+    def test_waits_while_the_dependency_is_open_and_logs_once(self):
+        self.one("x\n**Depends on**: #7")
+        self.tick(3)
+        self.assertEqual(self.state_jobs(), {})
+        self.assertEqual(self.w.issue(5)["comments"], [])
+        self.assertEqual(self.out.getvalue().count("waits on #7"), 1)
+        self.tick(2, fresh=True)
+        self.assertEqual(self.out.getvalue().count("waits on #7"), 1)
+
+    def test_taken_once_the_dependency_is_closed(self):
+        self.one("**Depends on**: #7")
+        self.tick(2)
+        self.w.open_numbers.discard(7)
+        self.tick()
+        self.assertEqual(self.state(), "building")
+        self.assertEqual(len(self.w.sends), 1)
+        self.assertNotIn("5", json.loads(self.raw()).get("waiting", {}))
+
+    def test_none_and_no_line_are_taken_as_before(self):
+        self.w.issues = [{"number": 5, "title": "a", "body": "**Depends on**: none", "comments": []},
+                         {"number": 6, "title": "b", "body": "nothing", "comments": []},
+                         {"number": 8, "title": "c", "body": "Depends on: #8", "comments": []}]
+        self.tick()
+        self.assertEqual(sorted(self.state_jobs()), ["5", "6", "8"])
+        self.assertEqual(self.w.open_list_calls(), [])
+
+    def test_a_waiting_issue_does_not_use_up_room(self):
+        self.cfg["max_jobs"] = 1
+        self.w.issues = [{"number": 5, "title": "a", "body": "**Depends on**: #7", "comments": []},
+                         {"number": 6, "title": "b", "body": "SMALL FIX", "comments": []}]
+        self.tick()
+        self.assertEqual(sorted(self.state_jobs()), ["6"])
+
+    def test_open_list_read_once_per_pass(self):
+        self.w.issues = [{"number": 5, "title": "a", "body": "Depends on: #7", "comments": []},
+                         {"number": 6, "title": "b", "body": "Depends on: #129", "comments": []}]
+        self.tick(2)
+        self.assertEqual(len(self.w.open_list_calls()), 2)
+
+    def test_several_numbers_and_a_note(self):
+        self.one("**Depends on**: #135, #129 (a note in brackets)")
+        self.w.open_numbers.discard(135)
+        self.tick()
+        self.assertEqual(self.state_jobs(), {})
+        self.assertIn("waits on #129", self.out.getvalue())
+        self.assertNotIn("#135,", self.out.getvalue())
+
+    def raw(self):
+        with open(self.cfg["state_file"]) as f:
+            return f.read()
+
+    def state_jobs(self):
+        try:
+            return json.loads(self.raw())["jobs"]
+        except FileNotFoundError:
+            return {}
 
 
 class OneBuilder(Base):

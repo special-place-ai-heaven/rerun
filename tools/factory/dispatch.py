@@ -129,6 +129,14 @@ def make_gh(token, run=subprocess.run):
     return call
 
 
+def depends_on(issue):
+    """Issue numbers on the first 'Depends on:' line of the body; none when there is no such line or no number on it."""
+    m = re.search(r"(?m)^.*?\bDepends on\b[*_\s]*:(.*)$", issue.get("body") or "")
+    if not m:
+        return set()
+    return {int(n) for n in re.findall(r"#(\d+)", m.group(1))} - {issue["number"]}
+
+
 def load_state(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -203,14 +211,32 @@ class Dispatcher:
         if room <= 0:
             return
         issues = json.loads(self.gh(["issue", "list", "-R", self.repo, "--label", self.label, "--state", "open",
-                                     "--json", "number,title", "--limit", "100"]))
-        for i in sorted(issues, key=lambda i: i["number"]):
-            if room <= 0:
-                break
+                                     "--json", "number,title,body", "--limit", "100"]))
+        issues = sorted(issues, key=lambda i: i["number"])
+        candidates = []
+        for i in issues:
             old = self.state["jobs"].get(str(i["number"]))
             # An ended job lost its label when it was reported: the label being back means "run it again".
-            if old and not (old["state"] in END and old.get("relabelled")):
+            if not old or (old["state"] in END and old.get("relabelled")):
+                candidates.append(i)
+        deps = {i["number"]: depends_on(i) for i in candidates}
+        open_now = None
+        if any(deps.values()):
+            open_now = {o["number"] for o in json.loads(self.gh(["issue", "list", "-R", self.repo, "--state", "open",
+                                                                 "--json", "number", "--limit", "1000"]))}
+        waiting = self.state.setdefault("waiting", {})
+        for i in candidates:
+            if room <= 0:
+                break
+            unmet = sorted(n for n in deps[i["number"]] if open_now is not None and n in open_now)
+            if unmet:
+                if waiting.get(str(i["number"])) != unmet:
+                    waiting[str(i["number"])] = unmet
+                    self.save()
+                    log(i["number"], "waits on " + ", ".join("#%d" % n for n in unmet))
                 continue
+            if waiting.pop(str(i["number"]), None) is not None:
+                self.save()
             if self.cfg.get("auto_plan_marker", True):
                 v = json.loads(self.gh(["issue", "view", str(i["number"]), "-R", self.repo, "--json", "body,comments"]))
                 texts = [v.get("body") or ""] + [c.get("body") or "" for c in v.get("comments") or []]

@@ -23,6 +23,14 @@ export const runSchema = z.object({
     startedAt: z.string(),
     finishedAt: z.string().nullable(),
     error: z.string().nullable(),
+    // Lineage and job fields: absent on an older engine, null when unknown; absent and null mean the same.
+    initiatorAgentId: z.string().nullable().optional(),
+    initiatorRunId: z.string().nullable().optional(),
+    initiatorSessionId: z.string().nullable().optional(),
+    initiatorUserId: z.string().nullable().optional(),
+    jobRef: z.string().nullable().optional(),
+    branch: z.string().nullable().optional(),
+    copyIndex: z.number().int().nullable().optional(),
 })
 export type Run = z.infer<typeof runSchema>
 

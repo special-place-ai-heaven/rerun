@@ -317,8 +317,22 @@ class Runner:
             text = pr_body("%s#%s" % (repo, job), unmerged_receipts(self.st, job))
             PB.publish(head, job, kv["title"], kv["base_branch"], lambda t, h, b, _="": self.open_pr(t, h, b, text), paths)
             self.st.set(job, "published:" + chunk, "1")
+            self.run_gate(repo, job)
         except (KeyError, ValueError, OSError, subprocess.CalledProcessError, GH.GhError) as e:
             raise ChainFailed("publish chain stopped: %s" % type(e).__name__) from e
+
+    def run_gate(self, repo, job):
+        """After publish: gate.py <repo> <pr> as a child (posts the commit status, token from our env). Only logged, never changes chunk state."""
+        try:
+            pr = self.pr_by_head and self.pr_by_head("factory/job-%s" % job)
+            if not pr:
+                return log("gate skipped for job %s: no PR found" % job)
+            env = dict(os.environ, GATE_POST_STATUS="1", FACTORY_GH="gh")
+            p = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gate.py"), repo, str(pr["number"])],
+                               env=env, capture_output=True, text=True, timeout=600)
+            log("gate %s#%s exit %s" % (repo, pr["number"], p.returncode))
+        except Exception as e:  # a gate that cannot run is a log line, not a failed chunk
+            log("gate for job %s did not run: %s" % (job, type(e).__name__))
 
     def see_merges(self):
         """A published chunk stays 'running' until its job PR (branch factory/job-<job>) is merged; one merged PR marks every

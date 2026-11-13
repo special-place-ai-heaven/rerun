@@ -42,6 +42,12 @@ describe('desktop session token', () => {
         expect((await post('%', 'desktop/apps', token)).status).toBe(401)
     })
 
+    it('is refused when the agent segment is encoded twice (auth and route must see one id)', async () => {
+        const token = issueDesktopToken('aA')
+        // 'a%2541' is a%41 after the router's one decode; only a second decode would turn it into 'aA'.
+        expect((await post('a%2541', 'desktop/apps', token)).status).toBe(401)
+    })
+
     it('still answers the engine key', async () => {
         expect((await post('a1', 'desktop/apps', 'k')).status).toBe(200)
     })

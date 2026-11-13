@@ -70,7 +70,7 @@ export async function collectAssistantText(agentId: string, sessionId: string, f
         .orderBy(asc(messages.createdAt))
     return rows
         .filter(r => r.role === 'assistant' && (!to || r.createdAt <= to))
-        .map(r => extractText(JSON.parse(r.contentJson)))
+        .map(r => visibleText(JSON.parse(r.contentJson), '\n'))
         .filter(Boolean)
         .join('\n')
 }

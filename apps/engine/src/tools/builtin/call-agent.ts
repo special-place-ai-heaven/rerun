@@ -66,7 +66,7 @@ export function callAgentTools(ctx: RunContext): ToolSet {
                 message: z.string().describe('The message to send'),
                 context: z.string().optional().describe('Optional background the target coworker needs'),
                 wait: z.boolean().default(false).describe('Wait for the answer and return it. Default false: dispatch and move on'),
-                branch: z.string().max(200).optional().describe('git branch of this work, if known'),
+                branch: z.string().max(200).optional().describe('the git branch this work is for, when you know it'),
             }),
             execute: async ({ agent, message, context, wait, branch }, { toolCallId, abortSignal }) => {
                 const resolved = resolveTargetAgent(agent, targets)

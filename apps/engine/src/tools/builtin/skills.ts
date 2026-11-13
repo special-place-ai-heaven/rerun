@@ -11,7 +11,10 @@ import { resolveWithinReal } from '../sandbox.js'
 import { skillDir, workspaceDir } from '../../config/paths.js'
 import { connectorSkillOwners } from '../../services/registry.js'
 import { slugify } from '../../lib/ids.js'
+import { disabledSkillSet } from '../../skills/switch.js'
 import type { RunContext } from '../../runtime/context.js'
+
+const OFF_SLUG = 'A skill with this name exists and cannot be changed from here.'
 
 function describeError(err: unknown): string {
     return err instanceof Error ? err.message : String(err)
@@ -19,6 +22,9 @@ function describeError(err: unknown): string {
 
 export function skillTools(ctx: RunContext): ToolSet {
     const id = ctx.agent.id
+    // Taken once, when the tools are built: a switch flipped mid-run applies from the next run.
+    const off = disabledSkillSet({ disabledSkills: ctx.agent.config?.disabledSkills })
+    const missing = (slug: string): boolean => off.has(slug) || !skillExists(id, slug)
 
     // Read at call time, not once per run: a connector installed mid-conversation must protect
     // its skills from the very next tool call.
@@ -32,7 +38,7 @@ export function skillTools(ctx: RunContext): ToolSet {
             description: 'List your skills with their descriptions.',
             inputSchema: z.object({}),
             execute: async () => {
-                const skills = await listSkills(id)
+                const skills = (await listSkills(id)).filter(s => !off.has(s.slug))
                 if (skills.length === 0) return 'No skills yet.'
                 const owners = await connectorSkillOwners(id)
                 return skills
@@ -48,7 +54,7 @@ export function skillTools(ctx: RunContext): ToolSet {
             description: 'Read the full procedure of a skill before using it.',
             inputSchema: z.object({ slug: z.string() }),
             execute: async ({ slug }) => {
-                if (!skillExists(id, slug)) return `Skill not found: ${slug}`
+                if (missing(slug)) return `Skill not found: ${slug}`
                 const skill = await readSkill(id, slug)
                 const service = (await connectorSkillOwners(id)).get(slug)
                 const origin = service ? `_This skill was installed by the ${service} app and is read-only._\n\n` : ''
@@ -67,7 +73,7 @@ export function skillTools(ctx: RunContext): ToolSet {
                 offset: z.number().int().nonnegative().default(0).describe('Character offset to start at. Use the offset named in the previous page to continue.'),
             }),
             execute: async ({ slug, path, offset = 0 }) => {
-                if (!skillExists(id, slug)) return `Skill not found: ${slug}`
+                if (missing(slug)) return `Skill not found: ${slug}`
                 if (!Number.isInteger(offset) || offset < 0) return 'offset must be a non-negative integer.'
                 try {
                     const content = await readFile(await resolveSkillFile(id, slug, path), 'utf8')
@@ -91,7 +97,7 @@ export function skillTools(ctx: RunContext): ToolSet {
                 content: z.string(),
             }),
             execute: async ({ slug, path, content }) => {
-                if (!skillExists(id, slug)) return `Skill not found: ${slug}`
+                if (missing(slug)) return `Skill not found: ${slug}`
                 const readOnly = await readOnlyReason(slug)
                 if (readOnly) return readOnly
                 try {
@@ -106,7 +112,7 @@ export function skillTools(ctx: RunContext): ToolSet {
             description: 'Delete a file bundled with a skill.',
             inputSchema: z.object({ slug: z.string(), path: z.string() }),
             execute: async ({ slug, path }) => {
-                if (!skillExists(id, slug)) return `Skill not found: ${slug}`
+                if (missing(slug)) return `Skill not found: ${slug}`
                 const readOnly = await readOnlyReason(slug)
                 if (readOnly) return readOnly
                 try {
@@ -128,6 +134,7 @@ export function skillTools(ctx: RunContext): ToolSet {
             execute: async ({ name, description, body }) => {
                 // writeSkill overwrites whatever sits at that slug, so a colliding name would
                 // silently replace a connector's SKILL.md.
+                if (off.has(slugify(name))) return OFF_SLUG
                 const readOnly = await readOnlyReason(slugify(name))
                 if (readOnly) return readOnly
                 const skill = await writeSkill(id, name, description, body)
@@ -153,6 +160,7 @@ export function skillTools(ctx: RunContext): ToolSet {
                 const fallbackName = isDir ? basename(sourcePath) : basename(sourcePath).replace(/\.md$/, '')
                 const finalName = name ?? (typeof data.name === 'string' ? data.name : fallbackName)
                 const finalDescription = description ?? (typeof data.description === 'string' ? data.description : '')
+                if (off.has(slugify(finalName))) return OFF_SLUG
                 const readOnly = await readOnlyReason(slugify(finalName))
                 if (readOnly) return readOnly
                 const skill = await writeSkill(id, finalName, finalDescription, body)
@@ -179,7 +187,7 @@ export function skillTools(ctx: RunContext): ToolSet {
                 replaceAll: z.boolean().default(false).describe('Replace every occurrence instead of requiring a unique match'),
             }),
             execute: async ({ slug, oldString, newString, replaceAll }) => {
-                if (!skillExists(id, slug)) return `Skill not found: ${slug}`
+                if (missing(slug)) return `Skill not found: ${slug}`
                 const readOnly = await readOnlyReason(slug)
                 if (readOnly) return readOnly
                 if (oldString === newString) return 'oldString and newString are identical; nothing to do.'
@@ -197,7 +205,7 @@ export function skillTools(ctx: RunContext): ToolSet {
                 'Overwrites the entire skill, discarding all of its existing content. Use ONLY for a deliberate full rewrite. For ANY partial change — adding, refining or fixing part of a skill — use skill_edit instead, never this.',
             inputSchema: z.object({ slug: z.string(), description: z.string(), body: z.string() }),
             execute: async ({ slug, description, body }) => {
-                if (!skillExists(id, slug)) return `Skill not found: ${slug}`
+                if (missing(slug)) return `Skill not found: ${slug}`
                 const readOnly = await readOnlyReason(slug)
                 if (readOnly) return readOnly
                 const current = await readSkill(id, slug)
@@ -209,7 +217,7 @@ export function skillTools(ctx: RunContext): ToolSet {
             description: 'Delete a skill you no longer need.',
             inputSchema: z.object({ slug: z.string() }),
             execute: async ({ slug }) => {
-                if (!skillExists(id, slug)) return `Skill not found: ${slug}`
+                if (missing(slug)) return `Skill not found: ${slug}`
                 const readOnly = await readOnlyReason(slug)
                 if (readOnly) return readOnly
                 await deleteSkill(id, slug)

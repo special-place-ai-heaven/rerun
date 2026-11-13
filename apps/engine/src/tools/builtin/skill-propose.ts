@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { tool, type ToolSet } from 'ai'
 import { connectorSkillReadOnlyError, skillProposalInputSchema, type SkillProposalInput } from '@rerun/contracts'
 import { skillExists } from '../../skills/loader.js'
+import { disabledSkillSet } from '../../skills/switch.js'
 import { connectorSkillOwners } from '../../services/registry.js'
 import {
     appendSkillProposalInstruction,
@@ -38,10 +39,10 @@ export function proposalFingerprint(input: { mode: string; slug: string | null; 
 
 // Every guard answers the model in plain words instead of throwing: a thrown tool comes back as an
 // invalid call, which the model then retries.
-export async function proposalGuard(agentId: string, input: SkillProposalInput): Promise<string | null> {
+export async function proposalGuard(agentId: string, input: SkillProposalInput, off: ReadonlySet<string> = new Set()): Promise<string | null> {
     if (input.mode === 'edit') {
         if (!input.slug) return 'An edit proposal needs the slug of the skill to change. Nothing shown.'
-        if (!skillExists(agentId, input.slug)) return `No skill with slug "${input.slug}". Nothing shown.`
+        if (off.has(input.slug) || !skillExists(agentId, input.slug)) return `No skill with slug "${input.slug}". Nothing shown.`
         const service = (await connectorSkillOwners(agentId)).get(input.slug)
         if (service) return connectorSkillReadOnlyError(input.slug, service)
     }
@@ -50,6 +51,7 @@ export async function proposalGuard(agentId: string, input: SkillProposalInput):
 
 export function skillProposeTool(ctx: RunContext): ToolSet {
     const agentId = ctx.agent.id
+    const off = disabledSkillSet({ disabledSkills: ctx.agent.config?.disabledSkills })
 
     return {
         skill_propose: tool({
@@ -57,7 +59,7 @@ export function skillProposeTool(ctx: RunContext): ToolSet {
                 'Propose capturing a settled way of working as a skill, so the user approves it from a small row in the chat: a single standing rule they just gave you, or a whole flow you built together once they have validated it, never a step of a flow still being shaped. This does NOT pause you and does NOT write anything: finish your turn normally and mention the proposal in one short sentence of your message. Give the rule itself, or the whole flow as it ended up, in instruction, in your own words, as an instruction to your future self. Do not draft the skill body: once the user accepts, the writing happens on its own, reading the skill as it is at that moment. Use mode "edit" with the slug of the skill that already covers that ground, and mode "create" only when nothing in your index does.',
             inputSchema: skillProposalInputSchema,
             execute: async input => {
-                const refusal = await proposalGuard(agentId, input)
+                const refusal = await proposalGuard(agentId, input, off)
                 if (refusal) return refusal
 
                 try {

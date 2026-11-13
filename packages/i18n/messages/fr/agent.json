@@ -567,7 +567,10 @@
         "newSkill": "Nouveau",
         "emptyTitle": "Aucun skill pour l'instant",
         "emptyDescription": "Les skills sont des instructions pas à pas réutilisables que votre coworker apprend, pour accomplir les tâches récurrentes toujours de la même façon.",
-        "appBadge": "App"
+        "appBadge": "App",
+        "offerSkill": "Proposer {name} à ce collègue",
+        "offBadge": "Désactivé",
+        "toggleFailed": "Impossible de modifier la compétence"
     },
     "shareAgentDialog": {
         "titleLink": "Votre lien de partage",

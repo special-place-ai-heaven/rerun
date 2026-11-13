@@ -567,7 +567,10 @@
         "newSkill": "Nueva",
         "emptyTitle": "Aún no hay skills",
         "emptyDescription": "Las skills son instrucciones paso a paso reutilizables que tu coworker aprende, para hacer las tareas recurrentes siempre de la misma forma.",
-        "appBadge": "App"
+        "appBadge": "App",
+        "offerSkill": "Ofrecer {name} a este compañero",
+        "offBadge": "Desactivado",
+        "toggleFailed": "No se pudo cambiar la habilidad"
     },
     "shareAgentDialog": {
         "titleLink": "Tu enlace para compartir",

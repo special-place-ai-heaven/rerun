@@ -1,11 +1,12 @@
 'use client'
 
 import { useErrorText } from '@/hooks/useErrorText'
-import { importSkillAction, listSkillsAction } from '@/app/api/_actions/agent.actions'
+import { importSkillAction, listSkillsAction, setSkillEnabledAction } from '@/app/api/_actions/agent.actions'
 import { setAgentSkillSummaries } from '@/hooks/useAgentSkillSummaries'
 import { SkillEditor } from '@/components/agent/skills/SkillEditor'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Switch } from '@/components/ui/switch'
 import { TooltipDisabledReason } from '@/components/ui/tooltip'
 import { useCanManageAgent } from '@/hooks/useBoxAccess'
 import type { EngineSkillWithSource } from '@/lib/engine/types'
@@ -122,6 +123,21 @@ export function AgentPanelSkills({ agentId, focusSlug, onFocusConsumed }: AgentP
         }
     }, [agentId, load, t, errorText])
 
+    // The row flips at once; a failed save puts it back and says why.
+    const handleToggle = useCallback(async (slug: string, enabled: boolean) => {
+        const mark = (value: boolean) => setSkills(prev => {
+            const next = prev.map(s => (s.slug === slug ? { ...s, enabled: value } : s))
+            setAgentSkillSummaries(agentId, next)
+            return next
+        })
+        mark(enabled)
+        const result = await setSkillEnabledAction(agentId, slug, enabled)
+        if (!result.success) {
+            mark(!enabled)
+            toast.error(errorText(result, t('toggleFailed')))
+        }
+    }, [agentId, t, errorText])
+
     const actionButtons = (
         <div className="flex items-center gap-1.5">
             <DropdownMenu>
@@ -200,8 +216,26 @@ export function AgentPanelSkills({ agentId, focusSlug, onFocusConsumed }: AgentP
                                     onClick={() => setView({ mode: 'edit', slug: skill.slug, readOnly: skill.fromConnector })}
                                     title={skill.name}
                                     description={skill.description}
+                                    actions={
+                                        <span onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} className="flex items-center">
+                                            <TooltipDisabledReason reason={manageReason} className="shrink-0">
+                                                <Switch
+                                                    checked={skill.enabled !== false}
+                                                    disabled={!canManage}
+                                                    aria-label={t('offerSkill', { name: skill.name })}
+                                                    onCheckedChange={value => handleToggle(skill.slug, value)}
+                                                    className="shrink-0"
+                                                />
+                                            </TooltipDisabledReason>
+                                        </span>
+                                    }
                                     meta={
                                         <>
+                                            {skill.enabled === false && (
+                                                <Badge size="xs" tone="neutral" glow={false}>
+                                                    {t('offBadge')}
+                                                </Badge>
+                                            )}
                                             {skill.files.length > 0 && (
                                                 <Badge size="xs" tone="neutral" glow={false} leading={<FileTextIcon className="size-2.5" />}>
                                                     {skill.files.length}

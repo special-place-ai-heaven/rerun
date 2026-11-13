@@ -22,7 +22,7 @@ async function load(agentId: string) {
     if (inflight.has(agentId)) return
     inflight.add(agentId)
     try {
-        snapshots.set(agentId, await listSkillSummariesAction(agentId))
+        snapshots.set(agentId, (await listSkillSummariesAction(agentId)).filter(s => s.enabled !== false))
     } finally {
         inflight.delete(agentId)
     }
@@ -47,7 +47,7 @@ export function invalidateAgentSkillSummaries(agentId: string) {
 }
 
 export function setAgentSkillSummaries(agentId: string, skills: EngineSkillSummary[]) {
-    snapshots.set(agentId, skills.map(({ slug, name, description }) => ({ slug, name, description })))
+    snapshots.set(agentId, skills.filter(s => s.enabled !== false).map(({ slug, name, description }) => ({ slug, name, description })))
     emit(agentId)
 }
 

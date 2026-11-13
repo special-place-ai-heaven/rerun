@@ -646,7 +646,10 @@
         "newSkill": "New",
         "emptyTitle": "No skills yet",
         "emptyDescription": "Skills are reusable step-by-step instructions your coworker learns, so it performs recurring tasks the same way every time.",
-        "appBadge": "App"
+        "appBadge": "App",
+        "offerSkill": "Offer {name} to this coworker",
+        "offBadge": "Off",
+        "toggleFailed": "Could not change the skill"
     },
     "shareAgentDialog": {
         "titleLink": "Your share link",

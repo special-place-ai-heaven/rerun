@@ -122,7 +122,6 @@ function hitlMessage(toolName: string, input: Record<string, unknown> | undefine
     if (toolName === 'request_secret') return secretSummary(input)
     if (toolName === 'request_mcp_sign_in') return `Sign in to ${String(input?.name ?? 'an MCP server')}`
     if (toolName === 'request_takeover') return takeoverSummary(input)
-    if (toolName === 'request_spend') return typeof input?.purpose === 'string' && input.purpose.trim() ? input.purpose : 'Approve a paid data spend'
     return approvalSummary(input)
 }
 

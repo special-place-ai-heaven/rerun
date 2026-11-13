@@ -172,9 +172,6 @@ export const agentConfigSchema = z.object({
     mcpServers: z.array(mcpServerSchema).default([]),
     selfImprovement: selfImprovementSchema.prefault({}),
     setup: agentSetupSchema.prefault({}),
-    // Set when the user picks "Always allow" on a spend approval: paid data then runs without asking
-    // again, which is what lets a delegate spend credit with nobody watching.
-    paidDataAlwaysAllow: z.boolean().default(false),
 })
 export type AgentConfig = z.infer<typeof agentConfigSchema>
 

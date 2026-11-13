@@ -1,0 +1,25 @@
+{
+  "repo": "special-place-ai-heaven/rerun",
+  "label": "factory",
+  "poll_s": 30,
+  "max_jobs": 8,
+  "checks_timeout_s": 1800,
+  "auto_plan_marker": true,
+  "state_file": "/state/dispatch.json",
+  "account_key_file": "/run/secrets/account_key",
+  "gh_token_file": "/run/secrets/gh_token",
+  "builders": [
+    {"id": "53dbe014-5b95-4cf9-853f-de3a3507030a", "name": "LARRY"},
+    {"id": "adb3e7b0-7535-4a4f-bfff-101838197532", "name": "HOPPER"},
+    {"id": "b5e4deb4-fd07-427a-88cf-fba69fde503b", "name": "code"},
+    {"id": "3af6462e-a040-453f-aa04-c4bdbdee5418", "name": "MARTIN"},
+    {"id": "942af558-1343-47b2-956a-f543af167ca8", "name": "BRENDAN"}
+  ],
+  "reviewers": [
+    {"id": "0d0e33bb-171a-4625-bc13-80de03eb0475", "name": "LINUS"},
+    {"id": "71dfdea8-3482-4f3f-b091-ed4b16a69b99", "name": "BRUCE"},
+    {"id": "29c37c8b-45cf-43bd-b8a0-bdb92d282dd6", "name": "KENT"},
+    {"id": "b87181fb-f337-427c-8a00-280b4699f518", "name": "FRED"},
+    {"id": "b0e5b39f-74e3-4dfd-9d16-8cf53934ad05", "name": "BARBARA"}
+  ]
+}

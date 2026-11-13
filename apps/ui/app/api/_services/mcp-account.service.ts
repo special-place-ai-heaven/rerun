@@ -38,7 +38,7 @@ import {
 } from '@/lib/engine/client'
 import type { InstalledService } from '@/lib/services/types'
 import type { BoxConnection, EngineAgentConfigPatch, EngineAgentDetail, EngineAgentSetup, EngineConnection, EngineRunDetail, EngineTrigger, EngineTriggerMethod } from '@/lib/engine/types'
-import { MAX_MEMORIES_PER_CALL, MAX_MEMORY_CHARS, MAX_UPLOAD_MB } from '@/lib/mcp/account-tools'
+import { MAX_DUPLICATES_PER_CALL, MAX_MEMORIES_PER_CALL, MAX_MEMORY_CHARS, MAX_UPLOAD_MB } from '@/lib/mcp/account-tools'
 import { asBooleanRecord, asNumber, asString, asStringArray, clamp, requireConfirmation, requireString } from '@/lib/mcp/args'
 import { connectionModels, readModelPin, type ModelPin } from '@/lib/mcp/model-pin'
 import { projectRun } from '@/lib/mcp/run-projection'
@@ -50,7 +50,7 @@ import { slugify } from '@/lib/slugify'
 import { MAX_TRIGGER_BODY_BYTES, triggerWebhookUrl } from '@/lib/triggers/webhook'
 import { createServiceRoleClient } from '@/supabase/serviceRole'
 import { selectCount, selectMany, selectMaybeSingle } from '@/supabase/supabase-helpers'
-import { changeAgentHandle, createAgent, deleteAgent, moveAgentToBox, renameAgent } from './agent.service'
+import { changeAgentHandle, createAgent, deleteAgent, duplicateAgent, moveAgentToBox, renameAgent } from './agent.service'
 import { declareService, installServiceSlugs } from './agent-setup.service'
 import { LOCKED_NOTICE, LOCKED_WRITE_ERROR } from './agent-content.service'
 import { ensureSessionRow, resolveAgentTarget } from './chat.service'
@@ -425,6 +425,46 @@ export async function dispatchAccountTool(actor: Actor, name: string, args: Reco
                 active: !agent.disabled_at,
                 ...(agent.disabled_at ? { inactiveReason: 'No free coworker slot on the current plan. Start Pro for unlimited coworkers, or delete a coworker to activate it.' } : {}),
                 connectors: connectors.map(connectorView),
+            }
+        }
+
+        case 'duplicate_agent': {
+            const agentId = requireString(args.agentId, 'agentId')
+            const count = args.count === undefined ? 1 : asNumber(args.count)
+            if (count === undefined || !Number.isInteger(count) || count < 1 || count > MAX_DUPLICATES_PER_CALL) {
+                throw new Error(`count must be an integer from 1 to ${MAX_DUPLICATES_PER_CALL}.`)
+            }
+            const source = await assertAgentInWorkspace(agentId, 'manage', actor)
+
+            // A copy's schedules are re-based to now, so every one of them would fire a second time.
+            const { conn, engineAgentId } = await resolveAgentTarget(agentId, actor, 'manage')
+            const schedules = await engineListSchedules(conn, engineAgentId)
+            if (schedules.length > 0) {
+                throw new Error(`This coworker has scheduled tasks (${schedules.map(schedule => schedule.name || schedule.slug).join(', ')}), and every copy would run them a second time. Delete them with delete_schedule first, or copy a coworker without any.`)
+            }
+
+            // Resolved only when asked for, as in update_agent: the default is the source's own Box.
+            const requestedSpaceId = asString(args.spaceId)
+            const spaceId = requestedSpaceId ? await resolveSpaceId(actor, requestedSpaceId) : source.space_id
+
+            // One after the other: each copy derives a unique handle from the ones already there.
+            const copies: { id: string; name: string; handle: string | null; enabled: boolean }[] = []
+            for (let i = 0; i < count; i++) {
+                try {
+                    const { agent } = await duplicateAgent({ actor, agentRowId: agentId, workspaceId, spaceId })
+                    copies.push({ id: agent.id, name: agent.name, handle: agent.handle, enabled: !agent.disabled_at })
+                } catch (err) {
+                    if (copies.length === 0) throw err
+                    // Saying what already exists keeps a retry from making those copies again.
+                    throw new Error(`Copy ${i + 1} of ${count} failed (${err instanceof Error ? err.message : String(err)}). Already made: ${copies.map(copy => copy.id).join(', ')}.`)
+                }
+            }
+
+            const switchedOff = copies.filter(copy => !copy.enabled).length
+            return {
+                copies,
+                schedules: 0,
+                ...(switchedOff > 0 ? { note: `${switchedOff} of the ${copies.length} copies came back switched off, because the workspace has no free coworker slot; delete or switch off a coworker to free one.` } : {}),
             }
         }
 

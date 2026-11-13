@@ -47,7 +47,6 @@ import { authorMetadata, sendNotification, type NotificationKind } from './notif
 import { emitRunTerminal } from './run-events.js'
 import { ClaudeSignInRenewedError, classifyFinishReason, classifyProviderError, errorMessageOf, isFailedFinish, ProviderRefusedError, ProviderStreamCutError, RUN_ERROR_CODES, refusalReason, unreachableEndpointError, type RunErrorCode } from './provider-errors.js'
 import { createLiveCounter, type LiveCounter } from './live-counter.js'
-import { armBudgetLatch, clearBudgetLatch, RERUN_BUDGET_ERROR_CODE } from './budget-latch.js'
 
 export type RunOutcome = { kind: 'done' | 'error' | 'cancelled'; error?: string; errorCode?: RunErrorCode | null }
 
@@ -305,7 +304,6 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
             // A turn that ends on a card ignores the replies: the card already says how to answer.
             const replies = quickReplies?.()
             if (replies && answerRow && !pending) await setMessageToolCalls(agent.id, answerRow.id, [quickRepliesCall(replies)]).catch(() => {})
-            if (provider === 'rerun') clearBudgetLatch()
             if (provider === 'codex') await keepCodexThread().catch(() => forgetCodexThread(agent.id, sessionId))
             await finishRun(agent.id, run.id, settlement.usage, stepsToWrite(), settlement.costMicros, contextUsage?.()).catch(() => {})
             await touchSession(agent.id, sessionId).catch(() => {})
@@ -332,7 +330,6 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
             const errorMessage = errorMessageOf(settlement.error)
             forgetCodexThread(agent.id, sessionId)
             logger.error({ err: errorMessage, errorCode, agent: agent.id, run: run.id }, 'run error')
-            if (errorCode === RERUN_BUDGET_ERROR_CODE) armBudgetLatch()
             if (errorCode === RUN_ERROR_CODES.usageLimit && connection && connection.id !== RERUN_CONNECTION_ID) armPlanLimitLatch(connection.id)
             // The token is still on file, so the connection would keep reading "Ready" while every
             // run on it fails. The keyless Rerun connection answers for the hub's key, not the user's.

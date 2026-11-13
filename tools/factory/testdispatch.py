@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The `one` test dispatch of the factory runner (rerun#53 chunk 5, Settled 9), the factory-suite check-run mode, and two
-probes. Commands: probe-one --repo R --ref BRANCH --suite S --pattern P | probe-merge --repo R [--issue N]
+probes. Commands: probe-one --repo R --ref BRANCH --suite S --pattern P | probe-merge --repo R --issue N
 GitHub only through the gh wrapper (factory.run); nothing here reads or prints a token."""
 import json, os, re, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,7 +14,7 @@ RUN_FIELDS = "databaseId,headSha,createdAt,status,conclusion,url"
 FACTORY_CHECK = "Factory tools tests"
 TAIL_LINES, TAIL_CHARS = 60, 200
 FIND_S, RUN_S, POLL_S = 3 * 120, 25 * 60, 20  # find: three ticks; run: one.yml's 20-minute timeout plus queueing
-PROBE_ISSUE, PROBE_LABEL = "209", "factory-blocked"
+PROBE_LABEL = "factory-blocked"
 
 
 def dispatch(full, branch, suite, pattern):
@@ -117,9 +117,9 @@ def gh_write(*args):
 def cmd_probe_merge(a):
     """Proves the writes chunk 7 needs: ref create, merges API, label add/remove, comment PATCH. Writes only to a scratch
     ref at dev~1 (deleted at the end, also on failure) and to the probe's own comment and label on --issue."""
-    repo, issue = opt(a, "--repo"), opt(a, "--issue") or PROBE_ISSUE
-    if not repo:
-        print("usage: probe-merge --repo R [--issue N]")
+    repo, issue = opt(a, "--repo"), opt(a, "--issue")
+    if not repo or not issue:
+        print("usage: probe-merge --repo R --issue N (no default: name an issue of that repo)")
         return 2
     full = F.repo_full(repo)
     it, dev = F.api("repos/%s/issues/%s" % (full, issue)), F.api("repos/%s/commits/dev" % full)

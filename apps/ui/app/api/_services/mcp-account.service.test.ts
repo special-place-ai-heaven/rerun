@@ -9,7 +9,7 @@ import { fakeSupabase, type FakeSupabase, type SupabaseCall } from '@/test/supab
 import type { ServiceManifest } from '@/lib/services/manifest'
 import type { InstalledService } from '@/lib/services/types'
 
-import { changeAgentHandle, createAgent, deleteAgent, renameAgent } from './agent.service'
+import { changeAgentHandle, createAgent, deleteAgent, duplicateAgent, renameAgent } from './agent.service'
 import { LOCKED_WRITE_ERROR } from './agent-content.service'
 import { declareService } from './agent-setup.service'
 import { resolveAgentTarget } from './chat.service'
@@ -19,7 +19,7 @@ import { allocateServiceInstance, listInstalledServices, loadManifest, uninstall
 vi.mock('@/supabase/serviceRole', () => ({ createServiceRoleClient: vi.fn() }))
 vi.mock('@/lib/engine/client')
 vi.mock('./workspace-engine.service', () => ({ findWorkspaceEngine: vi.fn(), getConnectionForAgent: vi.fn(), getWorkspaceConnection: vi.fn() }))
-vi.mock('./agent.service', () => ({ changeAgentHandle: vi.fn(), createAgent: vi.fn(), deleteAgent: vi.fn(), moveAgentToBox: vi.fn(), renameAgent: vi.fn() }))
+vi.mock('./agent.service', () => ({ changeAgentHandle: vi.fn(), createAgent: vi.fn(), deleteAgent: vi.fn(), duplicateAgent: vi.fn(), moveAgentToBox: vi.fn(), renameAgent: vi.fn() }))
 vi.mock('./agent-setup.service', () => ({ declareService: vi.fn(), installServiceSlugs: vi.fn() }))
 vi.mock('./chat.service', () => ({ ensureSessionRow: vi.fn(), resolveAgentTarget: vi.fn() }))
 vi.mock('./services.service', () => ({
@@ -142,6 +142,68 @@ describe('dispatchAccountTool', () => {
             await expect(dispatchAccountTool(workspaceActor(WORKSPACE_ID), 'create_agent', { name: 'Scout', spaceId: 'box-own' })).resolves.toMatchObject({ agentId: 'agent-new', spaceId: 'box-own', active: true })
 
             expect(createAgent).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: WORKSPACE_ID, spaceId: 'box-own', actor: ACTOR }))
+        })
+    })
+
+    describe('duplicate_agent', () => {
+        const copy = (n: number, disabledAt: string | null = null) => ({ agent: { id: `agent-copy-${n}`, name: `Scout ${n}`, handle: `scout-${n}`, disabled_at: disabledAt }, schedules: [], triggers: [] })
+
+        beforeEach(() => {
+            vi.mocked(resolveAgentTarget).mockResolvedValue({ conn: {}, engineAgentId: 'engine-own', contentLocked: false } as never)
+            vi.mocked(listSchedules).mockResolvedValue([])
+        })
+
+        it.each([0, 11, 2.5, '3'])('refuses count %s before copying anything', async count => {
+            await expect(dispatchAccountTool(workspaceActor(WORKSPACE_ID), 'duplicate_agent', { agentId: 'agent-own', count })).rejects.toThrow('count must be an integer from 1 to 10.')
+
+            expect(duplicateAgent).not.toHaveBeenCalled()
+        })
+
+        it.each(['agent-foreign', 'agent-missing'])('refuses %s', async agentId => {
+            await expect(dispatchAccountTool(workspaceActor(WORKSPACE_ID), 'duplicate_agent', { agentId })).rejects.toThrow('Coworker not found')
+
+            expect(duplicateAgent).not.toHaveBeenCalled()
+        })
+
+        it('refuses a coworker with scheduled tasks, naming them, since each copy would run them again', async () => {
+            vi.mocked(listSchedules).mockResolvedValue([{ slug: 'daily-digest', name: 'Daily digest', enabled: false }] as never)
+
+            await expect(dispatchAccountTool(workspaceActor(WORKSPACE_ID), 'duplicate_agent', { agentId: 'agent-own' })).rejects.toThrow(/Daily digest/)
+
+            expect(duplicateAgent).not.toHaveBeenCalled()
+        })
+
+        it('makes the copies one after the other in the Box of the source', async () => {
+            vi.mocked(duplicateAgent).mockResolvedValueOnce(copy(1) as never).mockResolvedValueOnce(copy(2) as never).mockResolvedValueOnce(copy(3) as never)
+
+            await expect(dispatchAccountTool(workspaceActor(WORKSPACE_ID), 'duplicate_agent', { agentId: 'agent-own', count: 3 })).resolves.toEqual({
+                copies: [1, 2, 3].map(n => ({ id: `agent-copy-${n}`, name: `Scout ${n}`, handle: `scout-${n}`, enabled: true })),
+                schedules: 0,
+            })
+
+            expect(duplicateAgent).toHaveBeenCalledTimes(3)
+            expect(duplicateAgent).toHaveBeenCalledWith({ actor: ACTOR, agentRowId: 'agent-own', workspaceId: WORKSPACE_ID, spaceId: 'box-own' })
+        })
+
+        it('says when a copy came back switched off for lack of a free slot', async () => {
+            vi.mocked(duplicateAgent).mockResolvedValueOnce(copy(1) as never).mockResolvedValueOnce(copy(2, '2026-11-13T00:00:00.000Z') as never)
+
+            const result = (await dispatchAccountTool(workspaceActor(WORKSPACE_ID), 'duplicate_agent', { agentId: 'agent-own', count: 2 })) as { copies: { enabled: boolean }[]; note?: string }
+
+            expect(result.copies.map(c => c.enabled)).toEqual([true, false])
+            expect(result.note).toMatch(/1 of the 2 copies came back switched off/)
+        })
+
+        it('names the copies already made when a later one fails', async () => {
+            vi.mocked(duplicateAgent).mockResolvedValueOnce(copy(1) as never).mockRejectedValueOnce(new Error('engine down'))
+
+            await expect(dispatchAccountTool(workspaceActor(WORKSPACE_ID), 'duplicate_agent', { agentId: 'agent-own', count: 2 })).rejects.toThrow(/Copy 2 of 2 failed \(engine down\)\. Already made: agent-copy-1\./)
+        })
+
+        it('refuses a destination Box of another workspace', async () => {
+            await expect(dispatchAccountTool(workspaceActor(WORKSPACE_ID), 'duplicate_agent', { agentId: 'agent-own', spaceId: 'box-foreign' })).rejects.toThrow('Box not found')
+
+            expect(duplicateAgent).not.toHaveBeenCalled()
         })
     })
 

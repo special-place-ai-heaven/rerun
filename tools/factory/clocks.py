@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import limits as L
 
 RETRY_BACKOFF_S = (60, 120, 240)
-_ERR = ("provider_overloaded", "429", "rate limit")
+_ERR = ("provider_overloaded", "429", "rate limit", "sign-in renewed during the run", "403 attention required")
 _ROOM = ("builders are already active", "GB free, floor is", "of memory available, floor is", "/data/work is over")
 
 

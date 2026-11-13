@@ -49,6 +49,14 @@ export const planLimitsSchema = z.object({
 })
 export type PlanLimits = z.infer<typeof planLimitsSchema>
 
+// How long a Claude sign-in has left and whether the engine is due to renew it. Derived values
+// only: never the token, the refresh token or the expiry time.
+export const signInLeftSchema = z.object({
+    minutesLeft: z.number().int().nonnegative(),
+    renewalDue: z.boolean(),
+})
+export type SignInLeft = z.infer<typeof signInLeftSchema>
+
 // The models a subscription's own CLI says it serves, asked of the binary the box runs (Codex's
 // `model/list`, Claude Code's `supportedModels`). Codex answers for the account: an old binary has
 // never heard of a new model, a free plan is not offered a paid one, and `outdated` tells the two
@@ -93,6 +101,9 @@ export const connectionSummarySchema = connectionConfigSchema.extend({
     credentialRejected: z.boolean().default(false),
     // Defaulted rather than required: an engine older than plan limits answers without it.
     planLimits: planLimitsSchema.nullable().default(null),
+    // Optional rather than defaulted: hand-built summaries in tests need no new field, and an
+    // engine older than it answers without it. Null when the provider has no renewable sign-in.
+    signIn: signInLeftSchema.nullable().optional(),
     cliModels: cliModelsSchema.nullable().default(null),
     // The models an API-key provider with a live catalog reaches today (OpenCode). Null on every
     // other provider, and on an engine older than it: the hub then falls back on its snapshot.

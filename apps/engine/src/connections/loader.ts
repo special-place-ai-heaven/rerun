@@ -5,6 +5,7 @@ import { connectionConfigPath, connectionEnvPath, connectionsDir } from '../conf
 import { readEnvFile } from '../lib/env-file.js'
 import { env } from '../config/env.js'
 import { isCredentialRejected } from './credential-rejections.js'
+import { claudeSignInLeft } from './claude-token.js'
 import { readCliModels } from './cli-models.js'
 import { readPlanLimits } from './plan-limits.js'
 import { opencodeProviderModels } from './opencode-catalog.js'
@@ -48,6 +49,7 @@ export function toSummary(connection: LoadedConnection): ConnectionSummary {
         connected: isConnected(connection),
         credentialRejected: isCredentialRejected(connection.id),
         planLimits: readPlanLimits(connection.id),
+        signIn: connection.config.provider === 'claude' ? claudeSignInLeft(connection) : null,
         cliModels: readCliModels(connection.id),
         providerModels: connection.config.provider === 'opencode' ? opencodeProviderModels() : null,
         discoveredModels: connection.config.provider === 'custom' ? customDiscoveredModels(connection.id) : null,

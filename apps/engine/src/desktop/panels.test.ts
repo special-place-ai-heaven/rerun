@@ -19,10 +19,22 @@ describe('desktop panels', () => {
         process.env.RERUN_API_KEY = 'secret-key'
         const config = dockConfig('/icons') + barConfig()
         expect(config).not.toContain('secret-key')
-        expect(config).toContain('Bearer $RERUN_DESKTOP_TOKEN')
+        expect(config).toContain(`printf 'Authorization: Bearer %s\\n' "$RERUN_DESKTOP_TOKEN" |`)
         expect(config).not.toContain('RERUN_API_KEY')
         expect(barConfig()).toContain(`printf '%s' "$RERUN_DESKTOP_AGENT_NAME"`)
         delete process.env.RERUN_API_KEY
+    })
+
+    it('passes the session token to curl on stdin, never in its arguments', () => {
+        const config = dockConfig('/icons')
+        const commands = config.split('\n').filter((line) => line.startsWith('execp_lclick_command = '))
+        expect(commands).toHaveLength(DOCK_APPS.length)
+        for (const line of commands) {
+            const [, curl] = line.split(' | ')
+            expect(curl).toContain('-H @-')
+            expect(curl).not.toContain('RERUN_DESKTOP_TOKEN')
+            expect(curl).not.toContain('Authorization')
+        }
     })
 
     it('shows the name on the left and the time on the right of the top bar', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chunkReasoningDelta, openrouterReasoningMiddleware, reasoningFetch, responseReasoning } from './openrouter-reasoning.js'
+import { chunkReasoningDelta, openrouterReasoningMiddleware, reasoningFetch, reasoningFetchFor, responseReasoning } from './openrouter-reasoning.js'
 
 const chunk = (delta: Record<string, unknown>) => ({ type: 'raw', rawValue: { choices: [{ index: 0, delta }] } })
 
@@ -136,5 +136,21 @@ describe('OpenRouter reasoning', () => {
 
         expect((result as any).providerMetadata).toEqual({ openrouter: { usage: { cost: 0.002 } } })
         expect((result as any).usage.inputTokenDetails.cacheWriteTokens).toBe(40)
+    })
+})
+
+describe('reasoningFetchFor', () => {
+    it('adds the level as the effort of the reasoning request', async () => {
+        const sent: string[] = []
+        const original = globalThis.fetch
+        globalThis.fetch = (async (_input: unknown, init?: { body?: unknown }) => (sent.push(String(init?.body)), new Response('{}'))) as typeof fetch
+        try {
+            await reasoningFetchFor('high')('https://openrouter.ai/api/v1/chat/completions', { method: 'POST', body: JSON.stringify({ model: 'qwen' }) })
+            await reasoningFetchFor(undefined)('https://openrouter.ai/api/v1/chat/completions', { method: 'POST', body: JSON.stringify({ model: 'qwen' }) })
+        } finally {
+            globalThis.fetch = original
+        }
+        expect(JSON.parse(sent[0]).reasoning).toEqual({ enabled: true, effort: 'high' })
+        expect(JSON.parse(sent[1]).reasoning).toEqual({ enabled: true })
     })
 })

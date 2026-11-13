@@ -37,7 +37,14 @@ export function closesReasoning(part: { type: string; delta?: unknown }): boolea
  * format has no room for. `@ai-sdk/openai` sends the request, so the field has to be added on its
  * way out, and the usage frame asked for in the same pass.
  */
-export const reasoningFetch: FetchFunction = async (input, init) => {
+export function reasoningFetchFor(level?: string | null): FetchFunction {
+    const request = level ? { ...REASONING_REQUEST, effort: level } : REASONING_REQUEST
+    return (input, init) => withReasoning(request, input, init)
+}
+
+export const reasoningFetch: FetchFunction = reasoningFetchFor(undefined)
+
+const withReasoning = async (request: Record<string, unknown>, ...[input, init]: Parameters<FetchFunction>): ReturnType<FetchFunction> => {
     if (typeof init?.body !== 'string') return fetch(input, init)
     let body: Record<string, unknown>
     try {
@@ -45,7 +52,7 @@ export const reasoningFetch: FetchFunction = async (input, init) => {
     } catch {
         return fetch(input, init)
     }
-    return fetch(input, { ...init, body: JSON.stringify({ ...body, usage: body.usage ?? USAGE_REQUEST, reasoning: body.reasoning ?? REASONING_REQUEST }) })
+    return fetch(input, { ...init, body: JSON.stringify({ ...body, usage: body.usage ?? USAGE_REQUEST, reasoning: body.reasoning ?? request }) })
 }
 
 function reasoningOf(delta: unknown): string | undefined {

@@ -1,7 +1,9 @@
 import type { streamText } from 'ai'
 import type { Provider } from '@rerun/contracts'
 import { opencodeModel } from '../connections/opencode-catalog.js'
+import { logger } from '../lib/logger.js'
 import { behaviourOf } from './opencode.js'
+import { thinkingSettingsFor, type ThinkingLevel } from './thinking.js'
 
 type ProviderOptions = NonNullable<Parameters<typeof streamText>[0]['providerOptions']>
 
@@ -18,10 +20,19 @@ export const REASONING_OPTIONS: Partial<Record<Provider, ProviderOptions>> = {
 
 // An OpenCode model is asked the way its format asks, and only when OpenCode says it reasons: the
 // chat format has no field for it, the model reasons or not on its own.
-export function reasoningProviderOptions(provider: Provider, model = ''): ProviderOptions | undefined {
-    if (provider !== 'opencode') return REASONING_OPTIONS[provider]
-    if (!opencodeModel(model)?.reasoning) return undefined
-    return REASONING_OPTIONS[behaviourOf(provider, model)]
+const LEVEL_UNSUPPORTED = new Set<string>()
+
+// The level is read where the provider has a field for it (thinking.ts holds the mapping). A provider
+// without one ignores it and says so once.
+export function reasoningProviderOptions(provider: Provider, model = '', level?: ThinkingLevel | null): ProviderOptions | undefined {
+    const target = provider === 'opencode' ? behaviourOf(provider, model) : provider
+    if (provider === 'opencode' && !opencodeModel(model)?.reasoning) return undefined
+    if (level && (target === 'anthropic' || target === 'openai' || target === 'google')) return thinkingSettingsFor(target, model, level).providerOptions
+    if (level && target !== 'claude' && target !== 'rerun' && target !== 'openrouter' && !LEVEL_UNSUPPORTED.has(provider)) {
+        LEVEL_UNSUPPORTED.add(provider)
+        logger.info({ provider }, 'thinking level ignored: provider cannot take it')
+    }
+    return REASONING_OPTIONS[target]
 }
 
 // One level deep on purpose: `openai` already carries the `promptCacheKey` that applyCaching put

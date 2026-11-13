@@ -307,8 +307,8 @@ class Dispatcher:
         self.save()
         args = {"agentId": agent, "message": message, "waitSeconds": WAIT_S}
         if state in GOALS:
-            args["goal"] = GOALS[state]
-            args["turnLimit"] = 3
+            # One object, as the account tool takes it (runGoalSchema in packages/contracts/src/run-goal.ts).
+            args["goal"] = {"lastLineForms": GOALS[state], "turnLimit": 3}
         try:
             r = self.account("send_message", args)
         except Error as e:

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { billedMicrosOf } from '@rerun/contracts'
 
-import { hitlCallBefore, hitlCallKind, isLatestUserMessage, spentAfter } from './hitl-receipts'
+import { hitlCallBefore } from './hitl-receipts'
 
 const approvalCall = { type: 'tool-request_approval', toolCallId: 'a1', input: { approvals: [{ action: 'Send the email' }] } }
 

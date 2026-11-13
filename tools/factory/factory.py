@@ -379,6 +379,24 @@ def unlink_links(d):
             unlink_links(e.path)
 
 
+def empty_on_old_base(p, path, branch):
+    """(old sha7, new sha7, base) when the worktree has no commit ahead of its base, nothing uncommitted and HEAD is not
+    the current origin/<base>; else None (today's EXISTS)."""
+    base = run([GIT, "config", "branch.%s.factorybase" % branch], cwd=p, check=False).stdout.strip()
+    if not base or run([GIT, "fetch", "--quiet", "origin", base], cwd=p, check=False).returncode:
+        return None
+    ref = "refs/remotes/origin/" + base
+    head = run([GIT, "rev-parse", "HEAD"], cwd=path, check=False)
+    new = run([GIT, "rev-parse", "--verify", "--quiet", ref], cwd=p, check=False)
+    ahead = run([GIT, "rev-list", "--count", "%s..HEAD" % ref], cwd=path, check=False)
+    dirty = run([GIT, "status", "--porcelain"], cwd=path, check=False)
+    if 0 != head.returncode + new.returncode + ahead.returncode + dirty.returncode:
+        return None
+    if ahead.stdout.strip() != "0" or dirty.stdout.strip() or head.stdout.strip() == new.stdout.strip():
+        return None
+    return head.stdout.strip()[:7], new.stdout.strip()[:7], base
+
+
 def cmd_wt(a):
     if not a or a[0] not in ("new", "done", "list", "sweep"):
         die("usage: wt new <repo> <issue> <chunk> [--base BRANCH] [--owner NAME] | wt done <repo> <issue> <chunk> | wt list | wt sweep [--apply]")
@@ -421,9 +439,7 @@ def cmd_wt(a):
                 pass
         print("removed worktree %s and local branch %s" % (path, branch))
         return
-    if os.path.isdir(path):
-        print("EXISTS %s (branch %s). Work there, or `wt done` first." % (path, branch))
-        return
+    existing = os.path.isdir(path)  # decided under the lock below: an empty worktree on an old base is replaced
     st = shutil.disk_usage("/data")
     if st.free / 2**30 < MIN_FREE_GB:
         die("/data has %.0f GB free, floor is %d GB. Tell @boss." % (st.free / 2**30, MIN_FREE_GB))
@@ -434,7 +450,8 @@ def cmd_wt(a):
         wt_sweep(True, only="REMOVE")  # finished worktrees go first; RESCUE stays with the explicit `wt sweep --apply`
     if du_gb(WORK) > MAX_WORK_GB:
         die("/data/work is over %d GB. Tell @boss; old worktrees need `wt done`." % MAX_WORK_GB)
-    cap_check()  # early refusal before any fetch or push; repeated under the lock below
+    if not existing:
+        cap_check()  # early refusal before any fetch or push; repeated under the lock below
     plan_check(full, issue)
     p = ensure_clone(full)
     info = api("repos/%s" % full)
@@ -449,11 +466,26 @@ def cmd_wt(a):
         print("created job branch %s from %s" % (base, default))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with builder_lock():  # count and create together, so two calls cannot both take the last slot
+        replaced = None
         if os.path.isdir(path):
-            print("EXISTS %s (branch %s). Work there, or `wt done` first." % (path, branch))
-            return
+            replaced = empty_on_old_base(p, path, branch)
+            if not replaced:
+                print("EXISTS %s (branch %s). Work there, or `wt done` first." % (path, branch))
+                return
+            base = replaced[2]
+            unlink_links(path)
+            run([GIT, "worktree", "remove", "--force", path], cwd=p)
+            run([GIT, "worktree", "prune"], cwd=p, check=False)
+            run([GIT, "branch", "-D", branch], cwd=p, check=False)  # nothing ahead of origin: no local-only commit is lost
+            for f in (marker(repo, branch), reg_path(repo, "%s-%s" % (issue, chunk))):
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
         cap_check()
         run([GIT, "worktree", "add", "--quiet", "-b", branch, path, "origin/" + base], cwd=p)
+        if replaced:
+            print("REPLACED empty worktree %s (was at %s, base now %s)" % (path, replaced[0], replaced[1]))
     run([GIT, "config", "branch.%s.factorybase" % branch, base], cwd=p)
     with open(reg_path(repo, "%s-%s" % (issue, chunk)), "w") as f:
         json.dump({"repo": full, "issue": issue, "chunk": chunk, "branch": branch, "base": base,

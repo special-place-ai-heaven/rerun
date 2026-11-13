@@ -285,6 +285,49 @@ class BuilderCap(FactoryCase):
         self.assertTrue(self.made("3"))
         self.assertFalse(os.path.exists(self.lock))
 
+    def advance_origin(self):
+        seed = os.path.join(self.tmp, "seed")
+        self.commit(seed, "later.txt", "later\n")
+        git(seed, "push", "--quiet", self.origin, "HEAD:refs/heads/dev")
+        return git(seed, "rev-parse", "HEAD")
+
+    def test_wt_new_replaces_an_empty_worktree_on_an_old_base(self):
+        code, out = self.new("1")
+        self.assertEqual(code, 0, out)
+        path = os.path.join(F.WT, REPO, "7-1")
+        old = git(path, "rev-parse", "HEAD")
+        newer = self.advance_origin()
+        code, out = self.new("1")
+        self.assertEqual(code, 0, out)
+        self.assertIn("REPLACED empty worktree %s (was at %s, base now %s)" % (path, old[:7], newer[:7]), out)
+        self.assertEqual(git(path, "rev-parse", "HEAD"), newer)
+        self.assertTrue(self.has_branch("chunk/7-1"))
+
+    def test_wt_new_keeps_a_worktree_with_a_commit(self):
+        self.new("1")
+        path = os.path.join(F.WT, REPO, "7-1")
+        sha = self.commit(path)
+        self.advance_origin()
+        code, out = self.new("1")
+        self.assertEqual(code, 0, out)
+        self.assertIn("EXISTS", out)
+        self.assertNotIn("REPLACED", out)
+        self.assertEqual(git(path, "rev-parse", "HEAD"), sha)
+
+    def test_wt_new_keeps_an_empty_worktree_already_at_the_base(self):
+        self.new("1")
+        code, out = self.new("1")
+        self.assertIn("EXISTS", out)
+
+    def test_wt_new_keeps_an_uncommitted_worktree(self):
+        self.new("1")
+        path = os.path.join(F.WT, REPO, "7-1")
+        write(path, "wip.txt", "wip\n")
+        self.advance_origin()
+        code, out = self.new("1")
+        self.assertIn("EXISTS", out)
+        self.assertTrue(os.path.exists(os.path.join(path, "wip.txt")))
+
     def test_wt_new_at_the_cap_refuses(self):
         self.wt(chunk="1")
         self.wt(chunk="2")

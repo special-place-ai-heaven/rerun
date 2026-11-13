@@ -19,6 +19,7 @@ import { aiStatusTools } from './builtin/ai-status.js'
 import { browserTools } from './builtin/browser.js'
 import { visionTools } from './builtin/vision.js'
 import { computerTools, runOffersComputer } from './builtin/computer.js'
+import { skimPagesEnabled, skimPagesTools } from './builtin/skim-pages.js'
 import { notifyTools } from './builtin/notify.js'
 import { hubTools } from './builtin/hub.js'
 import { paidDataTools } from './builtin/paid-data.js'
@@ -62,6 +63,7 @@ export async function buildTools(ctx: RunContext): Promise<{ tools: ToolSet; clo
     if (cfg.vision) Object.assign(tools, visionTools(ctx))
     const computer = runOffersComputer(ctx.agent.config, ctx.provider, ctx.model, ctx.agent.resolved.connection) ? computerTools(ctx) : null
     if (computer) Object.assign(tools, computer.tools)
+    if (skimPagesEnabled(ctx.agent)) Object.assign(tools, skimPagesTools(ctx))
     if (cfg.notify) Object.assign(tools, notifyTools(ctx))
     if (cfg.hub) Object.assign(tools, hubTools(ctx))
     if (cfg.paidData && (await paidDataOffered())) Object.assign(tools, paidDataTools(ctx))

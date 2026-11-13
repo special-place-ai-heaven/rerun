@@ -567,6 +567,43 @@ class WtSweep(FactoryCase):
         open(os.path.join(d, name), "w").close()
         return os.path.join(d, name)
 
+    def test_sweep_of_six_worktrees_fetches_origin_once(self):
+        for c in "123456":
+            p = self.wt(chunk=c)
+            self.pr(c, 9, "MERGED", self.commit(p))
+            git(p, "push", "--quiet", "origin", "chunk/7-" + c)
+        fetches, real = [], F.run
+
+        def counting(cmd, *a, **k):
+            if "fetch" in cmd:
+                fetches.append(cmd)
+            return real(cmd, *a, **k)
+        with mock.patch.object(F, "run", counting):
+            code, out = self.sweep("--apply")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(fetches), 1, fetches)
+        self.assertEqual(out.count("REMOVE"), 7, out)  # six lines and the summary
+
+    def behind_merged_head(self):
+        p = self.wt(chunk="1")
+        self.commit(p, "a.txt")
+        head = self.commit(p, "b.txt")
+        git(p, "push", "--quiet", "origin", "chunk/7-1")
+        git(p, "reset", "--quiet", "--hard", "HEAD~1")
+        self.pr("1", 9, "MERGED", head)
+        return p
+
+    def test_worktree_behind_the_merged_pr_head_is_removed(self):
+        self.behind_merged_head()
+        code, out = self.sweep()
+        self.assertEqual(self.verdicts(out), {REPO + "/7-1": "REMOVE"}, out)
+
+    def test_worktree_behind_the_merged_pr_head_with_a_change_is_kept(self):
+        p = self.behind_merged_head()
+        write(p, "scratch.txt", "x\n")
+        code, out = self.sweep()
+        self.assertEqual(self.verdicts(out), {REPO + "/7-1": "KEEP"}, out)
+
     def test_dry_run_prints_verdicts_and_changes_nothing(self):
         p = self.wt(chunk="1")
         sha = self.commit(p)
@@ -733,11 +770,52 @@ class WtNewSweepAndInstall(BuilderCap):
         self.assertTrue(self.made("3"))
         self.assertFalse(os.path.isdir(p))
 
-    def test_below_the_cap_makes_no_pr_lookup(self):
-        self.wt(chunk="1")
+    def merged(self, chunk):
+        p = self.wt(chunk=chunk)
+        sha = self.commit(p)
+        git(p, "push", "--quiet", "origin", "chunk/7-" + chunk)
+        self.prs["chunk/7-" + chunk] = [{"number": 9, "state": "MERGED", "headRefOid": sha}]
+        return p
+
+    def test_below_the_cap_removes_a_merged_worktree(self):
+        p = self.merged("1")
         code, out = self.new("3")
         self.assertEqual(code, 0, out)
-        self.assertEqual(self.lookups, [])
+        self.assertFalse(os.path.isdir(p))
+        self.assertTrue(self.made("3"))
+
+    def test_five_simultaneous_wt_new_at_the_limit_of_merged_worktrees_all_get_one(self):
+        olds = [self.merged(c) for c in "12345"]
+        codes, out = {}, io.StringIO()
+
+        def one(chunk):
+            try:
+                F.cmd_wt(["new", REPO, "7", chunk])
+                codes[chunk] = 0
+            except SystemExit as e:
+                codes[chunk] = e.code
+
+        with mock.patch.object(F, "MAX_BUILDERS", 5), self.wt_new_fakes(), \
+                mock.patch.object(F, "pr_lookup", lambda full, branch: self.prs.get(branch, [])), \
+                mock.patch.object(F, "install_deps", lambda p: None), contextlib.redirect_stdout(out):
+            ts = [threading.Thread(target=one, args=(c,)) for c in "abcde"]
+            [t.start() for t in ts]
+            [t.join(120) for t in ts]
+        self.assertEqual(sorted(codes.values()), [0] * 5, out.getvalue())
+        self.assertTrue(all(self.made(c) for c in "abcde"), out.getvalue())
+        self.assertFalse(any(os.path.isdir(p) for p in olds))
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_refusal_at_a_limit_of_open_prs_says_why_for_each_kept_worktree(self):
+        for c in "12":
+            p = self.wt(chunk=c)
+            self.prs["chunk/7-" + c] = [{"number": 20 + int(c), "state": "OPEN", "headRefOid": self.commit(p)}]
+        code, out = self.new("3")
+        self.assertEqual(code, 2, out)
+        self.assertIn("sweep: 2 KEEP, 0 REMOVE, 0 RESCUE", out)
+        self.assertIn("PR #21 open", out)
+        self.assertIn("PR #22 open", out)
+        self.assertEqual(len([l for l in out.splitlines() if l.startswith("KEEP")]), 2, out)
 
     def test_cap_leaves_an_idle_unpushed_worktree_alone(self):
         p = self.wt(chunk="1")

@@ -28,7 +28,7 @@ def max_builders():
 
 
 MIN_FREE_MEM_GB, MEMINFO = 4, "/proc/meminfo"
-LOCK_WAIT_S, LOCK_STALE_S = 60, 900  # stale > the longest hold (`git worktree add`, run() timeout 300 s)
+LOCK_WAIT_S, LOCK_STALE_S = 180, 900  # stale > the longest hold (`git worktree add`, run() timeout 300 s)
 WT_IDLE_HOURS = 48  # `wt sweep`: no new commit and no `wt new` for this long counts as idle
 QUEUE_LIMIT_S, SLICE_S = 30 * 60, 450
 PR_HEADS = ["## Done", "## Evidence", "## Not changed", "## Unsure", "## Open", "## Next owner and their done-test"]
@@ -341,10 +341,16 @@ def on_remote(p, sha):
     return bool(run([GIT, "for-each-ref", "--contains", sha, "refs/remotes/origin"], cwd=p).stdout.strip())
 
 
+SWEEP_FETCH = None  # while a sweep runs: {clone path: fetch worked}; one fetch per clone per sweep
+
+
 def unsaved(p, path, branch):
     """Tips of the worktree and its branch that are on no remote branch, or None when origin cannot be fetched."""
     # --prune: a tracking ref of a branch deleted on GitHub must not count as proof
-    if run([GIT, "fetch", "--quiet", "--prune", "origin"], cwd=p, check=False).returncode:
+    if SWEEP_FETCH is not None and p in SWEEP_FETCH:  # a sweep fetched this clone once already
+        if not SWEEP_FETCH[p]:
+            return None
+    elif run([GIT, "fetch", "--quiet", "--prune", "origin"], cwd=p, check=False).returncode:
         return None
     tips = {run([GIT, "rev-parse", "--verify", "--quiet", ref], cwd=c, check=False).stdout.strip()
             for c, ref in ((path, "HEAD"), (p, "refs/heads/" + branch)) if os.path.isdir(c)} - {""}
@@ -446,12 +452,14 @@ def cmd_wt(a):
     mem = avail_mem_gb()
     if mem is not None and mem < MIN_FREE_MEM_GB:
         die("%.1f GB of memory available, floor is %d GB. Tell @boss." % (mem, MIN_FREE_MEM_GB))
-    if du_gb(WORK) > MAX_WORK_GB or cap_check(quiet=True):
-        wt_sweep(True, only="REMOVE")  # finished worktrees go first; RESCUE stays with the explicit `wt sweep --apply`
-    if du_gb(WORK) > MAX_WORK_GB:
-        die("/data/work is over %d GB. Tell @boss; old worktrees need `wt done`." % MAX_WORK_GB)
-    if not existing:
-        cap_check()  # early refusal before any fetch or push; repeated under the lock below
+    os.makedirs(STATE, exist_ok=True)
+    with builder_lock():  # one sweep at a time: a second call waits, then finds the room the first one made
+        summary, kept = wt_sweep(True, only="REMOVE", quiet=True)  # finished worktrees go first, at every call; RESCUE stays with the explicit `wt sweep --apply`
+        if du_gb(WORK) > MAX_WORK_GB:
+            die("/data/work is over %d GB. Tell @boss; old worktrees need `wt done`.\n%s\n%s" % (MAX_WORK_GB, summary, "\n".join(kept)))
+        if not existing and cap_check(quiet=True):
+            print("\n".join([summary] + kept))  # why there is no room
+            cap_check()  # early refusal before any fetch or push; repeated under the lock below
     plan_check(full, issue)
     p = ensure_clone(full)
     info = api("repos/%s" % full)
@@ -541,7 +549,12 @@ def sweep_verdict(full, r, d, path):
     if any(x.get("state", "").upper() == "OPEN" for x in prs):
         return "KEEP", "PR #%s open" % ", #".join(str(x["number"]) for x in prs if x.get("state", "").upper() == "OPEN"), prs
     sha = run([GIT, "rev-parse", "HEAD"], cwd=path).stdout.strip()
-    done = next((x for x in prs if x.get("headRefOid") == sha and x.get("state", "").upper() in ("MERGED", "CLOSED")), None)  # head must match: branch names are reused
+    def settled(x):  # head must match: branch names are reused. A merged PR also counts when our HEAD is an ancestor of its head
+        st = x.get("state", "").upper()
+        if x.get("headRefOid") == sha and st in ("MERGED", "CLOSED"):
+            return True
+        return st == "MERGED" and bool(x.get("headRefOid")) and run([GIT, "merge-base", "--is-ancestor", sha, x["headRefOid"]], cwd=path, check=False).returncode == 0
+    done = next((x for x in prs if settled(x)), None)
     if done and not left and not dirty:
         return "REMOVE", "PR #%s %s, nothing unpushed" % (done["number"], done["state"].lower()), prs
     h = age_h(reg_read(r, d))
@@ -554,14 +567,32 @@ def sweep_verdict(full, r, d, path):
     return "KEEP", "active: idle %dh, %s" % (idle, work or "no merged or closed PR"), prs
 
 
-def wt_sweep(apply, only=None):
-    """Dry run unless apply. REMOVE and RESCUE go through `wt done`, which saves unpushed commits or refuses."""
-    n = {"KEEP": 0, "REMOVE": 0, "RESCUE": 0}
-    for r, d, path in wt_dirs():
+def wt_sweep(apply, only=None, quiet=False):
+    """Dry run unless apply. REMOVE and RESCUE go through `wt done`, which saves unpushed commits or refuses.
+    One `git fetch --prune origin` per clone. With quiet, KEEP lines are not printed; returns (summary line, KEEP lines)."""
+    global SWEEP_FETCH
+    n, kept = {"KEEP": 0, "REMOVE": 0, "RESCUE": 0}, []
+    dirs = wt_dirs()
+    SWEEP_FETCH = {}
+    try:
+        for r in sorted({r for r, _, _ in dirs}):
+            p = os.path.join(REPOS, r)
+            SWEEP_FETCH[p] = run([GIT, "fetch", "--quiet", "--prune", "origin"], cwd=p, check=False).returncode == 0
+        return _sweep_each(dirs, apply, only, quiet, n, kept)
+    finally:
+        SWEEP_FETCH = None
+
+
+def _sweep_each(dirs, apply, only, quiet, n, kept):
+    for r, d, path in dirs:
         full = reg_read(r, d).get("repo") or repo_full(r)  # shortcut: a worktree older than the register is assumed under OWNERS[0]
         verdict, why, prs = sweep_verdict(full, r, d, path)
         n[verdict] += 1
-        print("%-6s %s/%s  %s" % (verdict, r, d, why))
+        line = "%-6s %s/%s  %s" % (verdict, r, d, why)
+        if verdict == "KEEP":
+            kept.append(line)
+        if not (quiet and verdict == "KEEP"):
+            print(line)
         if not apply or verdict == "KEEP" or (only and verdict != only):
             continue
         try:
@@ -576,8 +607,11 @@ def wt_sweep(apply, only=None):
                 if m and m.group(1) in nums:
                     os.remove(os.path.join(sd, f))
                     print("deleted stale state %s" % f)
-    print("sweep: %d KEEP, %d REMOVE, %d RESCUE | %s" % (n["KEEP"], n["REMOVE"], n["RESCUE"],
-                                                     "applied" if apply else "dry run, nothing changed. `wt sweep --apply` acts on REMOVE and RESCUE"))
+    summary = "sweep: %d KEEP, %d REMOVE, %d RESCUE | %s" % (n["KEEP"], n["REMOVE"], n["RESCUE"],
+                                                          "applied" if apply else "dry run, nothing changed. `wt sweep --apply` acts on REMOVE and RESCUE")
+    if not quiet:
+        print(summary)
+    return summary, kept
 
 
 def wt_context():

@@ -26,7 +26,7 @@ import { listAgentIndex, setAgentStatus } from '../db/repos/agents.js'
 import { appendMessage, lastMessageId, listSessionAuthorIds, setMessageToolCalls } from '../db/repos/messages.js'
 import type { MessageRow } from '../db/schema.js'
 import { isSharedConversation, signText } from './message-authors.js'
-import { bumpRunStep, cancelRun, failRun, finishRun, setRunContext, startRun } from '../db/repos/runs.js'
+import { bumpRunStep, cancelRun, failRun, finishRun, setRunContext, startRun, updateRunLive } from '../db/repos/runs.js'
 import { insertRunStep, insertToolCall } from '../db/repos/telemetry.js'
 import { touchSession } from '../db/repos/sessions.js'
 import { logger } from '../lib/logger.js'
@@ -46,6 +46,7 @@ import { stepWithScreenshots } from './screenshots.js'
 import { authorMetadata, sendNotification, type NotificationKind } from './notify.js'
 import { emitRunTerminal } from './run-events.js'
 import { ClaudeSignInRenewedError, classifyFinishReason, classifyProviderError, errorMessageOf, isFailedFinish, ProviderRefusedError, ProviderStreamCutError, RUN_ERROR_CODES, refusalReason, unreachableEndpointError, type RunErrorCode } from './provider-errors.js'
+import { createLiveCounter, type LiveCounter } from './live-counter.js'
 import { armBudgetLatch, clearBudgetLatch, RERUN_BUDGET_ERROR_CODE } from './budget-latch.js'
 
 export type RunOutcome = { kind: 'done' | 'error' | 'cancelled'; error?: string; errorCode?: RunErrorCode | null }
@@ -237,6 +238,10 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
     let spawnToken: string | undefined
     let codexThreadId: string | undefined
     let steps = 0
+    // A CLI turn is one SDK step however many tools the CLI ran inside it, so its progress is the
+    // tool calls seen on the stream: `step_count` means "tool calls" for these providers.
+    let live: LiveCounter | undefined
+    const stepsToWrite = (): number => Math.max(steps, live?.snapshot().toolCalls ?? 0)
     const partialResults: PartialResult[] = []
     const skillProposals: SkillProposalNotice[] = []
 
@@ -279,6 +284,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
     const settle = async (settlement: Settlement): Promise<RunOutcome> => {
         if (settled) return settledPromise
         settled = true
+        live?.dispose()
 
         await appendP.catch(() => {})
 
@@ -301,7 +307,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
             if (replies && answerRow && !pending) await setMessageToolCalls(agent.id, answerRow.id, [quickRepliesCall(replies)]).catch(() => {})
             if (provider === 'rerun') clearBudgetLatch()
             if (provider === 'codex') await keepCodexThread().catch(() => forgetCodexThread(agent.id, sessionId))
-            await finishRun(agent.id, run.id, settlement.usage, steps, settlement.costMicros, contextUsage?.()).catch(() => {})
+            await finishRun(agent.id, run.id, settlement.usage, stepsToWrite(), settlement.costMicros, contextUsage?.()).catch(() => {})
             await touchSession(agent.id, sessionId).catch(() => {})
             text = settlement.text
             usage = settlement.usage
@@ -477,6 +483,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
         if (offersQuickReplies(agent.config)) quickReplies = resolvedModel.quickReplies
         const languageModel = resolvedModel.model
 
+        if (CLI_PROVIDERS.has(provider)) live = createLiveCounter({ flush: ({ toolCalls }) => updateRunLive(agent.id, run.id, { stepCount: toolCalls }) })
         let lastStepAt = Date.now()
         let runCostMicros: number | null = null
         const result = streamText({
@@ -499,6 +506,9 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
                     ...(!CLI_PROVIDERS.has(provider) && hitlStepLacksMessage(steps) ? { toolChoice: 'none' as const } : {}),
                 }
             },
+            onChunk: ({ chunk }) => {
+                if (chunk.type === 'tool-call') live?.addToolCall()
+            },
             onStepFinish: async step => {
                 steps += 1
                 const now = Date.now()
@@ -506,7 +516,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
                 lastStepAt = now
                 const stepCostMicros = costMicrosFrom(step.providerMetadata)
                 if (stepCostMicros !== null) runCostMicros = (runCostMicros ?? 0) + stepCostMicros
-                await bumpRunStep(agent.id, run.id, steps).catch(() => {})
+                await bumpRunStep(agent.id, run.id, stepsToWrite()).catch(() => {})
                 await recordStepTelemetry(agent.id, sessionId, run.id, provider, model, steps, durationMs, step, stepCostMicros).catch(err => logger.warn({ err: String(err), agent: agent.id }, 'record step telemetry failed'))
             },
             onError: async ({ error }) => {

@@ -12,10 +12,9 @@ import { isPlanLimitLatched } from '../connections/plan-limits.js'
 import { offersComputer } from '../tools/builtin/computer.js'
 import { startHeadlessRun } from './headless-run.js'
 import { sendNotification } from './notify.js'
-import { isBudgetLatched } from './budget-latch.js'
 import { agentHasLiveRun } from './run-control.js'
 import { nowIso } from '../lib/ids.js'
-import { agentDisabled, budgetExhausted, coworkerBusy, HttpError, subscriptionLimited } from '../lib/errors.js'
+import { agentDisabled, coworkerBusy, HttpError, subscriptionLimited } from '../lib/errors.js'
 import { logger } from '../lib/logger.js'
 
 const TICK_MS = 30_000
@@ -33,11 +32,8 @@ export async function fireSchedule(agentId: string, schedule: Schedule, opts?: {
     // after that run started. A schedule firing beside a live run (a chat, a call from another
     // coworker) would race it for the screen, so it stays due and fires on the tick after that run.
     if (!opts?.manual && agentHasLiveRun(agentId) && offersComputer(agent.config)) throw coworkerBusy()
-    // Resolved before markFired so a budget skip leaves the schedule due: it resumes on the first
-    // tick after the latch clears, with no session, no run and no notification in the meantime.
-    // Only the managed provider burns the workspace budget, so an agent on its own key still fires.
+    // Resolved before markFired so a skip leaves the schedule due.
     const override = await automationModel(agent, schedule, 'schedule')
-    if (!opts?.manual && override.provider === 'rerun' && isBudgetLatched()) throw budgetExhausted()
     if (!opts?.manual && override.connectionId && isPlanLimitLatched(override.connectionId)) throw subscriptionLimited()
     // Stamped before the launch, not after: a schedule whose run preparation keeps throwing would
     // otherwise stay due forever and re-fire on every 30s tick. The trade-off is at-most-once — a
@@ -72,7 +68,6 @@ export async function fireSchedule(agentId: string, schedule: Schedule, opts?: {
 }
 
 const SKIP_REASONS: Record<string, string> = {
-    budget_latched: 'rerun budget latched',
     coworker_busy: 'another run of the coworker is live',
     subscription_limited: 'subscription limit latched',
 }

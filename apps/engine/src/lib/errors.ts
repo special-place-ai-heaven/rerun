@@ -25,4 +25,3 @@ export const coworkerBusy = () => new HttpError(409, 'Another run of this cowork
 
 export const subscriptionLimited = () => new HttpError(429, "This coworker's subscription has hit its usage limit; scheduled runs are paused until it resets.", 'subscription_limited')
 
-export const budgetExhausted = () => new HttpError(402, 'The account behind Rerun models has no balance left; automated runs on Rerun models pause for ten minutes. Top it up, or switch to another model.', 'budget_latched')

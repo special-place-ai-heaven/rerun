@@ -4,9 +4,8 @@ import { createSession } from '../db/repos/sessions.js'
 import { markFired, type Trigger } from '../triggers/loader.js'
 import { startHeadlessRun } from './headless-run.js'
 import { sendNotification } from './notify.js'
-import { isBudgetLatched } from './budget-latch.js'
 import { nowIso } from '../lib/ids.js'
-import { agentDisabled, budgetExhausted } from '../lib/errors.js'
+import { agentDisabled } from '../lib/errors.js'
 import { logger } from '../lib/logger.js'
 
 // Deliberately without the in-flight collapsing fireSchedule does: two calls to the same webhook
@@ -15,7 +14,6 @@ export async function fireTrigger(agentId: string, trigger: Trigger, message: st
     const agent = await getAgent(agentId)
     if (!agent.config.enabled) throw agentDisabled()
     const override = await automationModel(agent, trigger, 'trigger')
-    if (override.provider === 'rerun' && isBudgetLatched()) throw budgetExhausted()
     const session = await createSession(agentId, `trigger: ${trigger.slug}`, undefined, 'trigger')
     await sendNotification({
         event: 'agent.session.created',

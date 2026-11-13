@@ -110,7 +110,6 @@ const { listMessages } = await import('../db/repos/messages.js')
 const { listRunSteps, listToolCalls } = await import('../db/repos/telemetry.js')
 const { runAgent } = await import('./loop.js')
 const { abortRun, claimSession, sessionClaim } = await import('./run-control.js')
-const { armBudgetLatch, clearBudgetLatch, isBudgetLatched } = await import('./budget-latch.js')
 const { insertAgentIndex } = await import('../db/repos/agents.js')
 const { createConnection } = await import('../connections/store.js')
 const { isCredentialRejected, recordCredentialRejected } = await import('../connections/credential-rejections.js')
@@ -183,7 +182,6 @@ describe('run loop paths', () => {
         prep.closeError = null
         curator.calls = []
         recalls.length = 0
-        clearBudgetLatch()
     })
 
     describe('when preparation fails', () => {
@@ -474,38 +472,6 @@ describe('run loop paths', () => {
             expect(answer?.contentJson).toBe(JSON.stringify([{ type: 'text', text: 'Which angle do you want?' }]))
             expect(sent.find(n => n.event === 'agent.notification')).toBeUndefined()
             expect(completions()[0]).toMatchObject({ message: 'Which angle do you want?' })
-        })
-    })
-
-    describe('the managed-model budget latch', () => {
-        it('arms on a budget error from the rerun provider', async () => {
-            stream.parts = [
-                { type: 'stream-start', warnings: [] },
-                { type: 'error', error: new Error('rerun_budget_exhausted: top up to continue') },
-            ]
-
-            const { outcome } = await run('spend', { override: { provider: 'rerun' } })
-
-            expect(outcome.errorCode).toBe('rerun_budget_exhausted')
-            expect(isBudgetLatched()).toBe(true)
-        })
-
-        it('clears on a successful rerun turn', async () => {
-            armBudgetLatch()
-            stream.parts = textTurn('back in business')
-
-            await run('try again', { override: { provider: 'rerun' } })
-
-            expect(isBudgetLatched()).toBe(false)
-        })
-
-        it('is left alone by a turn on another provider', async () => {
-            armBudgetLatch()
-            stream.parts = textTurn('own key')
-
-            await run('elsewhere', { override: { provider: 'openai' } })
-
-            expect(isBudgetLatched()).toBe(true)
         })
     })
 

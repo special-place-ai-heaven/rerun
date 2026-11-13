@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { runGoalRecordSchema } from './run-goal.js'
 
 export const runStatusSchema = z.enum(['running', 'done', 'error', 'cancelled'])
 
@@ -31,6 +32,8 @@ export const runSchema = z.object({
     jobRef: z.string().nullable().optional(),
     branch: z.string().nullable().optional(),
     copyIndex: z.number().int().nullable().optional(),
+    // Present on a run read; null when the run had no goal. Absent on an older engine.
+    goal: runGoalRecordSchema.nullable().optional(),
 })
 export type Run = z.infer<typeof runSchema>
 

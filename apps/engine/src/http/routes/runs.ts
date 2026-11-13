@@ -1,3 +1,4 @@
+import { runGoalRecordSchema, type RunGoalRecord } from '@rerun/contracts'
 import { Hono } from 'hono'
 import { aggregateUsageByDay, cancelRun, getRun, listRunsByAgent } from '../../db/repos/runs.js'
 import { listRunSteps, listToolCalls } from '../../db/repos/telemetry.js'
@@ -6,6 +7,13 @@ import { resumeStreamResponse } from '../../runtime/stream.js'
 import { abortRun } from '../../runtime/run-control.js'
 import { abortSubRun } from '../../tools/builtin/sub-run-watch.js'
 import { emitRunTerminal, triggerFromRun } from '../../runtime/run-events.js'
+
+// The run read answers the goal as one record built from the three stored columns; null for a run without one.
+function goalRecord(goalJson: string | null, state: string | null, verdictsJson: string | null): RunGoalRecord | null {
+    if (!goalJson) return null
+    const parsed = runGoalRecordSchema.safeParse({ ...JSON.parse(goalJson), state: state ?? 'running', verdicts: JSON.parse(verdictsJson ?? '[]') })
+    return parsed.success ? parsed.data : null
+}
 
 const JOB_REF_RE = /^[A-Za-z0-9._-]+#[0-9]+$/
 
@@ -105,5 +113,6 @@ runRoutes.get('/:rid', async c => {
     const run = await getRun(agentId, rid)
     if (!run || run.agentId !== agentId) return c.json({ error: 'run not found' }, 404)
     const output = await collectAssistantText(agentId, run.sessionId, run.startedAt, run.finishedAt)
-    return c.json({ ...run, output })
+    const { goalJson, goalState, goalTurns: _turns, goalVerdictsJson, ...rest } = run
+    return c.json({ ...rest, output, goal: goalRecord(goalJson, goalState, goalVerdictsJson) })
 })

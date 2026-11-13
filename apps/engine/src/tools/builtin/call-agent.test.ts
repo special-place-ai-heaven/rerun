@@ -108,7 +108,7 @@ describe('call_agent for someone kept out of a Box', () => {
         traced.length = 0
         const tools = callAgentTools(await restricted())
         await (tools.call_agent as any).execute({ agent: 'agent-c', message: 'hi', wait: false }, {} as any)
-        expect(traced.find(e => e.event === 'run.started')?.trigger).toEqual({ source: 'chat', callableAgentIds: ['agent-c'], calledBy: 'agent-a' })
+        expect(traced.find(e => e.event === 'run.started')?.trigger).toEqual({ source: 'chat', callableAgentIds: ['agent-c'], calledBy: 'agent-a', lineage: { initiatorAgentId: 'agent-a', initiatorSessionId: 'session-1' } })
     })
 })
 
@@ -155,6 +155,27 @@ describe('call_agent session mirroring', () => {
         expect(created.originAgentId).toBe('agent-a')
         expect(created.title).toBe('from Alice: tell a joke')
         expect(traced[1].sessionId).toBe(created.sessionId)
+    })
+})
+
+describe('call_agent run lineage', () => {
+    it('fills the lineage of the run it starts and takes a branch', async () => {
+        traced.length = 0
+        const ctx = { agent: { id: 'agent-a', config: { name: 'Alice' } }, sessionId: 'session-1', runId: 'run-9', callTargets: await agents() } as unknown as RunContext
+        const tool = callAgentTools(ctx).call_agent as any
+        await tool.execute({ agent: 'agent-c', message: 'JOB rerun#131 build it', wait: false, branch: 'job/131' }, {} as any)
+        const trigger = traced.find(e => e.event === 'run.started')!.trigger as { lineage: Record<string, unknown> }
+        expect(trigger.lineage).toEqual({ initiatorAgentId: 'agent-a', initiatorRunId: 'run-9', initiatorSessionId: 'session-1', branch: 'job/131' })
+        expect(trigger.lineage.jobRef).toBeUndefined()
+        expect(tool.inputSchema.safeParse({ agent: 'x', message: 'm', branch: 'b'.repeat(201) }).success).toBe(false)
+    })
+    it('gives no jobRef for a message without JOB', async () => {
+        traced.length = 0
+        const ctx = { agent: { id: 'agent-a', config: { name: 'Alice' } }, sessionId: 'session-1', runId: 'run-9', callTargets: await agents() } as unknown as RunContext
+        await (callAgentTools(ctx).call_agent as any).execute({ agent: 'agent-c', message: 'hello', wait: false }, {} as any)
+        const trigger = traced.find(e => e.event === 'run.started')!.trigger as { lineage: Record<string, unknown> }
+        expect(trigger.lineage.jobRef).toBeUndefined()
+        expect(trigger.lineage.initiatorRunId).toBe('run-9')
     })
 })
 

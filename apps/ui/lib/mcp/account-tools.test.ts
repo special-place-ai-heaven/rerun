@@ -59,4 +59,12 @@ describe('account tool defs', () => {
         expect(read.inputSchema.properties.offset).toMatchObject({ type: 'integer', minimum: 0 })
         expect(read.description).toContain('nextOffset')
     })
+
+    it('advertises the bounds duplicate_agent enforces on count', () => {
+        const duplicate = ACCOUNT_TOOL_DEFS.find(tool => tool.name === 'duplicate_agent') as {
+            inputSchema: { properties: { count?: { type: string; minimum?: number; maximum?: number } }; required: readonly string[] }
+        }
+        expect(duplicate.inputSchema.properties.count).toMatchObject({ type: 'integer', minimum: 1, maximum: 10 })
+        expect(duplicate.inputSchema.required).toEqual(['agentId'])
+    })
 })

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { abortRun, activeRunCount, agentHasLiveRun, claimSession, registerRunAbort, releaseSession, sessionClaim, sessionClaimCount, setRunCancel, unregisterRunAbort } from './run-control.js'
+import { abortRun, syncAgentStatus, activeRunCount, agentHasLiveRun, claimSession, registerRunAbort, releaseSession, sessionClaim, sessionClaimCount, setRunCancel, unregisterRunAbort } from './run-control.js'
+
+const setAgentStatus = vi.hoisted(() => vi.fn(async (_id: string, _status: string) => {}))
+vi.mock('../db/repos/agents.js', () => ({ setAgentStatus }))
 
 describe('abortRun', () => {
     it('returns false for a run it never registered', () => {
@@ -128,5 +131,20 @@ describe('session claims', () => {
         claimSession('sess-author', 'run-unsigned')
         expect(sessionClaim('sess-author')?.authorId).toBeUndefined()
         releaseSession('run-unsigned')
+    })
+})
+
+describe('syncAgentStatus', () => {
+    it('stays busy while any run of the coworker is live, idle once the last one settles', async () => {
+        registerRunAbort('sync-1', 'sync-agent')
+        registerRunAbort('sync-2', 'sync-agent')
+
+        unregisterRunAbort('sync-1')
+        await syncAgentStatus('sync-agent')
+        expect(setAgentStatus).toHaveBeenLastCalledWith('sync-agent', 'busy')
+
+        unregisterRunAbort('sync-2')
+        await syncAgentStatus('sync-agent')
+        expect(setAgentStatus).toHaveBeenLastCalledWith('sync-agent', 'idle')
     })
 })

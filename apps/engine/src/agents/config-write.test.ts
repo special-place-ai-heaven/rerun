@@ -92,3 +92,30 @@ describe('writeAgentConfig', () => {
         expect(await mode()).toBe(0o600)
     })
 })
+
+describe('thinkingLevel', () => {
+    it('accepts null and each level, rejects anything else', () => {
+        for (const level of [null, 'low', 'medium', 'high']) {
+            expect(agentConfigSchema.safeParse({ name: 't', thinkingLevel: level }).success).toBe(true)
+        }
+        expect(agentConfigSchema.safeParse({ name: 't', thinkingLevel: 'extreme' }).success).toBe(false)
+    })
+
+    it('round-trips a level through the config file', async () => {
+        const id = 'thinking-roundtrip'
+        await mkdir(agentDir(id), { recursive: true })
+        await writeAgentConfig(id, agentConfigSchema.parse({ name: 't', thinkingLevel: 'high' }))
+        expect(agentConfigSchema.parse(JSON.parse(await readFile(configPath(id), 'utf8'))).thinkingLevel).toBe('high')
+    })
+
+    it('loads a file without the field as undefined and saves it back byte-identical', async () => {
+        const id = 'thinking-unset'
+        await mkdir(agentDir(id), { recursive: true })
+        await writeAgentConfig(id, agentConfigSchema.parse({ name: 't' }))
+        const first = await readFile(configPath(id), 'utf8')
+        const loaded = agentConfigSchema.parse(JSON.parse(first))
+        expect(loaded.thinkingLevel).toBeUndefined()
+        await writeAgentConfig(id, loaded)
+        expect(await readFile(configPath(id), 'utf8')).toBe(first)
+    })
+})

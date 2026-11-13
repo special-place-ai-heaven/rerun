@@ -202,14 +202,14 @@ One beat every 30 seconds (it exists: `poll_s`). On every beat, in this order:
 
 | Step | What the delegator does | Clock or limit | Exists |
 |---|---|---|---|
-| 1 | Writes the heartbeat: the time and one line of state per type and per feature | the container's health check fails when the heartbeat is older than 2 minutes | new |
-| 2 | Resolves leases with no run id | 3 beats, then the task is Ready again | idle code (`limits.resolve_pending`) |
-| 3 | Reads every running run: wall time, last step, tokens | 45 minutes; 3,000,000 tokens (as_of 2026-11-13, #235: the first value, 400,000, was below 13 of the 49 runs two builders finished that day); the clock for 10 minutes without a step is switched off (#238) until the engine's step count can be trusted, because it stayed at 1 through two builds of over 20 minutes; then the run is cancelled and the attempt counted | idle code (`limits.run_outcome`); cancelling needs an account tool |
-| 4 | Checks ended runs against evidence and goal | never the run's own text alone | idle code (`evidence.py`); the goal check is merged (#171 to #177) and reaches the server with the next update |
+| 1 | Writes the heartbeat: the time and one line of state per type and per feature | the container's health check fails when the heartbeat is older than 2 minutes | live (#215) |
+| 2 | Resolves leases with no run id | 3 beats, then the task is Ready again | live (`lost_run`, #212 and #235) |
+| 3 | Reads every running run: wall time, last step, tokens | 45 minutes; 3,000,000 tokens (as_of 2026-11-13, #235: the first value, 400,000, was below 13 of the 49 runs two builders finished that day); the clock for 10 minutes without a step is switched off (#238): the count rises when a tool call starts, so the limit must clear the longest single call of a healthy run, and nothing records that (#240); then the run is cancelled and the attempt counted | live (#212), cancelling through the account tool `cancel_run` (#208) |
+| 4 | Checks ended runs against evidence and goal | never the run's own text alone | idle code (`evidence.py`); the goal check is live (#171 to #177) |
 | 5 | Fills the queues: ready set per type, ceilings, leases | a ready task not started for 10 minutes with room under the ceiling is reported as starved | partly live (`queued` state); the full rule is idle code (`readyq.eligible`) |
-| 6 | Watches checks of accepted tasks | waits while a check is running; gives up only when none is running and one is red, or after 60 minutes | live, with a flat 30-minute limit |
+| 6 | Watches checks of accepted tasks | waits while a check is running; gives up only when none is running and one is red, or after 60 minutes | live (#214); a red check goes back to the builder once |
 | 7 | Checks joins: features whose last task merged | queues the spec review | new |
-| 8 | Saves, and prints anything that changed state | one writer, a row per change with its time | live as a JSON file; the ledger is idle code (`store.py`) |
+| 8 | Saves, and prints anything that changed state | one writer, a row per change with its time | live in the ledger (#211); the JSON file was read into it once and is kept as `.imported` |
 
 **The timeline** is drawn from step 8's rows: every task as a bar from Ready to Merged, with its waiting, working,
 review and check parts, and an arrow to what it waits on. A `status` command prints it; a screen comes later. This is
@@ -260,12 +260,12 @@ A gate is a refusal in code. Each sits at a place work already passes through.
 
 | Gate | Where | Refuses when | Exists |
 |---|---|---|---|
-| Cut shape | intake by the delegator | a task has no type, no dependency line the delegator's own parser reads, no done-test, no paths; the graph has a cycle; two tasks that may run together share a path | shape only, idle (`ledger.shape`) |
+| Cut shape | intake by the delegator | a task has no type, no dependency line the delegator's own parser reads, no done-test, no paths; the graph has a cycle; two tasks that may run together share a path | live for the dependency line, worker, paths, test file and cycles (`cutshape.py`, #206 and #213); the shared-path rule is not built |
 | Plan marker | `wt new` | no `PLAN READY` or `SMALL FIX` on the issue | live; the delegator posts the marker itself today, so it never refuses |
 | Room | `wt new` | no slot, low memory, low disk | live |
 | Diff inside its paths | `pr-open` | a changed file is outside the task's paths; a lockfile changes anything but the packages the task names; a workflow file; a secret | workflow files only; the path rule is idle code (`publish._outside`, `evidence.build`) |
 | Evidence | delegator, step 4 | no pushed branch, no pull request, the test file is not in the diff | idle (`evidence.py`) |
-| Goal | engine stop check | the answer does not end in the required form | merged (#171 to #177), not on the server yet |
+| Goal | engine stop check | the answer does not end in the required form | live (#171 to #177) |
 | Reviewers by risk | delegator | a diff that writes stored data, config, keys or sign-in has no verdict from the reviewer of that area | idle (`roster.required`, `risk`) |
 | Verdict at this commit | merge | the pull request moved since the review | live (`--match-head-commit`) |
 | Red before green | merge | the task's test never failed without the change | live only in the hand tool (`gate.py` through `merge-dev`) |
@@ -292,6 +292,16 @@ The build order comes from here (principle 6: a part is built only when a measur
 Nine faults, eight of them cleared by hand. None needed more workers.
 
 ## 9. The overlay: what exists, what is idle, what is new
+
+**State after phase A (as_of 2026-11-13, 22:00 UTC: the delegator restarted on dev 5a9851f).** The delegator
+now runs on the ledger. Done, of the table below: State (#205, #211), Clocks (#207, #208, #212, #235, with the
+stall clock off, #238), A lease with no run id (#212), Retry (#212), Cut shape at intake without the
+shared-path rule (#206, #213), Heartbeat (#215), and the timeline (`timeline.py status` and `gantt`, #210).
+`dispatch.py` is 692 lines and imports `store`, `clocks` and `cutshape`. Still as the table says: May this
+start, Stage ended, Who reviews, Merge, Ghosts, Convergence, Front of the line. Of the numbers, only the
+timeline is wired; `measures.py` is used by `status_report.py` alone. Nothing is deleted yet: the files under
+"Deleted as this lands" still have the users named there, and the JSON state file stays beside the ledger as
+`.imported`. The rest of this section is the page as written before phase A.
 
 The repository holds two halves of this machine that do not know each other.
 
@@ -331,13 +341,20 @@ by `deploy/vps/factory-runner.yml`; `trigger.py` is imported by `runner_loop.py`
 `realmodel.py` are in the file list of `install.sh`. Whether the old runner's container still runs on the server is
 not checked.
 
-**Open before building**
+**Open before building** (points 1 to 3 were settled on 2026-11-13; the answers and their evidence are on #198)
 
 1. What parallel runs of one coworker share that could collide: the workspace folder outside worktrees, memory
    writes, the shared handoff files builders append to. Coders in worktrees and reviewers who only read are safe on
    the first two; the handoff files need an append that cannot interleave, or go away with the ledger.
+   *Settled:* the tools key everything by job and lock the count of builders; the one file not keyed is the
+   pull request body a builder writes, which the brief now names by issue number. A pilot of three builds on one
+   coworker is the check.
 2. The worker types and the main coworker of each. `roster.json` already has areas with an owner and a builder.
+   *Settled:* one main per type (coder `code`, reviewer LINUS, researcher `search`, designer DIETER), folded in
+   only after the pilot; the specialists become types of their own when a cut names them.
 3. Where the weekly allowance is read from, so the ceiling can pace against it (open since issue #40).
+   *Settled:* the engine keeps the plan windows (per cent used, reset time) for the coworkers' own status tool;
+   the account tool that lists AI connections is to return them.
 4. Two tiers of checks: fast for a task (its named tests, type check, lint), full for the feature.
 
 ## 10. Build order
@@ -347,13 +364,14 @@ Each phase is one cut of a few tasks, ends in something a person can see, and na
 | Phase | Outcome | Contents | Answers which faults of section 8 |
 |---|---|---|---|
 | **A. The delegator stops losing work** | no job needs a hand to move again | ledger for state; the three clocks and cancel; retry classes; cut-shape gate at intake; heartbeat and health check; `status` with the timeline | 3, 4, 5, 8, 9 |
-| **B. Queues by type and ghosts** | six ready tasks of one type start six workers | types from the roster; a queue per type; ghosts with `copy_index`; ceilings; staggered starts; a route on every task, the review queued with its code task | throughput on wide cuts |
+| **B. Queues by type and ghosts** | six ready tasks of one type start six workers | types in the settings with behaviour as today; briefs for the researcher and the designer; runs per coworker above one, then a pilot of three builds on one coworker; a reason on every waiting job; a hold on a spent plan and before a sign-in renewal. Ceilings and the fold into one main per type follow the pilot as a settings change (as_of 2026-11-13, #198; no stagger, the count of builders is already one locked step) | throughput on wide cuts |
 | **C. Gates where work passes** | no diff outside its task, no risky diff without its reviewer | path and lockfile rule in `pr-open`; reviewers by risk; evidence check; `gate.py` at the merge | 2, 6 |
 | **D. Convergence** | a feature reaches `dev` only as a whole that meets its spec | feature in the cut; feature branch; joins as quality-control tasks, at as many levels as the cut names; spec review; done-tests on the whole; close and the three numbers | 1, and parents closed by hand |
 | **E. The front of the line** | research, spec and plan are tasks like any other | stage skills and exit checks; plan review by someone else; the arbiter; the approval card | 7 |
 | **F. Deliver and learn** | an update verifies itself; the line changes one thing and measures it | check after an update; defects linked to their job for 7 days; proposals with keep or remove (#115) | escaped defects |
 
-A comes before B on purpose: ghosts on a delegator that loses work would lose it faster.
+A comes before B on purpose: ghosts on a delegator that loses work would lose it faster. A is merged
+(#205 to #215, with #235 and #238) and live since 2026-11-13, 22:00 UTC.
 
 ## Sources
 

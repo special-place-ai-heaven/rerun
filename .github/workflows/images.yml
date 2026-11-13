@@ -10,6 +10,10 @@ name: Images
 on:
   push:
     branches: [dev]
+    # Neither Dockerfile builds anything from these folders, so a push that touches only them changes no
+    # image: it gets no sha tag, and dev stays on the last commit that did. On 2026-11-13 that was 32 of
+    # 71 pushes to dev, and each new push cancels the build still running for the one before.
+    paths-ignore: ['docs/**', 'tools/factory/**', 'deploy/vps/**']
   workflow_dispatch:
 
 permissions:

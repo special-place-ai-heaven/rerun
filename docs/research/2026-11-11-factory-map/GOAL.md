@@ -92,4 +92,8 @@ is the claim itself: an end state, the check that proves it, and what must not c
 3. Delegator: render the condition from the issue for build and fix runs; review runs keep their form.
 4. Run page: the condition and the reasons.
 
-This is cut together with phase B of the plan (#198). It depends on nothing in phase B.
+**When (decided 2026-11-13, replacing "cut together with phase B"):** not with phase B. For a build job GitHub's
+checks already run the done-test on the exact commit that is merged, and what stays unproven (the test file is in
+the diff, every file is inside the paths, the test failed before the change) is checked by code in phase C at no
+tokens. The judged condition is kept for the stages that have no command and no diff to check: research and spec,
+phase E. Round one, a final state per run dictated by the delegator, is live. The reasons are on #198.

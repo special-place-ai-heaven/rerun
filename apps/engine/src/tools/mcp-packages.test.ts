@@ -192,7 +192,7 @@ describe('withInstalledPackage', () => {
         vi.setSystemTime(Date.now() + INSTALL_RETRY_MS)
         withInstalledPackage(server)
         await settle()
-        expect(npm.runs).toEqual(['mcp-tool@7.7.7'])
+        await vi.waitFor(() => expect(npm.runs).toEqual(['mcp-tool@7.7.7']), { timeout: 3000 })
     })
 
     it('keeps npx when npm itself cannot be started', async () => {

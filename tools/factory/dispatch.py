@@ -88,6 +88,7 @@ def make_account(url, key, opener=urllib.request.urlopen):
             with opener(req, timeout=30) as r:
                 text = r.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as e:
+            e.close()  # left open, Python's clean-up warning repeats the server's status text
             raise Error("account %s failed: HTTP %d" % (tool, e.code)) from None
         except (urllib.error.URLError, OSError) as e:
             raise Error("account %s failed: %s" % (tool, type(getattr(e, "reason", e)).__name__)) from None

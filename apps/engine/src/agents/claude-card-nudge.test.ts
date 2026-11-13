@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { CARD_TAG_NUDGE, cardTagStopHook } from './claude-card-nudge.js'
-import { withCardTagNudge } from './providers.js'
+import { withCardTagNudge, withGoalStop } from './providers.js'
+import { goalStopHook } from './claude-goal-hook.js'
 import { claudeContextCapture } from './claude-context.js'
 
 const stop = (last_assistant_message: string | undefined, stop_hook_active = false) => ({ hook_event_name: 'Stop', stop_hook_active, last_assistant_message })
@@ -34,5 +35,30 @@ describe('withCardTagNudge', () => {
 
     it('stands alone when no other hook is set', () => {
         expect(withCardTagNudge(undefined)).toEqual({ Stop: [{ hooks: [cardTagStopHook] }] })
+    })
+})
+
+describe('withGoalStop', () => {
+    const goal = { lastLineForms: [{ prefix: 'DONE ', rest: 'sha' as const }], turnLimit: 2 }
+    const option = () => ({ goal, record: async () => {} })
+
+    it('puts the goal hook last, after capture and card hooks', () => {
+        const capture = claudeContextCapture()
+        const o = { ...option(), hook: goalStopHook(goal, async () => {}) }
+        const stops = withGoalStop(withCardTagNudge(capture.settings.hooks), o).Stop ?? []
+        expect(stops).toHaveLength(3)
+        expect(stops[0]).toBe(capture.settings.hooks?.Stop?.[0])
+        expect(stops[1]?.hooks).toEqual([cardTagStopHook])
+        expect(stops[2]?.hooks).toEqual([o.hook])
+    })
+
+    it('adds the goal hook without a capture', () => {
+        const stops = withGoalStop(undefined, option()).Stop ?? []
+        expect(stops).toHaveLength(1)
+    })
+
+    it('leaves the hooks as today without a goal', () => {
+        const capture = claudeContextCapture()
+        expect(withGoalStop(withCardTagNudge(capture.settings.hooks), undefined)).toEqual(withCardTagNudge(capture.settings.hooks))
     })
 })

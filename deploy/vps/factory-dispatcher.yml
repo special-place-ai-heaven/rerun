@@ -1,0 +1,59 @@
+# The factory dispatcher (tools/factory/dispatch.py): plain Python, no model of its own. It takes open issues
+# labelled "factory" and carries them through build, review, one fix round, the checks and the merge on the
+# live coworkers, through the app's account tool server and the gh program. Its state file lives in its own volume.
+#
+#   sudo docker compose -f deploy/vps/factory-dispatcher.yml up -d --build
+# Needs three lines in deploy/vps/.env:
+#   FACTORY_ACCOUNT_URL       the account tool server's URL
+#   FACTORY_ACCOUNT_KEY_FILE  host file holding the account key
+#   FACTORY_GH_TOKEN_FILE     host file holding the GitHub token (the runner's, see factory-runner.yml)
+#
+# Neither key is in the environment: both host files are mounted read-only as the secrets account_key and
+# gh_token under /run/secrets. On the host each file is owned by the container's runner uid (10001), mode 0400,
+# in a directory only that uid enters.
+#
+# Deliberately absent: published ports, the docker socket, privileged mode, added capabilities, other networks,
+# host paths other than the read-only tools/factory mount, the engine key.
+name: rerun-factory
+
+services:
+  factory-dispatcher:
+    build:
+      context: .
+      dockerfile: factory-runner.Dockerfile
+    working_dir: /app
+    command: ["python3", "-u", "/app/dispatch.py", "run"]
+    environment:
+      FACTORY_DATA_DIR: /state
+      HOME: /tmp
+      DISPATCH_ACCOUNT_URL: ${FACTORY_ACCOUNT_URL:?set FACTORY_ACCOUNT_URL in deploy/vps/.env}
+    volumes:
+      - ../../tools/factory:/app:ro
+      - factory-dispatcher-data:/state
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    restart: unless-stopped
+    secrets:
+      - gh_token
+      - account_key
+
+secrets:
+  gh_token:
+    file: ${FACTORY_GH_TOKEN_FILE:?set FACTORY_GH_TOKEN_FILE in deploy/vps/.env}
+  account_key:
+    file: ${FACTORY_ACCOUNT_KEY_FILE:?set FACTORY_ACCOUNT_KEY_FILE in deploy/vps/.env}
+
+volumes:
+  factory-dispatcher-data:

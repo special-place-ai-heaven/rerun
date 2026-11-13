@@ -4,6 +4,7 @@ import { TEMPLATE_TOOL_DEFS } from './template-tools'
 export const MAX_MEMORIES_PER_CALL = 100
 export const MAX_MEMORY_CHARS = 20_000
 export const MAX_UPLOAD_MB = 5
+export const MAX_DUPLICATES_PER_CALL = 10
 
 // Static MCP tool definitions advertised by the Rerun account server for `tools/list`.
 // Pure data (no server deps) so the route can serve them without importing the service layer.
@@ -115,6 +116,20 @@ const AGENT_TOOL_DEFS = [
                 setup: SETUP_PROPERTY,
             },
             required: ['name'],
+        },
+    },
+    {
+        name: 'duplicate_agent',
+        description:
+            'Make one or several identical copies of a coworker, one after the other, each with a name and handle of its own. A copy has its own folder, memory and keys, and the same instructions, skills, tools and model as its source; conversation history is not copied. Every copy runs on the same model subscription as its source. A coworker with any scheduled task is refused: delete its scheduled tasks first, or they would fire a second time from each copy.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                agentId: { type: 'string', description: 'The coworker to copy, by its id from list_agents.' },
+                count: { type: 'integer', minimum: 1, maximum: MAX_DUPLICATES_PER_CALL, description: `How many copies, 1 to ${MAX_DUPLICATES_PER_CALL}. Defaults to 1.` },
+                spaceId: { type: 'string', description: "Optional: the Box the copies land in. Defaults to the source's own Box." },
+            },
+            required: ['agentId'],
         },
     },
     {

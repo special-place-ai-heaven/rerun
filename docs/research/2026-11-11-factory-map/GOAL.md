@@ -67,6 +67,12 @@ is the claim itself: an end state, the check that proves it, and what must not c
   rule of LOOPS.md that an exit check never rests on them, so it needs the run's tool output as well. Where
   that comes from (the run's stored steps, or the transcript the harness keeps) is settled at the cut, and
   until it is, the condition must not be switched on for a job.
+  A stronger answer, from the study of machinist ([MACHINIST.md](../2026-11-13-owainlewis-tutorials/MACHINIST.md),
+  point 3): where a command can prove the claim, no model judges at all. The engine runs the issue's **Run**
+  command in the run's own workspace when the worker stops, the exit code decides, and a failing output goes
+  back to the worker as data, inside the same turn limit. The model judge is then kept for what no command can
+  show. To be weighed at the cut: it needs the engine to run a command in the worker's workspace on its own
+  account, which it does not do today.
 - Which model judges on a connection that is not Claude's, and what one verdict costs on each. On the Claude
   path it is the small fast model of that connection.
 - The other providers check the goal once, at the end, with no send-back. Whether they get the loop too is

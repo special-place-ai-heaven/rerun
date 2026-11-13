@@ -37,6 +37,7 @@ import {
     deleteMemory as engineDeleteMemory,
     deleteSchedule as engineDeleteSchedule,
     deleteSkill as engineDeleteSkill,
+    setSkillEnabled as engineSetSkillEnabled,
     getAgent as engineGetAgent,
     getAgentKeys as engineGetAgentKeys,
     getRun as engineGetRun,
@@ -504,6 +505,16 @@ export async function deleteSkillAction(agentId: string, slug: string): Promise<
         return { success: true }
     } catch (err) {
         return { success: false, ...refusalOf(err, 'deleteSkillFailed') }
+    }
+}
+
+export async function setSkillEnabledAction(agentId: string, slug: string, enabled: boolean): Promise<SuccessResult> {
+    try {
+        const { conn, engineAgentId } = await getAgentChatTarget(agentId, 'manage')
+        await engineSetSkillEnabled(conn, engineAgentId, slug, enabled)
+        return { success: true }
+    } catch (err) {
+        return { success: false, ...refusalOf(err) }
     }
 }
 

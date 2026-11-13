@@ -567,7 +567,10 @@
         "newSkill": "Neu",
         "emptyTitle": "Noch keine Skills",
         "emptyDescription": "Skills sind wiederverwendbare Schritt-für-Schritt-Anleitungen, die dein Coworker lernt, damit er wiederkehrende Aufgaben jedes Mal gleich erledigt.",
-        "appBadge": "App"
+        "appBadge": "App",
+        "offerSkill": "{name} diesem Coworker anbieten",
+        "offBadge": "Aus",
+        "toggleFailed": "Der Skill konnte nicht geändert werden"
     },
     "shareAgentDialog": {
         "titleLink": "Dein Freigabelink",

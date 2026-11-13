@@ -22,7 +22,7 @@ import { buildSystemPrompt, nowBlock, recallMemories, recallSection, systemPromp
 import type { LoadedAgent } from '../agents/types.js'
 import { turnOrder } from '../agents/turn-order.js'
 import { answeringModel } from '../agents/rerun-upstream.js'
-import { listAgentIndex, setAgentStatus } from '../db/repos/agents.js'
+import { listAgentIndex } from '../db/repos/agents.js'
 import { appendMessage, lastMessageId, listSessionAuthorIds, setMessageToolCalls } from '../db/repos/messages.js'
 import type { MessageRow } from '../db/schema.js'
 import { isSharedConversation, signText } from './message-authors.js'
@@ -40,7 +40,7 @@ import { HostBreaker } from '../tools/host-breaker.js'
 import type { PartialResult, RunContext, RunLineage, RunTrigger, SkillProposalNotice } from './context.js'
 import { parseJobRef } from './job-ref.js'
 import { partialResultsNote } from './partial-results.js'
-import { registerRunAbort, setRunCancel, unregisterRunAbort } from './run-control.js'
+import { registerRunAbort, setRunCancel, syncAgentStatus, unregisterRunAbort } from './run-control.js'
 import { runCurator } from './curator.js'
 import { repairToolCall } from './tool-repair.js'
 import { stepWithScreenshots } from './screenshots.js'
@@ -349,7 +349,6 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
             outcome = { kind: 'error', error: errorMessage, errorCode }
         }
 
-        await setAgentStatus(agent.id, 'idle').catch(() => {})
         // Codex only writes its rotated token to auth.json once the CLI has exited, so the next run
         // must not be able to start before this returns. Capped rather than awaited outright: a
         // teardown that hangs used to be enough to keep the whole conversation busy forever.
@@ -358,6 +357,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
         // Last, not first: freeing the session claim before the transcript is written and before
         // the provider is down let a second send in on a history missing this turn.
         unregisterRunAbort(run.id)
+        await syncAgentStatus(agent.id).catch(() => {})
         resolveSettled(outcome)
 
         if (pending) {
@@ -441,7 +441,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
         const mcpServersP = provider === 'claude' ? preparedP.then(servers => withPooledRelays(agent, servers)) : preparedP
         cliAuthP = ensureCliAuth(provider, connection)
 
-        void setAgentStatus(agent.id, 'busy').catch(err => logger.warn({ err: String(err), agent: agent.id }, 'setAgentStatus busy failed'))
+        void syncAgentStatus(agent.id).catch(err => logger.warn({ err: String(err), agent: agent.id }, 'syncAgentStatus failed'))
 
         const system = await buildSystemPrompt(agent, trigger, provider, order)
         const systemText = systemPromptText(system)

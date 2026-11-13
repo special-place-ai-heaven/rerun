@@ -1,3 +1,5 @@
+import { setAgentStatus } from '../db/repos/agents.js'
+
 type RunHandle = { controller: AbortController; agentId: string; cancel?: () => void }
 
 const controllers = new Map<string, RunHandle>()
@@ -52,6 +54,12 @@ export function releaseSession(runId: string): void {
 export function agentHasLiveRun(agentId: string): boolean {
     for (const handle of controllers.values()) if (handle.agentId === agentId) return true
     return false
+}
+
+// A coworker is busy while any of its runs is live, not while the latest one is: two runs of one
+// coworker used to flip it to idle as soon as the first one ended.
+export async function syncAgentStatus(agentId: string): Promise<void> {
+    await setAgentStatus(agentId, agentHasLiveRun(agentId) ? 'busy' : 'idle')
 }
 
 export function activeRunCount(): number {

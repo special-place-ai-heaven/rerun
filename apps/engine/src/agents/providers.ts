@@ -1,4 +1,6 @@
 import { createProviderRegistry, wrapLanguageModel, type LanguageModel, type ToolSet } from 'ai'
+import type { GoalVerdict, RunGoal } from '@rerun/contracts'
+import { goalStopHook } from './claude-goal-hook.js'
 import { Agent as UndiciAgent } from 'undici'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
@@ -263,11 +265,13 @@ export function codexMcpConfig(tools?: ToolSet, mcpServers: McpServer[] = []): R
 //
 // `sessionId` is what an OpenCode request names its conversation by: a one-shot call inside a run
 // (compaction, vision) passes the run's own, the others one of their own making.
-export type CliModelOptions = { system?: string; claudeTools?: readonly string[]; screenshots?: ScreenshotLookup; sessionId?: string; labels?: Record<string, string> }
+export type GoalOption = { goal: RunGoal; record: (v: GoalVerdict) => Promise<void>; hook?: ReturnType<typeof goalStopHook> }
+
+export type CliModelOptions = { system?: string; claudeTools?: readonly string[]; screenshots?: ScreenshotLookup; sessionId?: string; labels?: Record<string, string>; goal?: GoalOption }
 
 // What a run hands its model beyond the tools: the prompt and the screenshots for the CLIs, the
 // conversation for OpenCode.
-export type ResolveModelOptions = { system?: string; screenshots?: ScreenshotLookup; sessionId?: string; labels?: Record<string, string> }
+export type ResolveModelOptions = { system?: string; screenshots?: ScreenshotLookup; sessionId?: string; labels?: Record<string, string>; goal?: GoalOption }
 
 function oneShotSessionId(agent: LoadedAgent, options?: { sessionId?: string }): string {
     return options?.sessionId ?? `${agent.id}:one-shot`
@@ -299,6 +303,13 @@ export function withCardTagNudge(hooks: ClaudeHooks | undefined): ClaudeHooks {
     return { ...hooks, Stop: [...stop, { hooks: [cardTagStopHook] }] }
 }
 
+// The goal check goes last: the capture hooks and the card nudge have answered before it counts a turn.
+export function withGoalStop(hooks: ClaudeHooks | undefined, goal: GoalOption | undefined): ClaudeHooks {
+    if (!goal) return hooks ?? {}
+    const stop = hooks?.Stop ?? []
+    return { ...hooks, Stop: [...stop, { hooks: [goal.hook ?? goalStopHook(goal.goal, goal.record)] }] }
+}
+
 function claudeProvider(agent: LoadedAgent, tools?: ToolSet, mcpServers: RunMcpServer[] = [], capture?: ClaudeContextCapture, options: CliModelOptions = {}) {
     const { mcpServers: servers, allowedTools } = claudeMcpConfig(tools, mcpServers, options.screenshots)
     const { cwd, env: agentEnv } = agentProcessEnv(agent, options.labels)
@@ -326,6 +337,7 @@ function claudeProvider(agent: LoadedAgent, tools?: ToolSet, mcpServers: RunMcpS
             ...(options.system !== undefined ? { systemPrompt: options.system } : {}),
             ...(allowedTools.length ? { mcpServers: servers, allowedTools } : {}),
             ...(capture ? { ...capture.settings, hooks: withCardTagNudge(capture.settings.hooks) } : {}),
+            ...(options.goal ? { hooks: withGoalStop(capture ? withCardTagNudge(capture.settings.hooks) : undefined, options.goal) } : {}),
         },
     })
 }
@@ -482,7 +494,7 @@ export type ResolvedModel = { model: LanguageModel; close: () => Promise<void>; 
 
 const noClose = async (): Promise<void> => {}
 
-export function resolveModel(agent: LoadedAgent, override?: ModelOverride, tools?: ToolSet, mcpServers?: RunMcpServer[], { system, screenshots, sessionId, labels }: ResolveModelOptions = {}): ResolvedModel {
+export function resolveModel(agent: LoadedAgent, override?: ModelOverride, tools?: ToolSet, mcpServers?: RunMcpServer[], { system, screenshots, sessionId, labels, goal }: ResolveModelOptions = {}): ResolvedModel {
     const { provider, model } = pairFor(agent, override)
     // `wrapLanguageModel` runs the list from the end: the guard sits nearest the model, so no other
     // middleware ever reads a fake tool call, the card tags go next, and the quick replies read the
@@ -496,7 +508,7 @@ export function resolveModel(agent: LoadedAgent, override?: ModelOverride, tools
     }
     if (provider === 'claude') {
         const capture = claudeContextCapture(agent.resolved.connection?.id)
-        const claude = claudeProvider(agent, tools, mcpServers, capture, { system, screenshots, labels, claudeTools: agent.config.tools.web ? CLAUDE_RUN_TOOLS : [] }).languageModel(model)
+        const claude = claudeProvider(agent, tools, mcpServers, capture, { system, screenshots, labels, goal, claudeTools: agent.config.tools.web ? CLAUDE_RUN_TOOLS : [] }).languageModel(model)
         return { model: wrapLanguageModel({ model: claude, middleware: [claudeScreenshotMiddleware, replies.middleware, cardTags, guard] }), close: noClose, contextUsage: capture.read, quickReplies: replies.read }
     }
     // OpenCode runs in Rerun's own loop, on the SDK of whichever format the model is served on.

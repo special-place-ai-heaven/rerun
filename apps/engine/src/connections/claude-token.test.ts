@@ -19,7 +19,7 @@ const { afterEach, beforeEach, describe, expect, it } = await import('vitest')
 const { mkdir, rm } = await import('node:fs/promises')
 const { connectionDir, connectionEnvPath } = await import('../config/paths.js')
 const { readEnvFile, writeEnvFile } = await import('../lib/env-file.js')
-const { acquireClaudeLease, claudeTokenOutlived, ensureFreshClaudeToken } = await import('./claude-token.js')
+const { acquireClaudeLease, claudeSignInLeft, claudeTokenOutlived, ensureFreshClaudeToken } = await import('./claude-token.js')
 const { forgetCredentialRejected, isCredentialRejected, recordCredentialRejected } = await import('./credential-rejections.js')
 
 const NOW = new Date('2026-09-30T12:00:00.000Z').getTime()
@@ -299,5 +299,31 @@ describe('refreshing', () => {
         await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
         release()
         await third
+    })
+})
+
+describe('claudeSignInLeft', () => {
+    it('says the minutes left and whether a renewal is due, never a value from the key file', async () => {
+        const answers = [
+            claudeSignInLeft(await connection(expiring(180)), NOW),
+            claudeSignInLeft(await connection(expiring(300)), NOW),
+            claudeSignInLeft(await connection(expiring(240)), NOW),
+            claudeSignInLeft(await connection(expiring(-10)), NOW),
+        ]
+        expect(answers).toEqual([
+            { minutesLeft: 180, renewalDue: true },
+            { minutesLeft: 300, renewalDue: false },
+            { minutesLeft: 240, renewalDue: true },
+            { minutesLeft: 0, renewalDue: true },
+        ])
+        const { CLAUDE_CODE_OAUTH_REFRESH_TOKEN: _r, ...noRefresh } = expiring(180)
+        const { CLAUDE_CODE_OAUTH_EXPIRES_AT: _e, ...noExpiry } = expiring(180)
+        expect(claudeSignInLeft(await connection(noRefresh), NOW)).toBeNull()
+        expect(claudeSignInLeft(await connection(noExpiry), NOW)).toBeNull()
+        expect(claudeSignInLeft(null, NOW)).toBeNull()
+        const text = JSON.stringify(answers)
+        for (const secret of SECRETS) expect(text).not.toContain(secret)
+        for (const m of [180, 300, 240, -10]) expect(text).not.toContain(String(NOW + m * 60_000))
+        expect(logged).toEqual([])
     })
 })

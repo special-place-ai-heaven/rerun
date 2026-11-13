@@ -750,6 +750,9 @@ def cmd_merge_dev(a):
     s = ci_state(cs)
     if s != "GREEN":
         die("CI is %s on %s, not GREEN. Reviewers never wait on CI: return BLOCKED to @boss.\n%s" % (s, pr["head"]["sha"][:8], ci_table(cs)))
+    g = run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gate.py"), full, n], check=False)
+    if g.returncode:
+        die("gate did not pass at %s (exit %s), not merging.\n%s" % (pr["head"]["sha"][:8], g.returncode, (g.stdout or g.stderr).strip()[-600:]), 1)
     if "--note" in a:
         run([GH, "pr", "comment", n, "-R", full, "--body", "Review ACCEPT @%s: %s" % (pr["head"]["sha"][:8], a[a.index("--note") + 1][:1500])], check=False)
     r = run([GH, "pr", "merge", n, "-R", full, "--merge", "--match-head-commit", pr["head"]["sha"]], check=False)

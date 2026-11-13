@@ -230,6 +230,8 @@ class WtDoneCleans(FactoryCase):
             return [] if path.endswith("/files?per_page=100") else {"default_branch": "main"} if path == "repos/" + FULL else pr
 
         def fake_run(cmd, *a, **k):
+            if cmd[-3].endswith("gate.py"):  # merge-dev runs the gate itself: one case, PASS
+                return subprocess.CompletedProcess(cmd, 0, "GATE PASS", "")
             if cmd[0] != F.GH:
                 return real_run(cmd, *a, **k)
             if cmd[1:3] == ["pr", "merge"]:

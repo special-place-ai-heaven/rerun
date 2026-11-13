@@ -3,7 +3,7 @@
   "label": "factory",
   "poll_s": 30,
   "max_jobs": 8,
-  "checks_timeout_s": 1800,
+  "checks_timeout_s": 3600,
   "auto_plan_marker": true,
   "ledger_file": "/state/ledger.db",
   "json_state_file": "/state/dispatch.json",

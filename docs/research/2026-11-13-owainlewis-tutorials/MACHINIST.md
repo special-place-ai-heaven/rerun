@@ -97,19 +97,34 @@ machinist never runs two agents on one subscription at once, and says why: the c
 does. What our engine does about it, read in `apps/engine/src/connections/claude-token.ts`:
 
 - A connection whose token has no refresh token or expiry is "static" and is never refreshed. Then none of
-  this applies. Which kind the live connection holds was not checked.
+  this applies. The live connection is not of that kind: of 967 finished runs read on 2026-11-13, one (on
+  2026-11-11) ended with the engine's own text for a sign-in renewed during the run.
 - Otherwise the old access token is revoked when a new one is issued (the comment above
   `IDLE_REFRESH_WINDOW_MS`), and a running program keeps the token it started with. So
   `ensureFreshClaudeToken` refreshes from four hours before expiry, but only while no run is out on the
   connection; with runs out it defers, and in the last five minutes it refreshes regardless.
-- A run whose token was swapped under it is told apart (`claudeTokenOutlived`). What the engine then does with
-  that run was not read.
+- A run whose token was swapped under it is told apart (`claudeTokenOutlived`). It ends in error with the text
+  `interrupted: Claude sign-in renewed during the run` (`settle` in `apps/engine/src/runtime/loop.ts`); nothing
+  picks it up again.
 
 The question for phase B follows from the second point. A factory that is busy around the clock has no moment
-without a run, so the refresh arrives under every running coworker at once. If those runs then end in error,
-the delegator counts each as a failed attempt and not as a passing failure (`clocks.klass`, `_ERR` lists only
-overload and rate limits). To settle before the ceiling of parallel runs is raised: the kind of token, what
-happens to an outlived run, and whether that error belongs in class `transient`.
+without a run, so the refresh arrives under every running coworker at once, and each of those runs ends in
+error. Settled on 2026-11-13, after the first version of this page:
+
+- The delegator counted such an end as a failed attempt (`clocks.klass`; `_ERR` listed only overload and rate
+  limits). It becomes class `transient` in #241: sent again after a back-off, and no attempt is spent.
+- That saves the job, not the work: every run in flight at that moment is still lost and paid for again.
+
+Open, for the cut of phase B:
+
+- How long a sign-in lasts. The engine logs `expiresIn` at each renewal; it was not read. It decides how often
+  the cut happens.
+- Whether the delegator makes the idle moment itself: when a renewal is due it holds new sends, the runs in
+  flight finish, the engine renews with no run out, and sending goes on. That costs a pause of minutes once per
+  sign-in instead of every run in flight. The engine knows when a renewal is due and is deferred (it logs
+  "refresh deferred"), but no account tool reports it, so this needs one field on the engine's side first.
+  Runs outside the factory (a chat, a schedule) hold the same connection and cannot be held back; they are
+  short.
 
 ## Not taken
 

@@ -69,11 +69,31 @@ seconds with 25 recorded tool calls ended with a step count of 1, and so did a r
 run with 10 tool calls ended with 10. The count is not a sign of life for every run, and one tool call can
 itself outlast 10 minutes. Both long builds would have been cancelled twice and ended `failed`.
 
-The delegator's stall clock is switched off until the count can be trusted (#238); the 45-minute limit and the
-token cap stay. Why the engine's count stays at 1 for some runs is not known yet.
+The delegator's stall clock was switched off (#238); the 45-minute limit and the token cap stay.
+
+**Corrected the same evening (#240).** The count itself was not at fault. For the command-line providers a whole
+turn is one step of the SDK, so every run counted 1 until the live count of tool calls (#121) reached the server
+with that afternoon's update, at about 17:25 UTC. Both long builds ran before it; the run that counted 10 ran
+after it. Sorted by start time, every run of five coworkers that day splits the same way: 1 before the update,
+the number of recorded tool calls after it. The comparison above set runs from both sides of an engine update
+side by side without their times.
+
+The clock stays off for the reason that does hold. The count rises when a tool call starts, not when it returns,
+so a limit must be longer than the longest single call of a healthy run, and nothing records that: the engine
+writes the calls of such a turn together when the step ends, with no time per call. No measuring is built for
+it now. The 45-minute limit and the token cap bound a run that hangs, and a hung run spends no tokens.
 
 Both clock faults have one cause: a limit was written down from a number that looked reasonable and shipped
 without being held against real runs. A limit is now measured before it ships.
+
+## The same check on the retry classes
+
+After the restart the delegator's retry classes were held against the error text of real runs: 967 finished
+runs, up to 200 per coworker. Four had ended in error, with three texts. One was already handled (an engine
+restart). The other two were classed as failed attempts though a second try clears both: a run cut because the
+engine renewed the Claude sign-in under it, and two runs refused at the provider's edge in the same second,
+during minutes in which a session on another machine and network was refused too. Both texts become class
+`transient` in #241. Only texts seen on real runs were added.
 
 ## What this does not show
 

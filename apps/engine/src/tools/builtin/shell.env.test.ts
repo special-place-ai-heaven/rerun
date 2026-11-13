@@ -35,6 +35,20 @@ describe('shell_exec child environment', () => {
         expect(options.timeout).toBe(1000)
     })
 
+    it('hands the session labels to the command environment', async () => {
+        const run = vi.fn<Runner>(async () => ({ stdout: '', stderr: '' }))
+        const ctx = { agent: { id: 'env-agent', env: {}, config: agentConfigSchema.parse({ name: 'env', tools: {} }) }, sessionId: 's1', runId: 'r1', lineage: { jobRef: 'rerun#134', branch: 'chunk/134-c2' }, logger: { warn() {} }, hostBreaker: new HostBreaker() } as any
+        await (shellTools(ctx, run).shell_exec as any).execute({ command: 'env', timeoutMs: 1000 }, { toolCallId: 'c', messages: [] })
+        expect(run.mock.calls[0][1].env).toMatchObject({
+            RERUN_COWORKER_ID: 'env-agent',
+            RERUN_SESSION_ID: 's1',
+            RERUN_RUN_ID: 'r1',
+            RERUN_JOB: 'rerun#134',
+            RERUN_BRANCH: 'chunk/134-c2',
+            RERUN_WORKSPACE: workspaceDir('env-agent'),
+        })
+    })
+
     it('leaves the shared database path out when the agent has no shared database', async () => {
         const options = await optionsSeenBy({}, { sharedDb: false })
         expect(options.env).not.toHaveProperty('RERUN_SHARED_DB')

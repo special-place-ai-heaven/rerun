@@ -657,5 +657,98 @@ class PlanGate(FactoryCase):
             self.assertIn("cannot read", out)
 
 
+class WtNewSweepAndInstall(BuilderCap):
+    """#125: `wt new` sweeps finished worktrees before it refuses, and installs dependencies."""
+
+    def setUp(self):
+        super().setUp()
+        self.lookups = []
+        self.prs = {}
+
+    def new(self, chunk):
+        def lookup(full, branch):
+            self.lookups.append(branch)
+            return self.prs.get(branch, [])
+        with self.wt_new_fakes(), mock.patch.object(F, "pr_lookup", lookup), \
+                mock.patch.object(F, "install_deps", lambda p: None):
+            return self.call(F.cmd_wt, ["new", REPO, "7", chunk])
+
+    def test_cap_with_a_merged_worktree_sweeps_it_and_creates_the_new_one(self):
+        p = self.wt(chunk="1")
+        self.wt(chunk="2")
+        sha = self.commit(p)
+        git(p, "push", "--quiet", "origin", "chunk/7-1")
+        self.prs["chunk/7-1"] = [{"number": 9, "state": "MERGED", "headRefOid": sha}]
+        code, out = self.new("3")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(self.made("3"))
+        self.assertFalse(os.path.isdir(p))
+
+    def test_below_the_cap_makes_no_pr_lookup(self):
+        self.wt(chunk="1")
+        code, out = self.new("3")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.lookups, [])
+
+    def test_cap_leaves_an_idle_unpushed_worktree_alone(self):
+        p = self.wt(chunk="1")
+        self.wt(chunk="2")
+        write(p, "work.txt", "old work\n")
+        git(p, "add", "-A")
+        env = dict(os.environ, GIT_COMMITTER_DATE="2026-01-01T00:00:00Z", GIT_AUTHOR_DATE="2026-01-01T00:00:00Z")
+        subprocess.run(["git", "-C", p, "commit", "--quiet", "-m", "old"], check=True, env=env, capture_output=True)
+        code, out = self.new("3")
+        self.assertEqual(code, 2, out)
+        self.assertTrue(os.path.isdir(p))
+        self.assertEqual(self.remote_refs(), "")
+
+
+class WtNewInstall(BuilderCap):
+    def new_with(self, runner, lock=True):
+        real = F.run
+
+        def fake(cmd, cwd="/tmp", check=True, timeout=300):
+            if cmd[0] == "pnpm":
+                return runner(cmd, cwd)
+            return real(cmd, cwd=cwd, check=check, timeout=timeout)
+        self.lockfile = lock
+
+        with self.wt_new_fakes(), mock.patch.object(F, "run", fake):
+            if lock:
+                # the lockfile is tracked on dev in the test origin: add it before the worktree is made
+                write(self.clone, "pnpm-lock.yaml", "lockfileVersion: 9\n")
+                git(self.clone, "add", "-A")
+                git(self.clone, "commit", "--quiet", "-m", "lock")
+                git(self.clone, "push", "--quiet", "--force", "origin", "HEAD:refs/heads/dev")
+                git(self.clone, "fetch", "--quiet", "origin")
+            return self.call(F.cmd_wt, ["new", REPO, "7", "3"])
+
+    def test_lockfile_runs_install_once_in_the_new_worktree(self):
+        calls = []
+        code, out = self.new_with(lambda c, cwd: calls.append((c, cwd)) or types.SimpleNamespace(returncode=0, stdout="", stderr=""))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls, [(["pnpm", "install", "--frozen-lockfile", "--prefer-offline"], os.path.join(F.WT, REPO, "7-3"))])
+        self.assertRegex(out, r"dependencies installed in \d+ s")
+
+    def test_no_lockfile_runs_no_install(self):
+        calls = []
+        code, out = self.new_with(lambda c, cwd: calls.append(c), lock=False)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(calls, [])
+        self.assertNotIn("dependencies", out)
+
+    def test_failed_install_still_succeeds_and_says_so(self):
+        code, out = self.new_with(lambda c, cwd: types.SimpleNamespace(returncode=1, stdout="", stderr="ERR_PNPM boom\nmore\n"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("dependencies NOT installed: ERR_PNPM boom", out)
+
+    def test_missing_pnpm_still_succeeds_and_says_so(self):
+        def missing(c, cwd):
+            raise FileNotFoundError("pnpm")
+        code, out = self.new_with(missing)
+        self.assertEqual(code, 0, out)
+        self.assertIn("dependencies NOT installed:", out)
+
+
 if __name__ == "__main__":
     unittest.main()

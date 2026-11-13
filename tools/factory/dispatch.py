@@ -6,6 +6,7 @@ written to the ledger (store.py) at once as a transitions row, and a send is rec
 out, so a restart never sends a step twice."""
 import argparse, datetime, hashlib, json, os, re, subprocess, sys, tempfile, time, urllib.error, urllib.request
 
+import briefs
 import clocks
 import cutshape
 import pools
@@ -114,6 +115,15 @@ def build_brief(j):
         final_state(j, '`PR: <url>` or `BLOCKED: <one sentence>`'),
         TAIL,
     ])
+
+
+def first_brief(j):
+    """The brief of a job's first step, by its worker type; the researcher's and the designer's come from briefs.py."""
+    w = j.get("worker", "coder")
+    if w in ("researcher", "designer"):
+        make = briefs.research_brief if w == "researcher" else briefs.design_brief
+        return "\n".join([make(j), "", final_state(j, '`PR: <url>` or `BLOCKED: <one sentence>`'), TAIL])
+    return build_brief(j)
 
 
 def review_brief(j, pr, head):
@@ -226,11 +236,26 @@ def checks_verdict(runs):
 class Dispatcher:
     def __init__(self, cfg, account, gh, now=time.time):
         self.cfg, self.account, self.gh, self.now = cfg, account, gh, now
+        self.fill_ids()
         self.repo, self.label = cfg["repo"], cfg.get("label", "factory")
         self.store = ledger_store.Store(cfg["ledger_file"])  # the delegator is the one writer
         self.store.import_json(cfg["json_state_file"])  # once; a second run finds it done
         self.beats = 0
         self.names = pools.names(cfg)
+
+    def fill_ids(self):
+        """Give every coworker of the settings that has no id its id from list_agents; one with an id causes no call."""
+        missing = [c for t in (self.cfg.get("types") or {}).values() for c in t.get("coworkers", []) if not c.get("id")]
+        if not missing:
+            return
+        agents = (self.account("list_agents", {}) or {}).get("agents") or []
+        for c in missing:
+            low = c["name"].lower()
+            hit = next((a for a in agents if str(a.get("handle", "")).lower() == low), None) \
+                or next((a for a in agents if a.get("name") == c["name"]), None)
+            if not hit or not hit.get("id"):
+                raise Error("coworker %s has no id in the settings and is not in list_agents" % c["name"])
+            c["id"] = hit["id"]
 
     def close(self):
         self.store.close()
@@ -257,15 +282,16 @@ class Dispatcher:
 
     def intake(self):
         open_jobs = [j for j in self.jobs() if j["state"] not in END + ("waiting",)]
-        room = (pools.max_jobs(self.cfg, "coder") or 0) - len(open_jobs)
-        if room <= 0:
+        rooms = {t: (v["max_jobs"] or 0) - len([j for j in open_jobs if j.get("worker", "coder") == t])
+                 for t, v in pools.types(self.cfg).items()}
+        if all(r <= 0 for r in rooms.values()):
             return
         issues = json.loads(self.gh(["issue", "list", "-R", self.repo, "--label", self.label, "--state", "open",
                                      "--json", "number,title,body", "--limit", "100"]))
         open_numbers = None
         shape = cutshape.check(issues)
         for i in sorted(issues, key=lambda i: i["number"]):
-            if room <= 0:
+            if all(r <= 0 for r in rooms.values()):
                 break
             old = self.store.get_job(str(i["number"]))
             # An ended job lost its label when it was reported: the label being back means "run it again".
@@ -281,13 +307,15 @@ class Dispatcher:
                     log(i["number"], "not started: the issue text is not readable (%d problem%s)" % (len(errors), "" if len(errors) == 1 else "s"))
                 continue
             parsed = cutshape.parse(i)
-            if parsed["worker"] != "coder":
+            if parsed["worker"] not in ("coder", "researcher", "designer") or parsed["worker"] not in pools.types(self.cfg):
                 t = parsed["worker"]
                 if self.store.get_all(str(i["number"])).get("worker_queue") != t:
                     self.gh(["issue", "comment", str(i["number"]), "-R", self.repo, "--body",
                              "worker type %s has no queue yet (phase B of #198)" % t])
                     self.store.set(str(i["number"]), "worker_queue", t)
                     log(i["number"], "not started: worker type %s has no queue yet" % t)
+                continue
+            if rooms.get(parsed["worker"], 0) <= 0:
                 continue
             deps = parsed["deps"]
             if deps:
@@ -319,7 +347,7 @@ class Dispatcher:
             if old and old.get("pr") and json.loads(self.gh(["pr", "view", str(old["pr"]), "-R", self.repo, "--json", "state"])).get("state") == "OPEN":
                 # Put back in with its pull request still open: that one is reviewed, a second build would open a duplicate.
                 job.update(state="review_wait", pr=old["pr"], builder=old.get("builder"))
-            room -= 1
+            rooms[parsed["worker"]] -= 1
             self.save(job, "queued")
             log(i["number"], ("back in at the review of #%s: " % job["pr"] if job.get("pr") else "queued: ") + i["title"][:120])
 
@@ -355,7 +383,7 @@ class Dispatcher:
 
     def message(self, j):
         if j["state"] == "building":
-            return build_brief(j)
+            return first_brief(j)
         if j["state"] == "reviewing":
             return review_brief(j, j["pr"], j["head"])
         return fix_brief(j, j["pr"], j["review"])

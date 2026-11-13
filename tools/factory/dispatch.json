@@ -72,6 +72,24 @@
           "runs": 1
         }
       ]
+    },
+    "researcher": {
+      "max_jobs": 8,
+      "coworkers": [
+        {
+          "name": "search",
+          "runs": 1
+        }
+      ]
+    },
+    "designer": {
+      "max_jobs": 8,
+      "coworkers": [
+        {
+          "name": "DIETER",
+          "runs": 1
+        }
+      ]
     }
   }
 }

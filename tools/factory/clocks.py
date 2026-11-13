@@ -1,11 +1,18 @@
 """Run clocks and retry class (rerun#207, phase A of #198). Pure: no network, no ledger write. It decides nothing that
 limits.run_outcome decides: it builds that function's inputs and maps its answer to a retry class."""
-import json, os, sys
+import json, os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import limits as L
 
 RETRY_BACKOFF_S = (60, 120, 240)
 _ERR = ("provider_overloaded", "429", "rate limit", "sign-in renewed during the run", "403 attention required")
+# The three patterns below are copied from packages/contracts/src/chat-error.ts at 719a14d (test_clocks checks them).
+# PROVIDER_OVERLOADED of that file: no room at the provider.
+_OVERLOADED = re.compile(r"overloaded|rate.?limit|too many requests|at capacity|high demand|service unavailable", re.I)
+# SUBSCRIPTION_LIMIT of that file: a spent plan.
+_SPENT = re.compile(r"hit your (?:session|weekly|opus|sonnet|usage) limit|usage limit reached|usage_limit_exceeded|5-hour limit|quota exceeded|monthly spend limit|usage credits|not supported when using codex with a chatgpt account|does not exist or you do not have access|opencode console credits used up|opencode go limit reached", re.I)
+# MODEL_NOT_IN_PLAN of that file: a model the plan lacks; waiting for a reset does not bring it back, so no hold.
+_NOT_IN_PLAN = re.compile(r"not supported when using codex with a chatgpt account|does not exist or you do not have access|requires usage credits|model_not_found", re.I)
 _ROOM = ("builders are already active", "GB free, floor is", "of memory available, floor is", "/data/work is over")
 
 
@@ -33,7 +40,7 @@ def outcome(run, seen, now, cfg=None):
 
 
 def klass(kind, run=None, blocked=None):
-    """transient, cancel, work, plan, or None (DONE/RUNNING)."""
+    """transient, cancel, work, plan, plan_limit, or None (DONE/RUNNING)."""
     if kind in ("DONE", "RUNNING"):
         return None
     if kind in ("RESTARTED", "MISSING"):
@@ -49,8 +56,13 @@ def klass(kind, run=None, blocked=None):
         if text.lower().startswith("plan:"):
             return "plan"
         return "work"
-    err = ((run or {}).get("error") or "").lower()
-    if any(p in err for p in _ERR):
+    raw = (run or {}).get("error") or ""
+    err = raw.lower()
+    if _NOT_IN_PLAN.search(raw):
+        return "work"
+    if _SPENT.search(raw):
+        return "plan_limit"
+    if _OVERLOADED.search(raw) or any(p in err for p in _ERR):
         return "transient"
     return "work"
 

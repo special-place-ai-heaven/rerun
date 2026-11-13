@@ -4,6 +4,7 @@ import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 import { assertCommandAllowed } from '../sandbox.js'
 import { agentProcessEnv } from '../../agents/process-env.js'
+import { sessionLabels } from '../../agents/session-labels.js'
 import { childProcessEnv } from '../../lib/child-env.js'
 import { HostBreaker, hostsOf, httpFailureInOutput, withHostBreaker, type HostAttempt } from '../host-breaker.js'
 import type { RunContext } from '../../runtime/context.js'
@@ -15,7 +16,17 @@ const execAsync = promisify(exec) as unknown as ShellRunner
 type ShellError = { stdout?: string; stderr?: string; message: string; killed?: boolean; signal?: string }
 
 export function shellTools(ctx: RunContext, run: ShellRunner = execAsync): ToolSet {
-    const { cwd, env: agentEnv } = agentProcessEnv(ctx.agent)
+    const { cwd, env: agentEnv } = agentProcessEnv(
+        ctx.agent,
+        sessionLabels({
+            agentId: ctx.agent.id,
+            agentName: ctx.agent.config.name,
+            sessionId: ctx.sessionId,
+            runId: ctx.runId,
+            jobRef: ctx.lineage?.jobRef,
+            branch: ctx.lineage?.branch,
+        }),
+    )
     const env = childProcessEnv(agentEnv)
     const breaker = ctx.hostBreaker ?? new HostBreaker()
     return {

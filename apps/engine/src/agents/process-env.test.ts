@@ -36,4 +36,21 @@ describe('agentProcessEnv', () => {
     it('leaves process.env out, so each caller decides what the process inherits', () => {
         expect(agentProcessEnv(agent({ sharedDb: false })).env.PATH).toBeUndefined()
     })
+
+    it('merges labels after the agent .env', () => {
+        const { env } = agentProcessEnv(agent({ sharedDb: false }, { A: '1' }), { RERUN_JOB: 'rerun#1', A: 'label' })
+        expect(env.RERUN_JOB).toBe('rerun#1')
+        expect(env.A).toBe('label')
+    })
+
+    it('does not let a label move the workspace or the private database', () => {
+        const { env } = agentProcessEnv(agent({ sharedDb: false }), { RERUN_WORKSPACE: '/x', RERUN_AGENT_DB: '/y' })
+        expect(env.RERUN_WORKSPACE).toBe(workspaceDir('env-agent'))
+        expect(env.RERUN_AGENT_DB).toBe(agentDataDbPath('env-agent'))
+    })
+
+    it('gives the old result when labels are omitted', () => {
+        expect(agentProcessEnv(agent({ sharedDb: true }), undefined)).toEqual(agentProcessEnv(agent({ sharedDb: true })))
+        expect(agentProcessEnv(agent({ sharedDb: true }), {})).toEqual(agentProcessEnv(agent({ sharedDb: true })))
+    })
 })

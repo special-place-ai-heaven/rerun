@@ -13,6 +13,7 @@ import {
     SPACE_DATA_BASE,
     agentDataBase,
     agentFilesBase,
+    cancelRun as engineCancelRun,
     createMemory as engineCreateMemory,
     executeDb as engineExecuteDb,
     fireTrigger as engineFireTrigger,
@@ -877,6 +878,17 @@ export async function dispatchAccountTool(actor: Actor, name: string, args: Reco
             const { conn, engineAgentId } = await resolveAgentTarget(requireString(args.agentId, 'agentId'), actor)
             const runs = await engineListRuns(conn, engineAgentId, { limit: clamp(asNumber(args.limit), 20, 200) })
             return { runs: runs.map(projectRun) }
+        }
+
+        case 'cancel_run': {
+            const { conn, engineAgentId } = await resolveAgentTarget(requireString(args.agentId, 'agentId'), actor, 'use')
+            const runId = requireString(args.runId, 'runId')
+            const before = await engineGetRun(conn, engineAgentId, runId)
+            await engineCancelRun(conn, engineAgentId, runId)
+            const after = await engineGetRun(conn, engineAgentId, runId)
+            // From the status before the call: the engine's own "aborted" cannot say it, since a row
+            // can read running with no live loop behind it.
+            return { ...projectRun(after), wasRunning: before.status === 'running' }
         }
 
         case 'get_run': {

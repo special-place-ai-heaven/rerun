@@ -8,6 +8,7 @@ import {
     createTrigger as engineCreateTrigger,
     deleteSchedule as engineDeleteSchedule,
     deleteSkill as engineDeleteSkill,
+    setSkillEnabled as engineSetSkillEnabled,
     deleteTrigger as engineDeleteTrigger,
     SPACE_DATA_BASE,
     agentDataBase,
@@ -567,6 +568,7 @@ export async function dispatchAccountTool(actor: Actor, name: string, args: Reco
                         name: skill.name,
                         description: skill.description,
                         files: skill.files,
+                        enabled: skill.enabled !== false,
                         ...(connector ? { connector, readOnly: true } : {}),
                     }
                 }),
@@ -668,6 +670,13 @@ export async function dispatchAccountTool(actor: Actor, name: string, args: Reco
                 await engineUploadFile(conn, base, new File([bytes], name), slash > 0 ? path.slice(0, slash) : '')
             }
             return { path, bytes: bytes.byteLength }
+        }
+
+        case 'set_skill_enabled': {
+            const { conn, engineAgentId } = await resolveAgentTarget(requireString(args.agentId, 'agentId'), actor, 'manage')
+            const slug = requireString(args.slug, 'slug')
+            if (typeof args.enabled !== 'boolean') throw new Error('enabled must be true or false.')
+            return engineSetSkillEnabled(conn, engineAgentId, slug, args.enabled)
         }
 
         case 'delete_skill': {

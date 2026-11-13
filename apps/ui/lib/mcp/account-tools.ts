@@ -190,7 +190,7 @@ const AGENT_TOOL_DEFS = [
     {
         name: 'list_skills',
         description:
-            'List a coworker skills: slug, name, description and the paths of the reference files each one carries. A skill is a procedure the coworker loads on demand when the task matches its description. A skill an app installed comes back flagged `readOnly` with its `connector`: it belongs to that app and can only change by reconfiguring it.',
+            'List a coworker skills: slug, name, description the paths of the reference files each one carries and `enabled`. A skill switched off is kept with its files but not offered to the coworker. A skill is a procedure the coworker loads on demand when the task matches its description. A skill an app installed comes back flagged `readOnly` with its `connector`: it belongs to that app and can only change by reconfiguring it.',
         inputSchema: {
             type: 'object',
             properties: { agentId: { type: 'string' } },
@@ -283,6 +283,16 @@ const AGENT_TOOL_DEFS = [
                 encoding: { type: 'string', enum: ['utf8', 'base64'] },
             },
             required: ['agentId', 'path', 'content'],
+        },
+    },
+    {
+        name: 'set_skill_enabled',
+        description:
+            "Switch one skill on or off for a coworker. Off keeps the skill and its files, but the coworker is not offered it and cannot load it. Allowed on an app's skill too.",
+        inputSchema: {
+            type: 'object',
+            properties: { agentId: { type: 'string' }, slug: { type: 'string' }, enabled: { type: 'boolean' } },
+            required: ['agentId', 'slug', 'enabled'],
         },
     },
     {

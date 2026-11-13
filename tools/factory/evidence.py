@@ -101,3 +101,13 @@ def verdict(get, full, pr, name, fired):
         if m and m.group(3).upper() == name.upper() and ts(c["created_at"]) > ts(fired):
             return "NONE", "%s verdict names %s, PR head is %s" % (name.upper(), m.group(2), head[:8])
     return v, d
+
+
+def stage_check(get, f, kv, ready):
+    """(verdict, detail) for a build run `f` (a fires row): `build` on the job's chunk branch. The repo comes from kv repo_url,
+    the test file from kv test:<chunk> (suite, file) and the paths from the ready item. Other stages: ("OK", "")."""
+    if f["stage"] != "build":
+        return "OK", ""
+    full = re.sub(r"(\.git)?/*$", "", kv["repo_url"]).split("github.com/")[-1]
+    ch = {"id": f["chunk"], "test": kv["test:" + f["chunk"]].split()[-1], "paths": ready["paths"]}
+    return build(get, full, f["job"], "job/" + f["job"], ch, f["intent_at"])

@@ -2,8 +2,11 @@ import os
 import subprocess
 
 
+ENV_ALLOWED = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR")
+
+
 def _rc(path, cmd, timeout):
-    env = {k: v for k, v in os.environ.items() if k not in ("FACTORY_GIT_TOKEN", "GIT_ASKPASS")}
+    env = {k: os.environ[k] for k in ENV_ALLOWED if k in os.environ}
     try:
         return subprocess.run(cmd, cwd=path, env=env, capture_output=True, timeout=timeout).returncode
     except subprocess.TimeoutExpired:

@@ -1,6 +1,9 @@
 import os, subprocess, tempfile, unittest
 
+import json
 import publish
+import runner_loop
+import store
 
 
 def git(cwd, *a):
@@ -22,7 +25,24 @@ class Publish(unittest.TestCase):
         calls = []
         sha = publish.publish(wt, 71, "C6e: x", "dev", lambda *a: calls.append(a) or "url", ["a.txt"])
         self.assertEqual(git(bare, "rev-parse", "factory/job-71"), sha)
-        self.assertEqual(calls, [("C6e: x", "factory/job-71", "dev")])
+        self.assertEqual(calls, [("C6e: x", "factory/job-71", "dev", "")])
+
+    def test_body_lists_each_chunk_with_receipt(self):
+        got = publish.body("o/r#71", {"B": {"verdict": "ok", "base": 1, "head": 0}, "A": {"verdict": "ok", "base": 2, "head": 0}})
+        self.assertEqual(got.splitlines(), ["Job: o/r#71, chunk A, B",
+                                            "Receipt A: done-test ok (base exit 2, head exit 0)",
+                                            "Receipt B: done-test ok (base exit 1, head exit 0)"])
+
+    def test_body_lists_only_unmerged_chunks_of_this_pr(self):
+        with tempfile.TemporaryDirectory() as d:
+            st = store.Store(os.path.join(d, "s.db"))
+            for c in ("A", "B"):
+                st.add_ready("71", c, ["x"], "", [])
+                st.set("71", "receipt:" + c, json.dumps({"verdict": "ok", "base": 1, "head": 0}))
+            st.set_ready_state("71", "A", "merged")
+            got = publish.body("o/r#71", runner_loop.unmerged_receipts(st, "71"))
+            self.assertEqual(got.splitlines(), ["Job: o/r#71, chunk B", "Receipt B: done-test ok (base exit 1, head exit 0)"])
+            st.close()
 
     def test_file_outside_paths_refused(self):
         d = tempfile.mkdtemp()

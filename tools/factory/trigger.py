@@ -98,7 +98,7 @@ def ensure_triggers(eng, cfg=None, stages=None):
             if row.get("slug") != slug:
                 raise TriggerError("the engine derived another slug than %s from the trigger name" % slug)
             if e.get("model") and model_of(row) != e["model"]:  # create did not keep the model: set it by the update route
-                row = dict(row, **eng._call("PATCH", "/agents/%s/triggers/%s" % (E._q(agent), E._q(slug)), payload={"model": e["model"]}))
+                row = dict(row, **eng.set_trigger_model(agent, slug, e["model"]))
                 if model_of(row) != e["model"]:
                     raise TriggerError("trigger %s did not take the model" % slug)
             listed[agent][slug] = row

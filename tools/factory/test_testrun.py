@@ -25,6 +25,11 @@ class TestRun(unittest.TestCase):
         with unittest.mock.patch.dict(os.environ, {"FACTORY_GIT_TOKEN": "fake", "GIT_ASKPASS": "/fake"}):
             self.assertEqual(testrun._rc(self.tree("x"), cmd, 30), 0)
 
+    def test_child_env_is_the_allowed_list_only(self):
+        cmd = [sys.executable, "-c", "import os, sys; sys.exit(1 if 'GH_TOKEN' in os.environ or 'OTHER_SECRET' in os.environ else 0)"]
+        with unittest.mock.patch.dict(os.environ, {"GH_TOKEN": "fake", "OTHER_SECRET": "x", "PATH": os.environ.get("PATH", "")}):
+            self.assertEqual(testrun._rc(self.tree("x"), cmd, 30), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

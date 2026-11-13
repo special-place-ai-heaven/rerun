@@ -61,8 +61,31 @@ class Client:
     def checks(self, sha):
         return self.get("/commits/%s/check-runs" % sha)["check_runs"]
 
+    def pr_by_head(self, branch):
+        """Newest open PR for the branch (else newest PR of any state) as a summary, or None."""
+        head = urllib.parse.quote(self.repo.split("/")[0] + ":" + branch, safe="")
+        prs = self.get("/pulls?state=all&head=" + head)
+        prs = sorted(prs, key=lambda p: (p["state"] == "open", p["number"]), reverse=True)
+        if not prs:
+            return None
+        p = prs[0]
+        merged = bool(p.get("merged_at"))
+        return {"number": p["number"], "state": p["state"], "merged": merged,
+                "merge_sha": p.get("merge_commit_sha") if merged else None}
+
     def open_pr(self, title, head, base, body=""):
+        try:
+            found = self.pr_by_head(head)
+        except GhError as e:
+            if e.status != 404:
+                raise
+            found = None  # lookup route absent: let the POST report the real error
+        if found and found["state"] == "open":
+            return found  # retry-safe: one open PR per head
         return self.req("POST", "/pulls", {"title": title, "head": head, "base": base, "body": body})
+
+    def branch_sha(self, branch):
+        return self.get("/git/ref/heads/" + urllib.parse.quote(branch, safe="/"))["object"]["sha"]
 
     def create_issue(self, title, body=""):
         return self.req("POST", "/issues", {"title": title, "body": body})

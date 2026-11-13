@@ -9,7 +9,8 @@ import argparse, json, os, signal, subprocess, sys, tempfile, threading, time, u
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import applypatch as AP, checkout as CO, engine as E, factory as F, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T, wake
+import applypatch as AP, batch as BT, checkout as CO, engine as E, evidence as EV, factory as F, ghclient as GH, intake as IN, limits as L, publish as PB, followups as FU, readyq as RQ, store as S, testrun as TR, trigger as T, wake
+from publish import body as pr_body  # not via PB: tests swap PB for a fake with publish only
 
 POLL_S = 30
 INBOX_NAME = "inbox"
@@ -164,9 +165,13 @@ def ingest(st, inbox):
         n += 1
     return n
 
+class ChainFailed(Exception):
+    """The publish chain of a finished build did not complete."""
+
+
 class Runner:
-    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None, issues=None):
-        self.open_pr, self.evidence, self.issues = open_pr, evidence, issues
+    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None, issues=None, pr_by_head=None):
+        self.open_pr, self.evidence, self.issues, self.pr_by_head = open_pr, evidence, issues, pr_by_head
         self.eng, self.st, self.cfg, self.tokens, self.clock = eng, st, cfg, tokens, clock
         self.by_slug = {e["slug"]: e for e in cfg["triggers"]}
         self.by_stage = {e["stage"]: e for e in cfg["triggers"]}
@@ -180,6 +185,7 @@ class Runner:
                 self.check(f)
             except (E.EngineError, T.TriggerError) as e:
                 log("read of run %s failed, will retry: %s" % (f["run_id"], e))
+        self.see_merges()
         self.sweep_leases()
         self.start_queued()
         self.start_ready()
@@ -241,7 +247,10 @@ class Runner:
             log("run %s result discarded: lease of chunk %s closed" % (rid, f["chunk"]))
         elif what == "DONE":
             if f["stage"] == "build" and f["chunk"] and "published:" + f["chunk"] not in self.st.get_all(f["job"]):
-                self.finish_build(f)
+                try:
+                    self.finish_build(f)
+                except ChainFailed as e:
+                    return self.chain_failed(f, str(e), tin, tout)
             ev = self.evidence(f) if self.evidence else ("OK", "")
             if ev[0] != "OK":
                 return  # the run ended but no evidence yet: stays running, read again next tick
@@ -276,22 +285,54 @@ class Runner:
         except (OSError, RuntimeError) as e:
             log("follow-up issues for %s stopped: %s" % (job, type(e).__name__))
 
+    def chain_failed(self, f, why, tin, tout):
+        """A failed publish chain is a failed attempt, never done: limits.failure says RETRY (requeue) or NEEDS_BOSS (escalate)."""
+        what, note = L.failure(self.st.attempts(f["job"], f["chunk"]), self.cfg, why)
+        self.st.close_run(f["run_id"], "error" if what == "RETRY" else "failed", iso(self.clock()), tin, tout, note or why)
+        if what == "RETRY":
+            return self.requeue(f)
+        self.st.set_ready_state(f["job"], f["chunk"], "needs_boss")
+        log("chunk %s of job %s escalated: %s" % (f["chunk"], f["job"], note))
+
     def finish_build(self, f):
         """A build run ended: check out base and head, apply the chunk's patch, run its done-test (fails on base, passes on
         head), publish only the chunk's paths. Job kv keys: repo_url, base, base_branch, title, patch:<chunk>, test:<chunk>."""
         job, chunk = f["job"], f["chunk"]
         kv, paths = self.st.get_all(job), self.st.get_ready(job, chunk)["paths"]
+        if "repo_url" not in kv:  # a job never registered for publishing has no chain to fail
+            return log("chunk %s: job %s has no repo_url, nothing to publish" % (chunk, job))
         d = self.cfg.get("work_dir") or os.path.join(os.path.dirname(store_path(self.cfg)), "work")
         try:
             base, head = (CO.Checkout(os.path.join(d, job, n), kv["repo_url"], kv["base"]).ensure() for n in ("base", "head"))
             if (r := AP.apply(head, kv["patch:" + chunk], paths)) != "applied":
-                return log("chunk %s: patch %s" % (chunk, r))
-            if (r := TR.run(base, head, kv["test:" + chunk].split())["verdict"]) != "ok":
-                return log("chunk %s: done-test %s" % (chunk, r))
-            PB.publish(head, job, kv["title"], kv["base_branch"], self.open_pr, paths)
+                raise ChainFailed("patch %s" % r)
+            res = TR.run(base, head, kv["test:" + chunk].split())
+            if res["verdict"] != "ok":
+                raise ChainFailed("done-test %s" % res["verdict"])
+            self.st.set(job, "receipt:" + chunk, json.dumps(res))
+            repo = kv["repo_url"].replace("https://github.com/", "", 1)
+            text = pr_body("%s#%s" % (repo, job), unmerged_receipts(self.st, job))
+            PB.publish(head, job, kv["title"], kv["base_branch"], lambda t, h, b, _="": self.open_pr(t, h, b, text), paths)
             self.st.set(job, "published:" + chunk, "1")
         except (KeyError, ValueError, OSError, subprocess.CalledProcessError) as e:
-            log("chunk %s: publish chain stopped: %s" % (chunk, type(e).__name__))
+            raise ChainFailed("publish chain stopped: %s" % type(e).__name__) from e
+
+    def see_merges(self):
+        """A published chunk stays 'running' until its job PR (branch factory/job-<job>) is merged; one merged PR marks every
+        published chunk of that job 'merged'. A GitHub error means not seen yet."""
+        if not self.pr_by_head:
+            return
+        for (job,) in self.st.db.execute("SELECT DISTINCT job FROM ready_chunks WHERE state='running'").fetchall():
+            done = [r[0] for r in self.st.db.execute("SELECT chunk FROM ready_chunks WHERE job=? AND state='running'", (job,))
+                    if "published:" + r[0] in self.st.get_all(job)]
+            try:
+                pr = done and self.pr_by_head("factory/job-%s" % job)
+            except GH.GhError as e:
+                log("merge check of job %s failed, will retry: %s" % (job, e))
+                continue
+            if pr and pr["merged"]:
+                for c in done:
+                    self.st.set_ready_state(job, c, "merged")
 
     def requeue(self, f):
         payload = {"job": f["job"], "stage": f["stage"], "chunk": f["chunk"]}
@@ -426,34 +467,65 @@ class Runner:
         busy, stages = [(f["job"], f["chunk"]) for f in fires if f["chunk"]], sum(1 for f in fires if not f["chunk"])
         merged = {r[0] for r in self.st.db.execute("SELECT chunk FROM ready_chunks WHERE state='merged'")}
         token = ent and self.tokens.get("%s/%s" % (ent["agent"], ent["slug"]))
-        for it in self.st.ready_list():
-            if not token:
+        left = [c for c in self.st.ready_list() if not self.over_total(c["job"])]
+        while token and left:
+            first = next((c for c in left if RQ.eligible(c, self._ready_state(merged, busy, stages, c["job"]))[0]), None)
+            if not first:
                 return
-            state = {"merged": merged, "busy": busy, "stages": stages, "leases": self.st.open_leases(),
-                     "fired": self.st.fire_count(it["job"]), "cfg": self.cfg}
-            if self.over_total(it["job"]) or not RQ.eligible(it, state)[0]:
-                continue
-            job, chunk = it["job"], it["chunk"]
-            payload = {"job": job, "stage": "build", "chunk": chunk}
-            q = self.st.enqueue(job, "build", chunk, payload)
-            fid = self.st.dequeue_to_intent(q, job, chunk, "build", ent.get("coworker", ""), ent["slug"],
-                                              it["paths"], iso(self.clock() + 2 * self.cfg.get("run_limit_s", 600)))
-            self.st.set_ready_state(job, chunk, "running")
-            busy.append((job, chunk))
-            try:
-                run_id, _ = T.fire(self.eng, ent["agent"], ent["slug"], token, payload)
-            except T.TriggerError as e:
-                log("fire of chunk %s failed (kept as intent): %s" % (chunk, e))
-                continue
-            self.st.fired(fid, run_id)
-            log("fired chunk %s of job %s: run %s" % (chunk, job, run_id))
+            same = [c for c in left if c["job"] == first["job"]]  # a batch is one job's chunks
+            batch = BT.pick_batch(same, self._ready_state(merged, busy, stages, first["job"]))
+            run_id = self.fire_batch(batch)
+            left = [c for c in left if c not in batch]
+            busy += [(c["job"], c["chunk"]) for c in batch]
+            log("fired chunks %s of job %s: run %s" % ([c["chunk"] for c in batch], first["job"], run_id))
 
-def build(cfg=None, eng=None, clock=time.time):
+    def _ready_state(self, merged, busy, stages, job):
+        return {"merged": merged, "busy": busy, "stages": stages, "leases": self.st.open_leases(),
+                "fired": self.st.fire_count(job), "cfg": self.cfg}
+
+def build(cfg=None, eng=None, clock=time.time, gh=None):
+    """gh: the one GitHub client (ghclient.Client) for open_pr and issues; default made from cfg github_api / repo, token from GH_TOKEN."""
     cfg = load_runtime(cfg)
+    gh = gh or GH.Client(cfg.get("github_api", "https://api.github.com"), cfg.get("repo", "special-place-ai-heaven/rerun"))
     eng = eng or E.Engine()
     tokens = T.ensure_triggers(eng, cfg)
     st = S.Store(store_path(cfg))
-    return Runner(eng, st, cfg, tokens, clock)
+    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr, issues=gh, pr_by_head=lambda b: gh.pr_by_head(b), evidence=lambda f: stage_evidence(gh, st, f))
+
+def unmerged_receipts(st, job):
+    """Receipts of the job's chunks not yet merged: the body of this PR lists only those."""
+    merged = {c for (c,) in st.db.execute("SELECT chunk FROM ready_chunks WHERE job=? AND state='merged'", (job,))}
+    return {k[8:]: json.loads(v) for k, v in st.get_all(job).items() if k.startswith("receipt:") and k[8:] not in merged}
+
+def stage_evidence(gh, st, f):
+    """Evidence for an ended run: a build run needs its pushed branch and CI (evidence.stage_check); other stages: OK.
+    A job without repo_url never published, so it has nothing to check. A GitHub error means no evidence yet."""
+    kv = st.get_all(f["job"])
+    if f["stage"] != "build" or "repo_url" not in kv:
+        return "OK", ""
+    try:
+        return EV.stage_check(gh.get, f, kv, st.get_ready(f["job"], f["chunk"]))
+    except GH.GhError as e:
+        return "NONE", str(e)
+
+TRUSTED_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
+FACTORY_LOGIN = "special-place-administrator"
+
+def _trusted(item):
+    return item.get("author_association") in TRUSTED_ASSOCIATIONS or (item.get("user") or {}).get("login") == FACTORY_LOGIN
+
+def intake_issue(st, gh, repo, n, base_branch="dev"):
+    """`intake REPO#N`: the issue (body, then comments) is the plan text; the job kv gets repo_url, title, base_branch and the
+    sha of base_branch as `base`. Nothing is stored when the plan has no valid chunk. Returns (state, errors)."""
+    issue = gh.issue(n)
+    parts = [issue.get("body") or ""] if _trusted(issue) else []  # only the repo's own people write the plan
+    text = "\n".join(parts + [c.get("body") or "" for c in gh.comments(n) if _trusted(c)])
+    meta = {"repo_url": "https://github.com/" + repo, "title": issue["title"], "base_branch": base_branch}
+    sha = gh.branch_sha(base_branch)  # resolved before register: a GitHub error then stores no job
+    state, errors = IN.register(st, str(n), meta, text)
+    if state:
+        st.set(str(n), "base", sha)
+    return state, errors
 
 def run(r, stop, poll_s):
     log("started")
@@ -476,8 +548,25 @@ def main(argv=None):
     en.add_argument("stage")
     en.add_argument("--chunk", default="")
     en.add_argument("--payload-file", help="JSON file used as the packet payload")
+    ik = sub.add_parser("intake")
+    ik.add_argument("ref", help="REPO#N, e.g. owner/name#71")
+    ik.add_argument("--base", default="dev")
     a = ap.parse_args(argv)
     cfg = T.load_config()
+    if a.cmd == "intake":
+        repo, _, n = a.ref.rpartition("#")
+        st = S.Store(store_path(cfg))
+        try:
+            state, errors = intake_issue(st, GH.Client(cfg.get("github_api", "https://api.github.com"), repo), repo, int(n), a.base)
+        except (GH.GhError, ValueError) as e:
+            print("intake failed: %s" % e, file=sys.stderr)
+            return 1
+        finally:
+            st.close()
+        for e in errors:
+            print("rejected: " + e, file=sys.stderr)
+        print("job %s: %s" % (n, "registered %d chunks" % len(state["chunks"]) if state else "no valid chunk"))
+        return 0 if state else 1
     if a.cmd == "enqueue":
         payload = None
         if a.payload_file:

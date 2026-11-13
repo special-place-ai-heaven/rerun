@@ -15,9 +15,9 @@ class FakeEngine:
         self.calls.append(("create", model))
         return {"slug": name, "token": "tok", "model": None}
 
-    def _call(self, method, path, query=None, payload=None):
-        self.calls.append((method, path, payload))
-        return {"model": payload["model"]} if self.patch else {}
+    def set_trigger_model(self, agent, slug, model):
+        self.calls.append(("set_model", agent, slug, model))
+        return {"model": model} if self.patch else {}
 
 
 class TriggerModel(unittest.TestCase):
@@ -31,7 +31,13 @@ class TriggerModel(unittest.TestCase):
             T.ensure_triggers(eng, self.cfg(d))
             with open(os.path.join(d, "t.json"), encoding="utf-8") as f:
                 self.assertIn("ag/factory-challenge", f.read())
-        self.assertEqual(eng.calls[1], ("PATCH", "/agents/ag/triggers/factory-challenge", {"model": "claude-x"}))
+        self.assertEqual(eng.calls[0], ("create", "claude-x"))
+
+    def test_model_set_by_public_method(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = FakeEngine()
+            T.ensure_triggers(eng, self.cfg(d))
+        self.assertEqual(eng.calls[1], ("set_model", "ag", "factory-challenge", "claude-x"))
 
     def test_model_not_taken_is_an_error(self):
         with tempfile.TemporaryDirectory() as d:

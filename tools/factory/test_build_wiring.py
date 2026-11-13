@@ -11,7 +11,8 @@ class BuildWiring(unittest.TestCase):
         class CK:
             def __init__(s, path, url, base): calls.append("checkout")
             def ensure(s): return "p"
-        saved = (R.CO, R.AP, R.TR, R.PB)
+        saved = (R.CO, R.AP, R.TR, R.PB, R.EV)
+        R.EV = NS(stage_check=lambda *a: ("OK", ""))
         R.CO = NS(Checkout=CK)
         R.AP = NS(apply=lambda w, p, a: calls.append("apply %s" % a) or "applied")
         R.TR = NS(run=lambda b, h, c: calls.append("testrun") or {"verdict": "ok"})
@@ -30,9 +31,29 @@ class BuildWiring(unittest.TestCase):
                 eng.runs["run1"]["status"] = "done"
                 r.tick()
             finally:
-                R.CO, R.AP, R.TR, R.PB = saved
+                R.CO, R.AP, R.TR, R.PB, R.EV = saved
                 r.st.close()
         self.assertEqual(calls, ["checkout", "checkout", "apply ['a.py']", "testrun", "publish ['a.py']"])
+
+    def test_build_passes_ghclient_open_pr(self):
+        gh = NS(open_pr=lambda *a: None, get=lambda p: None, create_issue=lambda *a: None)
+        with tempfile.TemporaryDirectory() as d:
+            cfg = {"poll_s": 30, "run_limit_s": 600, "stall_s": 0, "token_file": os.path.join(d, "t.json"),
+                   "store_file": os.path.join(d, "l.db"),
+                   "triggers": [{"stage": "build", "coworker": "CODE", "agent": "ag1", "slug": "factory-build"}]}
+            r = R.build(cfg, Eng(), clock=lambda: T0, gh=gh)
+            r.st.close()
+        self.assertIs(r.open_pr, gh.open_pr)
+
+    def test_build_passes_issues_client(self):
+        gh = NS(open_pr=lambda *a: None, get=lambda p: None, create_issue=lambda *a: None)
+        with tempfile.TemporaryDirectory() as d:
+            cfg = {"poll_s": 30, "run_limit_s": 600, "stall_s": 0, "token_file": os.path.join(d, "t.json"),
+                   "store_file": os.path.join(d, "l.db"),
+                   "triggers": [{"stage": "build", "coworker": "CODE", "agent": "ag1", "slug": "factory-build"}]}
+            r = R.build(cfg, Eng(), clock=lambda: T0, gh=gh)
+            r.st.close()
+        self.assertIs(r.issues, gh)
 
 
 if __name__ == "__main__":

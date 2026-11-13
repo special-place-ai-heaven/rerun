@@ -10,7 +10,7 @@ type ProviderOptions = NonNullable<Parameters<typeof streamText>[0]['providerOpt
 // already produces and already bills for. `claude` and `codex` drive their CLI through
 // `defaultSettings` instead, and `rerun` / `openrouter` ask for it in the request body
 // (see openrouter-reasoning.ts) because the OpenAI chat wire format has no field for it.
-const REASONING_OPTIONS: Partial<Record<Provider, ProviderOptions>> = {
+export const REASONING_OPTIONS: Partial<Record<Provider, ProviderOptions>> = {
     anthropic: { anthropic: { thinking: { type: 'adaptive', display: 'summarized' } } },
     openai: { openai: { reasoningSummary: 'auto' } },
     google: { google: { thinkingConfig: { includeThoughts: true } } },

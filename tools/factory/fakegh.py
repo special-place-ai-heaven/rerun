@@ -5,9 +5,9 @@ from urllib.parse import urlparse, parse_qs
 
 
 class Fake:
-    def __init__(self, issues=None, comments=None, commits=None, statuses=None, checks=None):
+    def __init__(self, issues=None, comments=None, commits=None, statuses=None, checks=None, diffs=None):
         self.issues, self.comments, self.commits = dict(issues or {}), comments or {}, commits or {}
-        self.statuses, self.checks, self.calls, self.next = statuses or {}, checks or {}, [], 72
+        self.diffs, self.statuses, self.checks, self.calls, self.next = dict(diffs or {}), statuses or {}, checks or {}, [], 72
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -20,7 +20,7 @@ class Fake:
                 body = json.loads(self.rfile.read(n)) if n else None
                 fake.calls.append((self.command, u.path, body, self.headers.get("Authorization")))
                 code, out, link = fake.route(self.command, u.path.split("/")[4:], parse_qs(u.query))
-                data = json.dumps(out).encode()
+                data = out.encode() if isinstance(out, str) else json.dumps(out).encode()
                 self.send_response(code)
                 self.send_header("Content-Length", str(len(data)))
                 if link:
@@ -37,6 +37,10 @@ class Fake:
         if m == "POST" and p in (["issues"], ["pulls"]):
             self.next += 1
             return 201, {"number": self.next - 1}, None
+        if m == "GET" and len(p) > 1 and p[0] == "compare":
+            b, _, h = "/".join(p[1:]).partition("...")
+            d = self.diffs.get((b, h))
+            return (200, d, None) if d is not None else (404, {"message": "Not Found"}, None)
         i, sub = (p + ["", ""])[1], (p + ["", "", ""])[2]
         out = {("issues", ""): lambda: self.issues.get(int(i or 0)), ("commits", ""): lambda: self.commits.get(i),
                ("commits", "status"): lambda: self.statuses.get(i, []),

@@ -33,6 +33,13 @@ class Runner(unittest.TestCase):
         self.assertIn("name: rerun-dev", self.c)
         self.assertNotIn("networks:", self.c)
 
+    def test_compose_builds_from_factory_runner_dockerfile(self):
+        self.assertRegex(self.c, r"(?m)^    build:\n(      .*\n)*?      dockerfile: factory-runner\.Dockerfile$")
+        self.assertNotRegex(self.c, r"(?m)^    image:")
+        self.assertNotRegex(self.c, r"gh[pousr]_\w{10}|github_pat_|(?i:token)\w*[ \t]*[:=][ \t]*[^\s$?]")
+        self.assertNotIn("env_file", self.c)
+        self.assertNotIn("ports:", self.c)
+
     def test_only_the_dev_key_and_url(self):
         self.assertIn("RERUN_DEV_ENGINE_KEY: ${RERUN_DEV_ENGINE_KEY:?", self.c)
         self.assertIn("RERUN_DEV_ENGINE_URL: http://engine-dev:3000", self.c)
@@ -50,6 +57,14 @@ class Runner(unittest.TestCase):
         self.assertRegex(self.c, r"factory-runner-data:/state")
         mounts = re.findall(r"^\s+- (\S+:/\S+)$", self.c, re.M)
         self.assertEqual(len(mounts), 2, mounts)
+
+    def test_token_comes_from_key_file_secret(self):
+        self.assertRegex(self.c, r"(?m)^    secrets:\n      - gh_token$")
+        self.assertRegex(self.c, r"(?m)^secrets:\n  gh_token:\n    file: \$\{FACTORY_GH_TOKEN_FILE:\?")
+        self.assertNotRegex(self.c, r"(GH|GITHUB|FACTORY_GIT)_TOKEN\s*:")
+        self.assertNotIn("env_file", self.c)
+        self.assertNotIn("ports:", self.c)
+        self.assertEqual(len(re.findall(r"^\s+- (\S+:/\S+)$", self.c, re.M)), 2)
 
 
 class StatusScript(unittest.TestCase):

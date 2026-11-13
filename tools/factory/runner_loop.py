@@ -170,8 +170,8 @@ class ChainFailed(Exception):
 
 
 class Runner:
-    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None, issues=None, pr_by_head=None):
-        self.open_pr, self.evidence, self.issues, self.pr_by_head = open_pr, evidence, issues, pr_by_head
+    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None, issues=None, pr_by_head=None, compare_diff=None):
+        self.open_pr, self.evidence, self.issues, self.pr_by_head, self.compare_diff = open_pr, evidence, issues, pr_by_head, compare_diff
         self.eng, self.st, self.cfg, self.tokens, self.clock = eng, st, cfg, tokens, clock
         self.by_slug = {e["slug"]: e for e in cfg["triggers"]}
         self.by_stage = {e["stage"]: e for e in cfg["triggers"]}
@@ -304,6 +304,9 @@ class Runner:
         d = self.cfg.get("work_dir") or os.path.join(os.path.dirname(store_path(self.cfg)), "work")
         try:
             base, head = (CO.Checkout(os.path.join(d, job, n), kv["repo_url"], kv["base"]).ensure() for n in ("base", "head"))
+            if "patch:" + chunk not in kv and self.compare_diff:  # no patch given: the pushed chunk branch against the job base
+                kv["patch:" + chunk] = self.compare_diff(kv["base"], "chunk/%s-%s" % (job, chunk))
+                self.st.set(job, "patch:" + chunk, kv["patch:" + chunk])
             if (r := AP.apply(head, kv["patch:" + chunk], paths)) != "applied":
                 raise ChainFailed("patch %s" % r)
             res = TR.run(base, head, kv["test:" + chunk].split())
@@ -314,8 +317,23 @@ class Runner:
             text = pr_body("%s#%s" % (repo, job), unmerged_receipts(self.st, job))
             PB.publish(head, job, kv["title"], kv["base_branch"], lambda t, h, b, _="": self.open_pr(t, h, b, text), paths)
             self.st.set(job, "published:" + chunk, "1")
-        except (KeyError, ValueError, OSError, subprocess.CalledProcessError) as e:
+            self.run_gate(repo, job)
+        except (KeyError, ValueError, OSError, subprocess.CalledProcessError, GH.GhError) as e:
             raise ChainFailed("publish chain stopped: %s" % type(e).__name__) from e
+
+    def run_gate(self, repo, job):
+        """After publish: gate.py <repo> <pr> as a child (posts the commit status, token from our env). Only logged, never changes chunk state."""
+        try:
+            pr = self.pr_by_head and self.pr_by_head("factory/job-%s" % job)
+            if not pr:
+                return log("gate skipped for job %s: no PR found" % job)
+            env = dict(os.environ, GATE_POST_STATUS="1", FACTORY_GH="gh",
+                       FACTORY_WORK=os.path.join(os.environ.get("FACTORY_DATA_DIR", "/state"), "work"))  # /data/work is read-only here
+            p = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gate.py"), repo, str(pr["number"])],
+                               env=env, capture_output=True, text=True, timeout=600)
+            log("gate %s#%s exit %s" % (repo, pr["number"], p.returncode))
+        except Exception as e:  # a gate that cannot run is a log line, not a failed chunk
+            log("gate for job %s did not run: %s" % (job, type(e).__name__))
 
     def see_merges(self):
         """A published chunk stays 'running' until its job PR (branch factory/job-<job>) is merged; one merged PR marks every
@@ -483,6 +501,21 @@ class Runner:
         return {"merged": merged, "busy": busy, "stages": stages, "leases": self.st.open_leases(),
                 "fired": self.st.fire_count(job), "cfg": self.cfg}
 
+TOKEN_FILE = "/run/secrets/gh_token"
+
+def load_token(cfg):
+    """Read the key file named by cfg gh_token_file once and put its content in GH_TOKEN and FACTORY_GIT_TOKEN.
+    A missing, unreadable or empty file raises RuntimeError naming the path only, never the content."""
+    path = cfg.get("gh_token_file") or TOKEN_FILE
+    try:
+        with open(path, encoding="utf-8") as f:
+            tok = f.read().strip()
+    except OSError as e:
+        raise RuntimeError("token file %s cannot be read (%s)" % (path, e.strerror or type(e).__name__))
+    if not tok:
+        raise RuntimeError("token file %s is empty" % path)
+    os.environ["GH_TOKEN"] = os.environ["FACTORY_GIT_TOKEN"] = tok
+
 def build(cfg=None, eng=None, clock=time.time, gh=None):
     """gh: the one GitHub client (ghclient.Client) for open_pr and issues; default made from cfg github_api / repo, token from GH_TOKEN."""
     cfg = load_runtime(cfg)
@@ -490,7 +523,7 @@ def build(cfg=None, eng=None, clock=time.time, gh=None):
     eng = eng or E.Engine()
     tokens = T.ensure_triggers(eng, cfg)
     st = S.Store(store_path(cfg))
-    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr, issues=gh, pr_by_head=lambda b: gh.pr_by_head(b), evidence=lambda f: stage_evidence(gh, st, f))
+    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr, issues=gh, pr_by_head=lambda b: gh.pr_by_head(b), compare_diff=getattr(gh, "compare_diff", None), evidence=lambda f: stage_evidence(gh, st, f))
 
 def unmerged_receipts(st, job):
     """Receipts of the job's chunks not yet merged: the body of this PR lists only those."""
@@ -583,6 +616,11 @@ def main(argv=None):
             print("setup failed: %s" % ("unexpected engine answer" if isinstance(e, KeyError) else e), file=sys.stderr)
             return 1
         return 0
+    try:
+        load_token(cfg)
+    except RuntimeError as e:
+        print("runner: cannot start: %s" % e, file=sys.stderr)
+        return 1
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())

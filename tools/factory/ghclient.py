@@ -15,16 +15,17 @@ class Client:
     def __repr__(self):
         return "Client(%s, %s)" % (self.base, self.repo)
 
-    def _open(self, method, url, body=None):
+    def _open(self, method, url, body=None, accept="application/json", raw=False):
         tok = os.environ.get(self.token_env)
         if not tok:
             raise GhError("no token in environment variable %s" % self.token_env)
         req = urllib.request.Request(url, method=method, headers={"Authorization": "token " + tok,
-                                     "Accept": "application/json", "Content-Type": "application/json"},
+                                     "Accept": accept, "Content-Type": "application/json"},
                                      data=None if body is None else json.dumps(body).encode())
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
-                return json.loads(r.read() or b"null"), r.headers.get("Link")
+                data = r.read()
+                return (data.decode("utf-8", "replace") if raw else json.loads(data or b"null")), r.headers.get("Link")
         except urllib.error.HTTPError as e:
             raise GhError("%s %s failed: HTTP %d" % (method, url.split("?")[0], e.code), e.code) from None
         except urllib.error.URLError as e:
@@ -89,3 +90,8 @@ class Client:
 
     def create_issue(self, title, body=""):
         return self.req("POST", "/issues", {"title": title, "body": body})
+
+    def compare_diff(self, base, branch):
+        q = lambda b: urllib.parse.quote(b, safe="/")
+        url = "%s/repos/%s/compare/%s...%s" % (self.base, self.repo, q(base), q(branch))
+        return self._open("GET", url, accept="application/vnd.github.diff", raw=True)[0]

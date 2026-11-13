@@ -247,6 +247,16 @@ def chunk_limits(full, n, jobrepo, jobn, ids):
     return why
 
 
+RECEIPT_RE = re.compile(r"^\s*Receipt (\w+): done-test (\w+) \(base exit (-?\d+), head exit (-?\d+)\)\s*$", re.M)
+
+
+def receipts(body, ref):
+    """{chunk: (done_test_ok, fail_before_ok)} from the 'Receipt' lines of a PR whose head ref is factory/job-<n>; any other PR gets {}."""
+    if not re.fullmatch(r"factory/job-\d+", ref or ""):
+        return {}
+    return {c: (v == "ok" and int(h) == 0, int(b) != 0) for c, v, b, h in RECEIPT_RE.findall(body or "")}
+
+
 def _list(x):
     return x if isinstance(x, list) else []
 
@@ -319,7 +329,14 @@ def gate(repo, n):
 
     # 2 DONE_TEST
     dt = fld.get("done-test")
-    if idconf:
+    jobpr = re.fullmatch(r"factory/job-\d+", pr["head"]["ref"]) is not None
+    rc = receipts(pbody, pr["head"]["ref"])
+    want = ids or sorted(rc)
+    if jobpr:
+        for i, (key, what) in enumerate((("DONE_TEST", "done-test"), ("FAIL_BEFORE", "fail-before"))):
+            bad = [c for c in want if not rc.get(c, (False, False))[i]]
+            put(key, want and not bad, ("%s receipt ok for chunk %s" % (what, ", ".join(want))) if want and not bad else "no %s receipt line that holds for chunk: %s" % (what, ", ".join(bad) or "none named"))
+    elif idconf:
         put("DONE_TEST", False, "chunk id mismatch: " + idconf)
     elif not dt:
         put("DONE_TEST", False, "no done-test in work order %s#%s chunk %s" % (jobrepo, jobn, chunk) if jobn else "chunk id not found (branch chunk/<issue>-<cN> or 'Job: <repo>#<n>, chunk <cN>')")
@@ -346,7 +363,9 @@ def gate(repo, n):
     # 3 FAIL_BEFORE
     tfiles = [f["filename"] for f in files if f["status"] in ("added", "modified") and (re.search(TESTF, f["filename"]) or inline_rust_test(f))]
     commits = [c["sha"] for c in gh_json("repos/%s/pulls/%s/commits?per_page=100" % (full, n), paginate=True) if c["sha"] != head]
-    if not tfiles:
+    if jobpr:
+        pass  # judged from the receipt lines above
+    elif not tfiles:
         put("FAIL_BEFORE", False, "PR touches no test file: nothing that failed before")
     else:
         missing, rec, nolog = [], [], set()

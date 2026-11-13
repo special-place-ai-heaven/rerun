@@ -46,6 +46,13 @@ class GhPr(unittest.TestCase):
         self.assertEqual(c.branch_sha("wave/x"), "f00d")
         self.assertEqual(c.sent[0][:2], ("GET", "/git/ref/heads/wave/x"))
 
+    def test_compare_diff_returns_text(self):
+        seen = []
+        c = ghclient.Client("http://x", "o/r")
+        c._open = lambda m, url, body=None, accept="", raw=False: (seen.append((m, url, accept, raw)) or "diff --git a/f b/f\n", None)
+        self.assertEqual(c.compare_diff("job/71", "chunk/71-a"), "diff --git a/f b/f\n")
+        self.assertEqual(seen, [("GET", "http://x/repos/o/r/compare/job/71...chunk/71-a", "application/vnd.github.diff", True)])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,8 +16,18 @@ class ImageFiles(unittest.TestCase):
         self.assertNotRegex(self.text, r"gh[pousr]_\w{10}|github_pat_|https?://\S+@")
         self.assertNotRegex(self.text, r"(?m)^(ENV|ARG)\s+\w*(TOKEN|KEY)\w*\s*=?\s*\S")
 
+    def test_gh_installed_no_token(self):
+        # gh comes from the distribution package (no new apt source), and nothing bakes a token in.
+        self.assertRegex(self.text, r"apt-get install[^\n]*\bgh\b")
+        self.assertNotRegex(self.text, r"cli\.github\.com|githubcli|/etc/apt/sources|apt-key|gh auth")
+        self.assertNotRegex(self.text, r"(?m)^(ENV|ARG)\s+(GH|GITHUB)_\w*")
+        self.assertNotRegex(self.text, r"gh[pousr]_\w{10}|github_pat_")
+
     def test_runs_unprivileged(self):
         self.assertRegex(self.text, r"(?m)^USER\s+(?!root)\S+")
+
+    def test_runner_uid_pinned(self):
+        self.assertRegex(self.text, r"useradd\b[^\n]*--uid 10001\b")
 
 
 if __name__ == "__main__":

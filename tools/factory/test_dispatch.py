@@ -144,6 +144,7 @@ class Base(unittest.TestCase):
         self.cfg = {"repo": "o/r", "label": "factory", "max_jobs": 8, "checks_timeout_s": 3600, "auto_plan_marker": True,
                     "ledger_file": os.path.join(self.dir.name, "ledger.db"),
                     "json_state_file": os.path.join(self.dir.name, "dispatch.json"),
+                    "heartbeat_file": os.path.join(self.dir.name, "heartbeat"),
                     "builders": [{"id": b, "name": b.upper()} for b in self.builders],
                     "reviewers": [{"id": r, "name": r.upper()} for r in ("r1", "r2")]}
         self.w.ledger = self.cfg["ledger_file"]
@@ -882,6 +883,24 @@ class Ledger(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Heartbeat(Base):
+    def test_each_beat_writes_the_time_and_the_state_per_stage(self):
+        self.tick()
+        first = open(self.cfg["heartbeat_file"], encoding="utf-8").read().strip()
+        self.assertIn("beat 1 | waiting 0, queued 0, building 0,", first)
+        self.d.store.put_job("6", "waiting", {"issue": 6, "relabelled": True})
+        self.d.store.put_job("7", "merged", {"issue": 7, "relabelled": True})
+        self.out.truncate(0)
+        self.out.seek(0)
+        self.tick()
+        line = open(self.cfg["heartbeat_file"], encoding="utf-8").read().strip()
+        self.assertEqual(line, "1970-01-01T00:16:40Z beat 2 | waiting 1, queued 0, building 1, review_wait 0, reviewing 0, "
+                               "fix_wait 0, fixing 0, checks 0 | ended today: merged 1, blocked 0, failed 0, returned 0")
+        self.assertIn(line, self.out.getvalue().splitlines())
+        
+        self.assertFalse([f for f in os.listdir(self.dir.name) if f.startswith("heartbeat") and f != "heartbeat"])
 
 
 class Final(Base):

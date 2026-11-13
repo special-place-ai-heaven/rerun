@@ -66,6 +66,14 @@ class Runner(unittest.TestCase):
         self.assertNotIn("ports:", self.c)
         self.assertEqual(len(re.findall(r"^\s+- (\S+:/\S+)$", self.c, re.M)), 2)
 
+    def test_dispatcher_health_check_reads_the_heartbeat(self):
+        c = code(read("factory-dispatcher.yml"))
+        self.assertIn("/state/heartbeat", c)
+        self.assertIn("time.time() - os.path.getmtime('/state/heartbeat') < 120", c)
+        for want in ("interval: 30s", "timeout: 5s", "retries: 2", "start_period: 60s"):
+            self.assertIn(want, c)
+        self.assertRegex(c, r'healthcheck:\s*\n\s*test: \["CMD", "python3", "-c", ')
+
 
 class StatusScript(unittest.TestCase):
     def setUp(self):

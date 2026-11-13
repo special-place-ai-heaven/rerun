@@ -1,4 +1,5 @@
-import { connectorSkillReadOnlyError, isSetupAnswered, MAX_TEXT_WRITE_CHARS, providerSchema, sleep, triggerMethodSchema, verbositySchema } from '@rerun/contracts'
+import type { RunGoal } from '@rerun/contracts'
+import { connectorSkillReadOnlyError, isSetupAnswered, MAX_TEXT_WRITE_CHARS, providerSchema, runGoalSchema, sleep, triggerMethodSchema, verbositySchema } from '@rerun/contracts'
 import { AccessDeniedError, assertAgentInWorkspace, callableEngineAgentIds, isAdminActor, keepVisible, manageableSpaceIds, spaceAccessMap, visibleAgentIds, visibleSpaceIds, type Actor } from '@/app/api/_auth/access'
 import type { Database } from '@/app/api/database.types'
 import {
@@ -829,8 +830,20 @@ export async function dispatchAccountTool(actor: Actor, name: string, args: Reco
             const [{ conn, engineAgentId }, callableAgentIds] = await Promise.all([resolveAgentTarget(agentId, actor), callableEngineAgentIds(actor)])
             const waitSeconds = clamp(asNumber(args.waitSeconds), DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS)
 
-            const res = await engineChat(conn, engineAgentId, { message: requireString(args.message, 'message'), sessionId: asString(args.sessionId), source: 'api', callableAgentIds })
-            if (!res.ok) throw new Error(`The coworker could not be reached: ${res.status} ${await res.text().catch(() => '')}`.trim())
+            // Checked before anything starts: a bad goal never costs a run.
+            let goal: RunGoal | undefined
+            if (args.goal !== undefined) {
+                const parsed = runGoalSchema.safeParse(args.goal)
+                if (!parsed.success) throw new Error(`invalid_goal: ${parsed.error.issues.map(issue => `${issue.path.join('.') || 'goal'} ${issue.message}`).join('; ')}`)
+                goal = parsed.data
+            }
+
+            const res = await engineChat(conn, engineAgentId, { message: requireString(args.message, 'message'), sessionId: asString(args.sessionId), source: 'api', callableAgentIds, ...(goal ? { goal } : {}) })
+            if (!res.ok) {
+                const body = await res.text().catch(() => '')
+                if (res.status === 400 && body.includes('invalid_goal')) throw new Error(`invalid_goal: the engine refused the goal. ${body}`.trim())
+                throw new Error(`The coworker could not be reached: ${res.status} ${body}`.trim())
+            }
 
             const runId = res.headers.get('x-run-id')
             const sessionId = res.headers.get('x-session-id')

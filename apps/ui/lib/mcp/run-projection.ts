@@ -1,4 +1,6 @@
-export function projectRun(run: { id: string; status: string; sessionId: string; provider: string | null; model: string | null; triggerSource: string | null; triggerSlug: string | null; stepCount: number; inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; costMicros: number | null; startedAt: string; finishedAt: string | null; error: string | null }) {
+import type { RunGoalRecord } from '@rerun/contracts'
+
+export function projectRun(run: { id: string; status: string; sessionId: string; provider: string | null; model: string | null; triggerSource: string | null; triggerSlug: string | null; stepCount: number; inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; costMicros: number | null; startedAt: string; finishedAt: string | null; error: string | null; goal?: RunGoalRecord | null }) {
     return {
         runId: run.id,
         status: run.status,
@@ -14,5 +16,6 @@ export function projectRun(run: { id: string; status: string; sessionId: string;
         startedAt: run.startedAt,
         finishedAt: run.finishedAt,
         error: run.error,
+        goal: run.goal ?? null,
     }
 }

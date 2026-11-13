@@ -426,6 +426,25 @@ const AGENT_TOOL_DEFS = [
                 message: { type: 'string' },
                 sessionId: { type: 'string', description: 'Continue this conversation. Omit to start a new one.' },
                 waitSeconds: { type: 'number', description: 'How long to wait for the answer. Default 120, max 600.' },
+                goal: {
+                    type: 'object',
+                    description: 'The final state the run must end in; checked by the engine after each answer.',
+                    properties: {
+                        lastLineForms: {
+                            type: 'array',
+                            minItems: 1,
+                            maxItems: 4,
+                            description: 'The last line of the final answer must start with one prefix and end with its rest form.',
+                            items: {
+                                type: 'object',
+                                properties: { prefix: { type: 'string', minLength: 1, maxLength: 40 }, rest: { type: 'string', enum: ['pull-url', 'sha', 'sentence'] } },
+                                required: ['prefix', 'rest'],
+                            },
+                        },
+                        turnLimit: { type: 'integer', minimum: 1, maximum: 10, description: 'How many answers the coworker may give before the goal counts as not met.' },
+                    },
+                    required: ['lastLineForms', 'turnLimit'],
+                },
             },
             required: ['agentId', 'message'],
         },

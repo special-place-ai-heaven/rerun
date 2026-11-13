@@ -532,6 +532,8 @@ export async function dispatchAccountTool(actor: Actor, name: string, args: Reco
                     models: connectionModels(connection),
                     connected: connection.connected,
                     isDefault: workspaceDefault?.connectionId === connection.id,
+                    planLimits: connection.planLimits ? { windows: connection.planLimits.windows, readAt: connection.planLimits.capturedAt } : null,
+                    signIn: connection.signIn ? { minutesLeft: connection.signIn.minutesLeft, renewalDue: connection.signIn.renewalDue } : null,
                 })),
             }
         }

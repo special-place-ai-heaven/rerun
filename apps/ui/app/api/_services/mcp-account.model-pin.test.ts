@@ -24,7 +24,7 @@ const WORKSPACE_ID = 7
 const CONN = { baseUrl: 'http://engine', apiKey: null }
 
 function connection(id: string, name: string, provider: BoxConnection['provider'], models: string[], connected = true): BoxConnection {
-    return { id, name, provider, models, extraModels: [], createdAt: '2026-01-01T00:00:00.000Z', connected, credentialRejected: false, planLimits: null, cliModels: null, providerModels: null, discoveredModels: null }
+    return { id, name, provider, models, extraModels: [], createdAt: '2026-01-01T00:00:00.000Z', connected, credentialRejected: false, planLimits: null, signIn: null, cliModels: null, providerModels: null, discoveredModels: null }
 }
 
 const CONNECTIONS = [connection('codex-clem', 'Codex Clem', 'codex', ['gpt-6-sol']), connection('claude-clem', 'Claude Clem', 'claude', ['claude-opus-5-5']), connection('claude-rerun', 'Rerun (person@example.com)', 'claude', ['claude-opus-5-5'])]
@@ -45,11 +45,33 @@ describe('dispatchAccountTool, what a coworker runs on', () => {
         await expect(dispatchAccountTool(workspaceActor(WORKSPACE_ID), 'list_ai_connections', {})).resolves.toEqual({
             default: { connectionId: 'claude-rerun', model: 'claude-opus-5-5', connectionName: 'Rerun (person@example.com)' },
             connections: [
-                { id: 'codex-clem', name: 'Codex Clem', provider: 'codex', models: ['gpt-6-sol'], connected: true, isDefault: false },
-                { id: 'claude-clem', name: 'Claude Clem', provider: 'claude', models: ['claude-opus-5-5'], connected: true, isDefault: false },
-                { id: 'claude-rerun', name: 'Rerun (person@example.com)', provider: 'claude', models: ['claude-opus-5-5'], connected: true, isDefault: true },
+                { id: 'codex-clem', name: 'Codex Clem', provider: 'codex', models: ['gpt-6-sol'], connected: true, isDefault: false, planLimits: null, signIn: null },
+                { id: 'claude-clem', name: 'Claude Clem', provider: 'claude', models: ['claude-opus-5-5'], connected: true, isDefault: false, planLimits: null, signIn: null },
+                { id: 'claude-rerun', name: 'Rerun (person@example.com)', provider: 'claude', models: ['claude-opus-5-5'], connected: true, isDefault: true, planLimits: null, signIn: null },
             ],
         })
+    })
+
+    it('carries the plan windows and the sign-in time left of a connection, and nothing more', async () => {
+        const window = { kind: 'weekly' as const, label: null, usedPercent: 62, resetsAt: '2026-11-17T10:00:00.000Z' }
+        vi.mocked(listConnections).mockResolvedValue({
+            connections: [{ ...connection('claude-clem', 'Claude Clem', 'claude', ['claude-opus-5-5']), planLimits: { windows: [window], capturedAt: '2026-11-13T20:00:00.000Z' }, signIn: { minutesLeft: 180, renewalDue: true } }],
+            default: null,
+        })
+
+        const answer = (await dispatchAccountTool(workspaceActor(WORKSPACE_ID), 'list_ai_connections', {})) as { connections: Record<string, unknown>[] }
+
+        expect(answer.connections[0]).toEqual({
+            id: 'claude-clem',
+            name: 'Claude Clem',
+            provider: 'claude',
+            models: ['claude-opus-5-5'],
+            connected: true,
+            isDefault: false,
+            planLimits: { windows: [window], readAt: '2026-11-13T20:00:00.000Z' },
+            signIn: { minutesLeft: 180, renewalDue: true },
+        })
+        expect(Object.keys(answer.connections[0]).sort()).toEqual(['connected', 'id', 'isDefault', 'models', 'name', 'planLimits', 'provider', 'signIn'])
     })
 
     it('moves a coworker pinned to Codex onto the Claude account it names, and reports what it runs on', async () => {

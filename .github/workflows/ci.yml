@@ -92,8 +92,10 @@ jobs:
   images:
     # Runs in the open source repository only, not in a private clone of it.
     needs: docker-inputs
+    # Not always(): that also ignores the cancel a newer commit sends, and a superseded run then
+    # builds on for 20 minutes while the new one waits behind it.
     if: >-
-      always() && (github.repository == 'rerun-build/rerun' || github.repository == 'special-place-ai-heaven/rerun') &&
+      !cancelled() && (github.repository == 'rerun-build/rerun' || github.repository == 'special-place-ai-heaven/rerun') &&
       ((github.event_name == 'push' && github.ref != 'refs/heads/dev') || needs.docker-inputs.outputs.changed == 'true')
     name: Docker images build
     runs-on: ubuntu-latest

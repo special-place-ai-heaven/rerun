@@ -1,5 +1,3 @@
-import { Host, Picker, Text } from '@expo/ui/swift-ui'
-import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers'
 import type { Locale } from '@rerun/i18n'
 import * as Application from 'expo-application'
 import { router } from 'expo-router'
@@ -11,10 +9,12 @@ import { useLocale, useTranslations } from 'use-intl'
 import { appBuild } from '@/api/client'
 import { useAuth } from '@/auth/AuthProvider'
 import { askToDeleteAccount, askToLeaveServer, contactSupport, initialsOf } from '@/components/home/account-actions'
+import { useGroupMode, type GroupMode } from '@/components/home/useGroupMode'
 import { workspaceLabel } from '@/components/home/workspace-logos'
 import { AppText } from '@/components/ui/AppText'
 import { GlassButton, GLASS_BUTTON_SIZE } from '@/components/ui/GlassButton'
 import { Card, Section, SectionTitle, Separator, SettingsRow } from '@/components/ui/GroupedList'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { environment, onCustomServer, webHost } from '@/config/environment'
 import { track } from '@/lib/analytics'
 import { usePushPermission } from '@/notifications/usePushPermission'
@@ -28,8 +28,13 @@ const APPEARANCES: { value: AppearancePreference; label: 'appearanceSystem' | 'a
     { value: 'dark', label: 'appearanceDark' },
 ]
 
+const GROUPINGS: { value: GroupMode; label: 'groupRecent' | 'groupByBox' }[] = [
+    { value: 'recent', label: 'groupRecent' },
+    { value: 'box', label: 'groupByBox' },
+]
+
 // Each language in its own words, whatever the current one: Hermes has no Intl.DisplayNames.
-const LANGUAGE_NAMES: Record<Locale, string> = { en: 'English', fr: 'Français', es: 'Español' }
+const LANGUAGE_NAMES: Record<Locale, string> = { en: 'English', fr: 'Français', es: 'Español', pt: 'Português', de: 'Deutsch' }
 
 const AVATAR_SIZE = 44
 
@@ -40,6 +45,7 @@ export function PreferencesSheet() {
     const insets = useSafeAreaInsets()
     const { me, session, signOut } = useAuth()
     const [appearance, chooseAppearance] = useAppearancePreference()
+    const [group, chooseGroup] = useGroupMode()
     const push = usePushPermission().status
     const t = useTranslations('mobileSettings.preferences')
     const locale = useLocale()
@@ -57,7 +63,7 @@ export function PreferencesSheet() {
     return (
         <ScrollView style={{ backgroundColor: theme.background }} contentContainerStyle={{ padding: spacing.lg, paddingTop: spacing.xl, paddingBottom: insets.bottom + spacing.xl, gap: spacing.xl }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <GlassButton symbol="xmark" label={t('close')} onPress={() => router.back()} />
+                <GlassButton symbol="x" label={t('close')} onPress={() => router.back()} />
                 <AppText variant="headline" numberOfLines={1} maxFontSizeMultiplier={1.2} style={{ flex: 1, textAlign: 'center' }}>
                     {t('title')}
                 </AppText>
@@ -90,15 +96,12 @@ export function PreferencesSheet() {
 
             <View style={{ gap: spacing.sm }}>
                 <SectionTitle>{t('appearance')}</SectionTitle>
-                <Host matchContents={{ vertical: true }} colorScheme={theme.scheme} style={{ alignSelf: 'stretch' }}>
-                    <Picker selection={appearance} onSelectionChange={chooseAppearance} modifiers={[pickerStyle('segmented')]}>
-                        {APPEARANCES.map(option => (
-                            <Text key={option.value} modifiers={[tag(option.value)]}>
-                                {t(option.label)}
-                            </Text>
-                        ))}
-                    </Picker>
-                </Host>
+                <SegmentedControl options={APPEARANCES.map(option => ({ value: option.value, label: t(option.label) }))} value={appearance} onChange={chooseAppearance} />
+            </View>
+
+            <View style={{ gap: spacing.sm }}>
+                <SectionTitle>{t('coworkers')}</SectionTitle>
+                <SegmentedControl options={GROUPINGS.map(option => ({ value: option.value, label: t(option.label) }))} value={group} onChange={chooseGroup} />
             </View>
 
             <Section>

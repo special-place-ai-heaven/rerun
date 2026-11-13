@@ -28,6 +28,7 @@ export type SessionHistoryEntry = {
     outcome: SessionOutcome | null
     kind: SessionKind
     createdAt: string
+    firstMessage: string | null
 }
 
 // Session history for an agent: Supabase-mirrored sessions merged with
@@ -39,7 +40,7 @@ export async function listAgentSessions(agentId: string, actor?: Actor): Promise
     const supabase = createServiceRoleClient()
 
     const [{ data: rows }, target] = await Promise.all([
-        selectMany(supabase, 'sessions', ['id', 'title', 'status', 'updated_at', 'created_at', 'engine_session_id', 'origin_agent_id', 'source', 'automation_name', 'outcome', 'kind'] as const, { agent_id: agentId }),
+        selectMany(supabase, 'sessions', ['id', 'title', 'status', 'updated_at', 'created_at', 'engine_session_id', 'origin_agent_id', 'source', 'automation_name', 'outcome', 'kind', 'first_message'] as const, { agent_id: agentId }),
         resolveAgentTarget(agentId, caller).catch(() => null),
     ])
     const supabaseRows = rows ?? []
@@ -79,6 +80,7 @@ export async function listAgentSessions(agentId: string, actor?: Actor): Promise
             outcome: r.outcome,
             kind: r.kind,
             createdAt: r.created_at,
+            firstMessage: r.first_message,
         })),
         ...unmirrored.map(s => ({
             id: null,
@@ -96,6 +98,7 @@ export async function listAgentSessions(agentId: string, actor?: Actor): Promise
             outcome: null,
             kind: 'thread' as const,
             createdAt: s.createdAt,
+            firstMessage: null,
         })),
     ]
 
@@ -382,7 +385,11 @@ export async function cancelSessionRuns(sessionId: string): Promise<void> {
     await Promise.all(running.map(r => cancelRun(ctx.conn, ctx.engineAgentId, r.id).catch(() => {})))
 }
 
-export async function finalizeSession(sessionId: string, status: 'idle' | 'error'): Promise<void> {
+// `onlyWhileWorking` is the reconnection's safety net: the engine's notification already settles a run's
+// end (`done` to idle, a card to `awaiting_*`), so that write may only catch a session left `working`
+// and never move one that waits on an answer. A stop or a closed card passes no option.
+export async function finalizeSession(sessionId: string, status: 'idle' | 'error', options?: { onlyWhileWorking?: boolean }): Promise<void> {
     await assertSessionInWorkspace(sessionId)
-    await updateSessionStatus(sessionId, status)
+    if (!options?.onlyWhileWorking) return updateSessionStatus(sessionId, status)
+    await createServiceRoleClient().from('sessions').update<Database['public']['Tables']['sessions']['Update']>({ status }).eq('id', sessionId).eq('status', 'working')
 }

@@ -30,14 +30,15 @@ import { AuthoredGroup } from '@/components/chat/AuthoredGroup'
 import { ChatTimeSeparator } from '@/components/chat/ChatTimeSeparator'
 import { MessageView } from '@/components/chat/MessageView'
 import { ServiceSuggestionBlock } from '@/components/services/ServiceSuggestionBlock'
+import { SpendRequestBlock } from '@/components/chat/spend/SpendRequestBlock'
 import { SkeletonChat } from '@/components/ui/skeleton'
 
-import { cancelRunAction, getRunAction } from '@/app/api/_actions/agent.actions'
+import { cancelRunAction, getRunAction, updateAgentConfigAction } from '@/app/api/_actions/agent.actions'
 import { acknowledgeSessionAlertAction, cancelSessionRunsAction, fetchSessionActiveRun, fetchSessionMessages, finalizeSessionAction, openSessionAction } from '@/app/api/_actions/session.actions'
 import type { SessionUsageSeed } from '@/app/api/_services/chat.service'
 import type { ThreadRow } from '@/app/api/_services/conversation.service'
 import { useAgentModel } from '@/hooks/useAgentModel'
-import { useWorkspaceConnections } from '@/hooks/useWorkspaceConnections'
+import { refreshWorkspaceConnections, useWorkspaceConnections } from '@/hooks/useWorkspaceConnections'
 import { useArriveByTop } from '@/hooks/useArriveByTop'
 import { useMemberProfiles } from '@/hooks/useMemberProfiles'
 import { useMessageFeedback } from '@/hooks/useMessageFeedback'
@@ -55,21 +56,21 @@ import { stepGroupShowsActivity } from '@/lib/agent-chat-loader'
 import { buildInstallMessage } from '@/lib/chat/install-marker'
 import { contextStatsOf } from '@/lib/chat/context-stats'
 import { summarizePendingHitl } from '@/lib/chat/hitl-cue'
-import { hitlCallBefore } from '@/lib/chat/hitl-receipts'
+import { hitlCallBefore, hitlCallKind, isLatestUserMessage, spentAfter } from '@/lib/chat/hitl-receipts'
 import { turnRanOutOfPaidCredit } from '@/lib/chat/paid-data-credit'
 import { authorTurnsOf } from '@/lib/chat/message-author'
 import { splitTurnsAtBreaks, timeBreaksOf } from '@/lib/chat/message-times'
 import { threadsByMessage } from '@/lib/chat/thread-rows'
 import { shouldFlush, shouldKeepQueued } from '@/lib/chat/queued-message'
 import { classifyChatError, installInFlightOf, teammateRunOf, unwrapChatError } from '@/lib/chat-error'
-import { findPendingAlert, findPendingHitl, HITL_CANCELLED, pendingApprovals, pendingMcpSignIn, pendingQuestions, pendingSecrets, pendingTakeover, serializeApprovalDecisions } from '@/lib/chat-hitl'
+import { findPendingAlert, findPendingHitl, HITL_CANCELLED, pendingApprovals, pendingMcpSignIn, pendingQuestions, pendingSecrets, pendingTakeover, serializeApprovalDecisions, serializeSpendDecision, type SpendDecision } from '@/lib/chat-hitl'
 import { lastUserText } from '@/lib/chat-payload'
 import { historyCovers, needsReconcile } from '@/lib/chat/transcript-reconcile'
 import { browserPermission } from '@/lib/notifications/browser'
 import { modelContextWindow } from '@/lib/engine/models'
 import { rerunCreditOf } from '@/lib/engine/ai-sources'
 import { toGroup } from '@/lib/engine/model-groups'
-import { isPremiumModelEntitled } from '@rerun/cloud/billing'
+import { isLifetimePlan, isPremiumModelEntitled } from '@rerun/cloud/billing'
 import { createClient } from '@/supabase/client'
 import { selectMaybeSingle } from '@/supabase/supabase-helpers'
 import { useChat } from '@ai-sdk/react'
@@ -255,6 +256,7 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
             if (!isAbort && !isDisconnect && !isError) {
                 completedRef.current = true
             }
+            if (!isDisconnect && !isError) void refreshWorkspaceConnections()
             // An installation ends with the agent calling install_complete, which only the engine
             // knows about: re-read it rather than infer the end of the setup from the transcript.
             onRunFinishedRef.current?.()
@@ -526,7 +528,9 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
                 getRun: () => getRunAction(agentId, runId),
                 fetchMessages: () => fetchSessionMessages(sid),
                 onSettled: async ({ errored, errorText }) => {
-                    await finalizeSessionAction(sid, errored ? 'error' : 'idle').catch(() => {})
+                    // The run's end belongs to the engine's notification: a run that stopped on a card has
+                    // already put the session in `awaiting_*`, and settling here must not close that card.
+                    await finalizeSessionAction(sid, errored ? 'error' : 'idle', { onlyWhileWorking: true }).catch(() => {})
                     activeRunIdRef.current = null
                     if (errorText) setRunError(errorText)
                 },
@@ -609,6 +613,25 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
     const handleStop = useCallback(() => {
         void stopRun()
     }, [stopRun])
+
+    // "Always allow" is written before the reply goes out, so the run the reply starts already reads
+    // it. A failed write leaves the approval itself standing, scoped to its estimate, and the reply
+    // drops the flag: the coworker would otherwise read that paid data no longer asks while the
+    // engine still holds it to this estimate.
+    const submitSpend = useCallback(
+        async (decision: SpendDecision) => {
+            let granted = decision
+            if (decision.always && agentId) {
+                const result = await updateAgentConfigAction(agentId, { paidDataAlwaysAllow: true })
+                if (!result.success) {
+                    toast.error(t('alwaysAllowFailed'))
+                    granted = { purpose: decision.purpose, decision: 'approved' }
+                }
+            }
+            sendMessage({ text: serializeSpendDecision(granted) })
+        },
+        [agentId, sendMessage, t]
+    )
 
     const dismissHitl = useCallback(
         (toolCallId: string) => {
@@ -965,6 +988,7 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
                                 const isLast = mi === messages.length - 1
                                 const isActive = isLast && (status === 'streaming' || status === 'submitted')
                                 const hitlCall = hitlCallBefore(messages, mi)
+                                const spendReply = hitlCallKind(hitlCall) === 'spend'
                                 const branches = threadBranches(threadRows.after.get(mi))
                                 const view = (
                                     <MessageView
@@ -976,6 +1000,8 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
                                         pendingHitlToolCallId={pendingHitl?.toolCallId}
                                         pendingMcpSignIn={pendingHitl?.kind === 'mcp' ? pendingMcpSignIn(pendingHitl.input).name : undefined}
                                         hitlCall={hitlCall}
+                                        spentMicros={spendReply ? spentAfter(messages, mi) : undefined}
+                                        spendRunning={spendReply && (status === 'streaming' || status === 'submitted') && isLatestUserMessage(messages, mi)}
                                         pendingAlertToolCallId={pendingAlert?.toolCallId ?? undefined}
                                         activeRunId={activeRunIdRef.current}
                                         onSendMessage={sendMessage}
@@ -1012,9 +1038,10 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
                         })}
                         {pendingHitl && pendingHitl.kind !== 'takeover' && (
                             <motion.div key={pendingHitl.toolCallId} ref={pendingHitlRef} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}>
-                                {pendingHitl.kind === 'question' && <QuestionForm inline ref={questionFormRef} agentId={agentId} questions={pendingQuestions(pendingHitl.input)} onSend={text => sendMessage({ text })} onCancel={() => dismissHitl(pendingHitl.toolCallId)} textareaRef={inputRef} textareaProps={mentionTextareaProps} />}
+                                {pendingHitl.kind === 'question' && <QuestionForm inline ref={questionFormRef} target={{ kind: 'agent', agentId }} questions={pendingQuestions(pendingHitl.input)} onSend={text => sendMessage({ text })} onCancel={() => dismissHitl(pendingHitl.toolCallId)} textareaRef={inputRef} textareaProps={mentionTextareaProps} />}
                                 {pendingHitl.kind === 'approval' && <ActionApprovalBlock inline approvals={pendingApprovals(pendingHitl.input)} onSubmit={decisions => sendMessage({ text: serializeApprovalDecisions(decisions) })} />}
                                 {pendingHitl.kind === 'secret' && agentId && <SecretRequestBlock inline agentId={agentId} sessionId={sessionId ?? null} secrets={pendingSecrets(pendingHitl.input)} reason={typeof pendingHitl.input.reason === 'string' ? pendingHitl.input.reason : undefined} onDone={summary => sendMessage({ text: summary })} onSkip={() => sendMessage({ text: HITL_CANCELLED.secret })} onDismiss={() => dismissHitl(pendingHitl.toolCallId)} />}
+                                {pendingHitl.kind === 'spend' && <SpendRequestBlock input={pendingHitl.input} output={pendingHitl.output} onSubmit={decision => void submitSpend(decision)} />}
                                 {pendingHitl.kind === 'mcp' && agentId && <McpSignInBlock inline agentId={agentId} {...pendingMcpSignIn(pendingHitl.input)} onDone={summary => sendMessage({ text: summary })} onSkip={() => sendMessage({ text: HITL_CANCELLED.mcp })} />}
                                 {pendingHitl.kind === 'service' && agentId && <ServiceSuggestionBlock inline agentId={agentId} services={(Array.isArray(pendingHitl.input.services) ? pendingHitl.input.services : []) as { slug: string; reason?: string }[]} onDone={summary => sendMessage({ text: summary })} />}
                             </motion.div>
@@ -1038,13 +1065,13 @@ export function AgentChat({ uid, active, agentId, agentName, sessionId, onSessio
                             <Message from="assistant">
                                 {/* Paid data only runs on Rerun credit: connecting a Claude or ChatGPT plan would not buy it. */}
                                 <MessageContent>
-                                    <BudgetExhaustedNotice trialing={workspace?.subscription_status === 'trialing' || resumeAfterUpgrade} paused={!!workspace?.rerun_credit_paused_at} noCredit={rerunCredit.budgetMicros === 0} {...trialUpgrade} />
+                                    <BudgetExhaustedNotice trialing={workspace?.subscription_status === 'trialing' || resumeAfterUpgrade} paused={!!workspace?.rerun_credit_paused_at} noCredit={rerunCredit.budgetMicros === 0} lifetime={isLifetimePlan(workspace)} {...trialUpgrade} />
                                 </MessageContent>
                             </Message>
                         )}
                         {displayedError !== null && errorKind !== null && (
                             <Message from="assistant">
-                                <MessageContent>{errorKind === 'budget' ? <BudgetExhaustedNotice onConnectProvider={connectProvider} ownConnection={runOnOwnConnection} trialing={workspace?.subscription_status === 'trialing' || resumeAfterUpgrade} paused={!!workspace?.rerun_credit_paused_at} noCredit={rerunCredit.budgetMicros === 0} {...trialUpgrade} /> : <ProviderErrorNotice kind={errorKind} message={displayedError} onSwitchModel={switchModel} onReconnect={reconnectProvider} onStopRun={handleStop} onContinue={continueInterruptedRun} onRetry={canRetry ? retryLastTurn : undefined} onNewConversation={onNewConversation} />}</MessageContent>
+                                <MessageContent>{errorKind === 'budget' ? <BudgetExhaustedNotice onConnectProvider={connectProvider} ownConnection={runOnOwnConnection} trialing={workspace?.subscription_status === 'trialing' || resumeAfterUpgrade} paused={!!workspace?.rerun_credit_paused_at} noCredit={rerunCredit.budgetMicros === 0} lifetime={isLifetimePlan(workspace)} {...trialUpgrade} /> : <ProviderErrorNotice kind={errorKind} message={displayedError} onSwitchModel={switchModel} onReconnect={reconnectProvider} onStopRun={handleStop} onContinue={continueInterruptedRun} onRetry={canRetry ? retryLastTurn : undefined} onNewConversation={onNewConversation} />}</MessageContent>
                             </Message>
                         )}
                     </ConversationContent>

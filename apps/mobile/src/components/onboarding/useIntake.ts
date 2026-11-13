@@ -1,6 +1,8 @@
 import { EMPTY_DRAFT, industryHint, intakeSteps, stepAnswered, toIntake, type ForemanIntakeRequest, type IntakeDraft, type TemplateCategory } from '@rerun/contracts'
 import { useRef, useState } from 'react'
 
+import { useSystemBack } from '@/lib/system-back'
+
 const INDUSTRY_WAIT_MS = 2500
 
 type IntakeOptions = {
@@ -87,6 +89,9 @@ export function useIntake({ knownFirstName, decideIndustry, submit, initial, ini
         if (index === 0) return
         setIndex(current => current - 1)
     }
+
+    // The onboarding is the app's first screen: Android's back walks its steps back, as the Back button does.
+    useSystemBack(index > 0 && !submitting, back)
 
     return { step, steps, index, draft, industry: draft.industry ?? decided, deciding, submitting, saveFailed, canAdvance: stepAnswered(step, draft), last, set, choose, next, back, skipWebsite }
 }

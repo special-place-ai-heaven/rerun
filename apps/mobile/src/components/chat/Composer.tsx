@@ -1,24 +1,23 @@
-import { MAX_UPLOAD_FILE_BYTES, type SkillSummary } from '@rerun/contracts'
-import * as DocumentPicker from 'expo-document-picker'
-import * as Haptics from 'expo-haptics'
-import { GlassView } from 'expo-glass-effect'
-import * as ImagePicker from 'expo-image-picker'
+import { type SkillSummary } from '@rerun/contracts'
 import { type Ref, useEffect, useEffectEvent, useImperativeHandle, useRef, useState } from 'react'
-import { Alert, Text, TextInput, View, type TextInputInstance } from 'react-native'
+import { Text, TextInput, View, type TextInputInstance } from 'react-native'
 import { useTranslations } from 'use-intl'
 
 import { addPasteImagesListener } from '@/chat/composer-paste'
 import { useGlassStyle } from '@/components/ui/GlassButton'
+import { GlassSurface } from '@/components/ui/GlassSurface'
+import * as Haptics from '@/lib/haptics'
 import type { Coworker } from '@/mocks/data'
 import type { Model } from '@/mocks/models'
 import { useTheme } from '@/theme/theme'
 import { fonts, radius, spacing } from '@/theme/tokens'
 
 import { AttachmentStrip } from './AttachmentStrip'
-import { fitAttachments, imageAttachment, MAX_ATTACHMENTS, type ComposerAttachment } from './attachments'
+import { imageAttachment, type ComposerAttachment } from './attachments'
 import { AttachMenu, CONTROL, ModelChip, RoundButton, TargetPicker } from './ComposerControls'
 import { MentionSuggestions } from './MentionSuggestions'
 import { insertAtCaret, insertMention, mentionItems, mentionQueryAt, type MentionAgent, type MentionItem } from './mentions'
+import { useAttachmentPicker } from './useAttachmentPicker'
 import { useVoiceMessage, type VoiceSender } from './useVoiceMessage'
 import { VoiceRecorderBar } from './VoiceRecorderBar'
 
@@ -59,6 +58,7 @@ export function Composer({ value, onChangeText, attachments = [], onAttachmentsC
     // Where the caret goes once the text a menu just wrote is on screen.
     const pendingCaret = useRef<number | null>(null)
     const t = useTranslations('mobileChat.composer')
+    const { add, pickPhotos, takePhoto, pickFiles } = useAttachmentPicker(attachments, onAttachmentsChange)
     const recorder = useVoiceMessage(voice)
     const recording = recorder.status !== 'idle'
     const canRecord = Boolean(voice)
@@ -93,41 +93,12 @@ export function Composer({ value, onChangeText, attachments = [], onAttachmentsC
         input.current?.focus()
     }
 
-    const add = (added: ComposerAttachment[]) => {
-        const { attachments: next, tooBig, noRoom } = fitAttachments(attachments, added)
-        if (tooBig.length > 0) Alert.alert(t('tooLargeTitle', { count: tooBig.length }), t('tooLargeBody', { files: tooBig.map(file => file.name).join(', '), megabytes: MAX_UPLOAD_FILE_BYTES / 1024 / 1024 }))
-        if (noRoom.length > 0) Alert.alert(t('tooManyTitle'), t('tooManyBody', { max: MAX_ATTACHMENTS, files: noRoom.map(file => file.name).join(', ') }))
-        onAttachmentsChange(next)
-    }
-
     // Only the composer being typed in: the pager keeps its neighbours' composers mounted.
     const onPasted = useEffectEvent((uris: string[]) => add(uris.map(imageAttachment)))
     useEffect(() => {
         if (!focused || !canAttach) return
         return addPasteImagesListener(onPasted)
     }, [focused, canAttach])
-
-    const pickPhotos = async () => {
-        const room = MAX_ATTACHMENTS - attachments.length
-        if (room <= 0) return
-        // Compatible hands over a JPEG instead of the library's HEIC, which the models do not all read.
-        const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: room, quality: 0.8, preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible })
-        if (!result.canceled) add(result.assets.map((asset, index) => ({ ...imageAttachment(asset.uri, attachments.length + index), size: asset.fileSize })))
-    }
-
-    const takePhoto = async () => {
-        if (attachments.length >= MAX_ATTACHMENTS) return
-        const { granted } = await ImagePicker.requestCameraPermissionsAsync()
-        if (!granted) return
-        const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 }).catch(() => null)
-        if (result && !result.canceled) add([imageAttachment(result.assets[0].uri, attachments.length)])
-    }
-
-    const pickFiles = async () => {
-        if (attachments.length >= MAX_ATTACHMENTS) return
-        const result = await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true }).catch(() => null)
-        if (result && !result.canceled) add(result.assets.map(asset => ({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType ?? 'application/octet-stream', size: asset.size })))
-    }
 
     const startRecording = async () => {
         if (await recorder.start()) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
@@ -143,29 +114,29 @@ export function Composer({ value, onChangeText, attachments = [], onAttachmentsC
     const actions = running ? (
         canSend ? (
             <>
-                <RoundButton symbol="stop.fill" label={t('stop')} onPress={stop} />
-                <RoundButton symbol="arrow.up" label={t('send')} tone="primary" onPress={() => onSend()} />
+                <RoundButton symbol="stop-fill" label={t('stop')} onPress={stop} />
+                <RoundButton symbol="arrow-up" label={t('send')} tone="primary" onPress={() => onSend()} />
             </>
         ) : (
-            <RoundButton symbol="stop.fill" label={t('stop')} tone="primary" onPress={stop} />
+            <RoundButton symbol="stop-fill" label={t('stop')} tone="primary" onPress={stop} />
         )
     ) : !canSend ? (
         canRecord ? (
             <RoundButton symbol="mic" label={t('recordVoice')} tone="primary" onPress={startRecording} />
         ) : (
-            <RoundButton symbol="arrow.up" label={t('send')} tone="primary" disabled onPress={() => onSend()} />
+            <RoundButton symbol="arrow-up" label={t('send')} tone="primary" disabled onPress={() => onSend()} />
         )
     ) : (
         <>
             {!hasText && canRecord && <RoundButton symbol="mic" label={t('recordVoice')} onPress={startRecording} />}
-            <RoundButton symbol="arrow.up" label={t('send')} tone="primary" onPress={() => onSend()} />
+            <RoundButton symbol="arrow-up" label={t('send')} tone="primary" onPress={() => onSend()} />
         </>
     )
 
     return (
         <View style={{ gap: spacing.sm }}>
             {mention && suggestions.length > 0 && <MentionSuggestions trigger={mention.trigger} items={suggestions} onPick={pickMention} />}
-            <GlassView key={theme.scheme} colorScheme={theme.scheme} glassEffectStyle={glass} style={{ borderRadius: expanded ? radius.xl : radius.pill, borderCurve: 'continuous', paddingHorizontal: expanded ? spacing.md : spacing.sm, paddingTop: expanded ? spacing.md : spacing.sm, paddingBottom: spacing.sm, gap: spacing.sm }}>
+            <GlassSurface key={theme.scheme} colorScheme={theme.scheme} glassEffectStyle={glass} style={{ borderRadius: expanded ? radius.xl : radius.pill, borderCurve: 'continuous', paddingHorizontal: expanded ? spacing.md : spacing.sm, paddingTop: expanded ? spacing.md : spacing.sm, paddingBottom: spacing.sm, gap: spacing.sm }}>
                 {expanded && target && (
                     <View style={{ paddingHorizontal: spacing.xs }}>
                         <TargetPicker target={target.coworker} choices={target.choices} onPick={target.onPick} />
@@ -193,9 +164,9 @@ export function Composer({ value, onChangeText, attachments = [], onAttachmentsC
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
                         {recording ? (
                             <>
-                                <RoundButton symbol="xmark" label={t('discardRecording')} tone="plain" disabled={recorder.status === 'processing'} onPress={() => void recorder.discard()} />
+                                <RoundButton symbol="x" label={t('discardRecording')} tone="plain" disabled={recorder.status === 'processing'} onPress={() => void recorder.discard()} />
                                 <View style={{ flex: 1 }} />
-                                {recorder.status === 'failed' ? <RoundButton symbol="arrow.clockwise" label={t('retryRecording')} tone="primary" onPress={recorder.retry} /> : <RoundButton symbol="arrow.up" label={t('sendRecording')} tone="primary" busy={recorder.status !== 'recording'} onPress={() => void recorder.finish()} />}
+                                {recorder.status === 'failed' ? <RoundButton symbol="rotate-cw" label={t('retryRecording')} tone="primary" onPress={recorder.retry} /> : <RoundButton symbol="arrow-up" label={t('sendRecording')} tone="primary" busy={recorder.status !== 'recording'} onPress={() => void recorder.finish()} />}
                             </>
                         ) : (
                             <>
@@ -207,7 +178,7 @@ export function Composer({ value, onChangeText, attachments = [], onAttachmentsC
                         )}
                     </View>
                 )}
-            </GlassView>
+            </GlassSurface>
         </View>
     )
 }

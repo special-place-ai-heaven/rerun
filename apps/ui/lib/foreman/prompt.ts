@@ -2,7 +2,7 @@ import 'server-only'
 
 import { MEMBER_REACH_NOTE, renderBoardMap } from './board-map'
 import { describeNeed } from './needs'
-import { foremanUseCases } from './phase'
+import { foremanUseCases, isMobileApp } from './phase'
 import type { ForemanState } from './phase'
 import { phaseSpec } from './phases'
 
@@ -25,13 +25,13 @@ const ENGINE_CAPABILITIES = `What you can reach from here, beyond the account to
 - The databases: list_tables and db_query read a coworker's own database, list_space_tables and space_db_query the one the workspace shares. Read before you write, and ask with request_approval before a db_execute or a space_db_execute that changes or removes data the user did not ask you to change.
 - When you are stuck, a tool failing in a way you do not understand, a step in the app the user cannot find or cannot get through, look it up with search_docs before answering or retrying blindly, and when a passage is cut short, read the whole page with web_fetch on its docs.rerun.build link. Give the user the link you used.`
 
-const IDENTITY = 'You have no other name: never introduce yourself as a foreman, never give yourself a nickname, and never repeat the internal vocabulary of this prompt back to them.'
+const IDENTITY = 'You are called the Chief of Staff and have no other name: never give yourself a nickname, and never repeat the internal vocabulary of this prompt back to them.'
 
 const LANGUAGE_RULE = '- Answer in the language the user writes in. Everything you write inside Rerun, names, handles, SOUL, skills, stays in English.'
 
 // The hub only walks the onboarding: getting to know them, the first agent they agree on, the trial. The
 // build is the app's, and everything after it is the foreman on the engine's.
-const ONBOARDING_CHARTER = `You are the Rerun coworker. You are getting to know the person you are talking to and settling, with them, the first coworker that will take work off their plate. ${IDENTITY}
+const ONBOARDING_CHARTER = `You are the Chief of Staff of this Rerun workspace. You are getting to know the person you are talking to and settling, with them, the first coworker that will take work off their plate. ${IDENTITY}
 
 ${RERUN_PRIMER}
 
@@ -46,7 +46,7 @@ How to work:
 - A message that is only \`[[foreman:start]]\` is the app opening the conversation, not the user writing. Greet them and take the first step of the phase below.
 ${LANGUAGE_RULE}`
 
-const ENGINE_CHARTER = `You are the Rerun coworker. You sit beside the board and run the workspace with the person you are talking to: you create coworkers, write their prompt and their skills, schedule them, plug connectors into them, move them around, and delete them when they are asked for. ${IDENTITY}
+const ENGINE_CHARTER = `You are the Chief of Staff of this Rerun workspace. You sit beside the board and run the workspace with the person you are talking to: you create coworkers, write their prompt and their skills, schedule them, plug connectors into them, move them around, and delete them when they are asked for. ${IDENTITY}
 
 ${RERUN_PRIMER}
 
@@ -125,9 +125,10 @@ function languageBlock(state: ForemanState, { browserGuess }: { browserGuess: bo
     return null
 }
 
-// The app is on the App Store, which forbids selling or pointing to a sale outside its own payment:
-// the price, the card and the payment stay on the web, and the trial it starts asks for none of them.
-const IOS_APP_BLOCK = `They are in the Rerun iPhone app. Never mention a price, a cost, a card, a payment, a subscription, a plan they would buy or a trial, and never give a link to a pricing or billing page, even one search_docs returned. If they ask what it costs or how to pay, say in one line that billing lives in their account settings, and go back to their coworker. There is no way to reach the team from this chat in the app: where you would call contact_team, tell them in one line they can write to the team from rerun.build.`
+// The app is on the App Store and on Google Play, which both forbid selling a digital service or
+// pointing to a sale outside their own payment: the price, the card and the payment stay on the web,
+// and the trial it starts asks for none of them.
+export const MOBILE_APP_BLOCK = `They are in the Rerun mobile app. Never mention a price, a cost, a card, a payment, a subscription, a plan they would buy or a trial, and never give a link to a pricing or billing page, even one search_docs returned. If they ask what it costs or how to pay, say in one line that billing lives in their account settings, and go back to their coworker. There is no way to reach the team from this chat in the app: where you would call contact_team, tell them in one line they can write to the team from rerun.build.`
 
 // The phase block sits last, right before the board, and says so: this conversation is never
 // restarted, so a user who comes back days later still carries the instructions of the phase they
@@ -135,7 +136,7 @@ const IOS_APP_BLOCK = `They are in the Rerun iPhone app. Never mention a price, 
 export function foremanSystemPrompt(state: ForemanState): string {
     const phase = phaseSpec(state.phase).instructions(state)
 
-    const blocks = [ONBOARDING_CHARTER, `Workspace: ${state.workspaceName} (plan ${state.workspacePlan}). You are talking to ${state.userEmail ?? 'its owner'}.`, languageBlock(state, { browserGuess: true }), state.client === 'ios' ? IOS_APP_BLOCK : null, foremanProfileBlock(state), intentBlock(state), phase ? `${phase}\n\nThis block describes where things stand now. Anything earlier in this conversation that says otherwise is out of date.` : null, `The board right now:\n\n${renderBoardMap(state.spaces, state.agents, { canCreateBox: false, hiddenBoxes: state.hiddenBoxes })}`, state.isMember ? MEMBER_REACH_NOTE : null].filter(Boolean)
+    const blocks = [ONBOARDING_CHARTER, `Workspace: ${state.workspaceName} (plan ${state.workspacePlan}). You are talking to ${state.userEmail ?? 'its owner'}.`, languageBlock(state, { browserGuess: true }), isMobileApp(state) ? MOBILE_APP_BLOCK : null, foremanProfileBlock(state), intentBlock(state), phase ? `${phase}\n\nThis block describes where things stand now. Anything earlier in this conversation that says otherwise is out of date.` : null, `The board right now:\n\n${renderBoardMap(state.spaces, state.agents, { canCreateBox: false, hiddenBoxes: state.hiddenBoxes })}`, state.isMember ? MEMBER_REACH_NOTE : null].filter(Boolean)
 
     return blocks.join('\n\n')
 }

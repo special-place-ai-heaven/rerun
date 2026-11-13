@@ -1,0 +1,69 @@
+{
+    "update": {
+        "ready": "O Rerun {version} está pronto",
+        "description": "Reinicie o app para usar a nova versão.",
+        "restart": "Reiniciar"
+    },
+    "downloads": {
+        "done": "{filename} baixado",
+        "failed": "Não foi possível baixar {filename}",
+        "show": "Mostrar na pasta"
+    },
+    "handoff": {
+        "title": "Entrar no {app}",
+        "body": "Continuar no {app} como {account}?",
+        "continue": "Continuar",
+        "switchAccount": "Usar outra conta",
+        "doneTitle": "Volte para o {app}",
+        "doneBody": "O {app} conclui o login sozinho. Você pode fechar esta aba.",
+        "codeHint": "Se o {app} não abriu, cole este código nele:",
+        "copyCode": "Copiar o código",
+        "failed": "Não foi possível conectar o app. Tente de novo.",
+        "invalidTitle": "Este link expirou",
+        "invalidBody": "Comece o login de novo pelo app para desktop."
+    },
+    "signIn": {
+        "waitingTitle": "Continue no seu navegador",
+        "waitingBody": "Entre na janela do navegador que abriu e depois volte aqui.",
+        "reopen": "Abrir o navegador de novo",
+        "pasteCode": "Colar um código",
+        "codeLabel": "Código do navegador",
+        "submit": "Entrar",
+        "back": "Voltar",
+        "errors": {
+            "expired": "Este código expirou. Comece de novo.",
+            "invalid": "Este código não é válido. Comece de novo.",
+            "state-mismatch": "Este login foi iniciado em outra janela. Comece de novo.",
+            "network": "Não foi possível acessar o Rerun. Verifique sua conexão.",
+            "cancelled": "O login foi cancelado."
+        }
+    },
+    "settings": {
+        "openAtLogin": "Abrir ao iniciar sessão",
+        "openAtLoginMac": "O Rerun inicia com o seu Mac, na barra de menus.",
+        "openAtLoginOther": "O Rerun inicia com o seu computador, na área de notificação.",
+        "closeToTray": "Continuar rodando ao fechar",
+        "closeToTrayHint": "Fechar a janela deixa o Rerun na área de notificação, e as notificações continuam chegando.",
+        "updates": "Atualizações",
+        "version": "Rerun {version}",
+        "checking": "Buscando atualizações…",
+        "downloading": "Baixando a atualização… {percent}%",
+        "updateFailed": "Não foi possível buscar atualizações.",
+        "check": "Buscar atualizações",
+        "restart": "Reiniciar para atualizar para {version}",
+        "quickAsk": "Pergunta rápida",
+        "quickAskHint": "{shortcut} abre um campo para o seu Chief of Staff em qualquer app."
+    },
+    "openInApp": {
+        "title": "Abrir esta página no {app}?",
+        "open": "Abrir"
+    },
+    "quickAsk": {
+        "placeholder": "Pergunte ao seu Chief of Staff…",
+        "hint": "Enter para enviar, Esc para fechar",
+        "send": "Enviar"
+    },
+    "server": {
+        "otherServer": "Usar outro servidor Rerun"
+    }
+}

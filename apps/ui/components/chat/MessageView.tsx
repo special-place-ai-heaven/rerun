@@ -51,7 +51,7 @@ import { parseTriggerPayload } from '@/lib/triggers/trigger-payload'
 import { parseScheduledRun } from '@/lib/schedules/scheduled-run'
 import { parseVoiceMessage } from '@/lib/voice/marker'
 import { cn } from '@/lib/utils'
-import { QUICK_REPLIES_TOOL, fileCardSchema, quickRepliesOf, quickReplyDraft, skillProposalIdOf, tableCardSchema, toolActivityOf, type MessageFeedbackRating, type PaidTurnSources } from '@rerun/contracts'
+import { QUICK_REPLIES_TOOL, fileCardSchema, messageText, quickRepliesOf, quickReplyDraft, skillProposalIdOf, tableCardSchema, toolActivityOf, type MessageFeedbackRating, type PaidTurnSources } from '@rerun/contracts'
 import type { UIMessage } from 'ai'
 import { BrainIcon, FoldVerticalIcon, RefreshCcwIcon, ThumbsDownIcon, ThumbsUpIcon } from '@/lib/icons'
 import { useTranslations } from 'next-intl'
@@ -74,13 +74,6 @@ export type AssistantStep =
 type NormalizedSource = { url?: string; title?: string }
 
 type MessagePartLike = { type: string; text?: string; [key: string]: unknown }
-
-export function messageText(message: { parts: readonly MessagePartLike[] }): string {
-    return message.parts
-        .filter((p): p is { type: 'text'; text: string } => p.type === 'text' && 'text' in p)
-        .map(p => p.text)
-        .join('')
-}
 
 function messageSources(message: { parts: readonly MessagePartLike[] }): NormalizedSource[] {
     return message.parts
@@ -113,6 +106,9 @@ export type MessageViewProps = {
     pendingMcpSignIn?: string
     // On a user reply to a setup block: the call it answers, which fills in what the reply leaves out.
     hitlCall?: HitlCallPart
+    // On a spend reply: what the run it started has billed so far, and whether it is still going.
+    spentMicros?: number
+    spendRunning?: boolean
     pendingAlertToolCallId?: string
     activeRunId?: string | null
     onStopTask?: (taskId: string) => void
@@ -163,7 +159,7 @@ export function UnderText({ children }: { children: ReactNode }) {
     return children
 }
 
-function MessageViewInner({ message, isActive = false, isLastAssistant = false, agentId, pendingHitlToolCallId, pendingMcpSignIn, hitlCall, pendingAlertToolCallId, activeRunId, onStopTask: stopTaskOverride, onSendMessage, onDraftReply, showQuickReplies = false, onRegenerate, onRateMessage, feedbackRating = null, rawUrlFor, readFile, sharedFiles, skillProposals, decidingProposalId, onDecideProposal, pinnedProposalIds, renderToolPart, installing, mentions, assistantLayout, createdAt, paidSources }: MessageViewProps) {
+function MessageViewInner({ message, isActive = false, isLastAssistant = false, agentId, pendingHitlToolCallId, pendingMcpSignIn, hitlCall, spentMicros, spendRunning, pendingAlertToolCallId, activeRunId, onStopTask: stopTaskOverride, onSendMessage, onDraftReply, showQuickReplies = false, onRegenerate, onRateMessage, feedbackRating = null, rawUrlFor, readFile, sharedFiles, skillProposals, decidingProposalId, onDecideProposal, pinnedProposalIds, renderToolPart, installing, mentions, assistantLayout, createdAt, paidSources }: MessageViewProps) {
     const t = useTranslations('chat')
     const tTools = useTranslations('tools')
     const toolDisplay = useToolDisplay(agentId)
@@ -382,7 +378,7 @@ function MessageViewInner({ message, isActive = false, isLastAssistant = false, 
     if (triggerPayload) return <WebhookRunBlock agentId={agentId} payload={triggerPayload} />
 
     // A setup block answered: what the user decided, not the reply written for the agent.
-    if (hitlReply) return <HitlReceipt reply={hitlReply} call={hitlCall} agentId={agentId} rawUrlFor={rawUrlFor} readFile={readFile} />
+    if (hitlReply) return <HitlReceipt reply={hitlReply} call={hitlCall} spentMicros={spentMicros} spendRunning={spendRunning} agentId={agentId} rawUrlFor={rawUrlFor} readFile={readFile} />
 
     return (
         <Message from={message.role}>

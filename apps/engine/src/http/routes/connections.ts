@@ -10,6 +10,7 @@ import { defaultModelOf, repairBoxDefault } from '../../agents/availability.js'
 import { refreshCodexPlanLimits, refreshStaleCodexPlanLimits } from '../../connections/codex-plan-limits.js'
 import { refreshOpencodeCatalog, refreshStaleOpencodeCatalog } from '../../connections/opencode-catalog.js'
 import { refreshOpencodePlanLimits, refreshStaleOpencodePlanLimits } from '../../connections/opencode-plan-limits.js'
+import { awaitPendingPlanLimits } from '../../connections/plan-limits-pending.js'
 import { probeCustomEndpoint, refreshCustomCatalog, refreshStaleCustomCatalogs } from '../../connections/custom-catalog.js'
 import type { LoadedConnection } from '../../connections/types.js'
 import { sendNotification } from '../../runtime/notify.js'
@@ -31,6 +32,7 @@ connectionRoutes.get('/', async c => {
     for (const connection of connections) {
         await repairBoxDefault(connection).catch(err => logger.warn({ err: String(err), connection: connection.id }, 'box default repair failed'))
     }
+    await awaitPendingPlanLimits(connections)
     refreshStaleCodexPlanLimits(connections)
     refreshStaleOpencodePlanLimits(connections)
     if (connections.some(connection => connection.config.provider === 'opencode')) refreshStaleOpencodeCatalog()

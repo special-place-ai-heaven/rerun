@@ -1,0 +1,58 @@
+{
+    "title": "Télécharger l’app de bureau Rerun",
+    "eyebrow": "App de bureau",
+    "headline": "Rerun sur votre bureau",
+    "description": "Vos coworkers dans une fenêtre à eux, avec les notifications, une icône dans la barre des menus ou la zone de notification, et la question rapide.",
+    "mac": "Télécharger pour macOS",
+    "windows": "Télécharger pour Windows",
+    "linux": "Télécharger pour Linux",
+    "allPlatforms": "Toutes les plateformes",
+    "alternatives": {
+        "macIntel": "Télécharger pour un Mac Intel",
+        "macAppleSilicon": "Télécharger pour un Mac Apple Silicon",
+        "windowsArm64": "Télécharger pour Windows sur Arm",
+        "windowsX64": "Télécharger pour Windows x64"
+    },
+    "beta": "Bêta",
+    "webApp": "Rerun fonctionne aussi dans votre navigateur : <link>ouvrir l’app web</link>.",
+    "platforms": {
+        "label": "Télécharger",
+        "title": "macOS, Windows et Linux",
+        "mac": {
+            "name": "macOS",
+            "requirements": "macOS 13 ou plus récent, Apple Silicon et Intel.",
+            "appleSilicon": "Apple Silicon",
+            "intel": "Intel"
+        },
+        "windows": {
+            "name": "Windows",
+            "requirements": "Windows 10 ou plus récent, x64 et Arm.",
+            "warning": "L’app Windows n’est pas encore signée. Si Windows affiche « Windows a protégé votre ordinateur », cliquez sur Informations complémentaires, puis sur Exécuter quand même.",
+            "x64": "x64",
+            "arm64": "Arm"
+        },
+        "linux": {
+            "name": "Linux",
+            "requirements": "x64. L’AppImage fonctionne sur la plupart des distributions et se met à jour toute seule.",
+            "appImage": "AppImage",
+            "deb": ".deb (Debian, Ubuntu)",
+            "rpm": ".rpm (Fedora, openSUSE)"
+        }
+    },
+    "features": {
+        "label": "Ce que l’app ajoute",
+        "title": "Tout Rerun, à un raccourci",
+        "notifications": {
+            "title": "Des notifications qui vous ramènent",
+            "body": "Vos coworkers vous joignent dès que vous êtes dans une autre app, et un clic ouvre la conversation."
+        },
+        "quickAsk": {
+            "title": "Question rapide",
+            "body": "⌘⇧Espace sur Mac, Ctrl+Maj+Espace sur Windows et Linux : une question pour votre Chief of Staff depuis n’importe quelle app, et la réponse vous attend dans Rerun."
+        },
+        "always": {
+            "title": "Toujours là",
+            "body": "Fermer la fenêtre garde Rerun dans la barre des menus ou la zone de notification, avec sur son icône le nombre de ce qui vous attend."
+        }
+    }
+}

@@ -1,7 +1,7 @@
 'use client'
 
 import { useChat } from '@ai-sdk/react'
-import { FOREMAN_AGENT_ID, FOREMAN_INTENT_PART, type ForemanIntent } from '@rerun/contracts'
+import { FOREMAN_AGENT_ID, FOREMAN_INTENT_PART, sleep, type ForemanIntent } from '@rerun/contracts'
 import { DefaultChatTransport, type UIMessage } from 'ai'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
@@ -12,6 +12,7 @@ import { getRunAction } from '@/app/api/_actions/agent.actions'
 import type { SessionUsageSeed } from '@/app/api/_services/chat.service'
 import { readAgentModel, useAgentModel } from '@/hooks/useAgentModel'
 import { useRunReconnect } from '@/hooks/useRunReconnect'
+import { refreshWorkspaceConnections } from '@/hooks/useWorkspaceConnections'
 import { contextStatsOf } from '@/lib/chat/context-stats'
 import { historyCovers, needsReconcile } from '@/lib/chat/transcript-reconcile'
 import { isWorkspaceApiEntitled } from '@rerun/cloud/billing'
@@ -42,8 +43,6 @@ async function fetchEngineTranscript(sessionId: string): Promise<UIMessage[]> {
     if (!res.ok) return []
     return ((await res.json()) as { messages?: UIMessage[] }).messages ?? []
 }
-
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 export function useForemanChat() {
     const sessionId = useForemanStore(state => state.sessionId)
@@ -133,6 +132,8 @@ export function useForemanChat() {
             if (isForemanClientTool(tool)) runForemanClientTool(tool, input, gates.current)
         },
         onFinish: ({ isAbort, isDisconnect, isError }) => {
+            // Only the engine foreman has a model pill reading the store; the hub's is fixed.
+            if (selectForemanBackend(useForemanStore.getState()) === 'engine' && !isDisconnect && !isError) void refreshWorkspaceConnections()
             if (isAbort || isDisconnect || isError) return
             completedRef.current = true
             holdRun(null)
@@ -363,7 +364,7 @@ export function useForemanChat() {
                     setEngineMessages(data)
                     return
                 }
-                await wait(600)
+                await sleep(600)
             }
         },
         [resumeEngineStream, setEngineMessages, setRunError]

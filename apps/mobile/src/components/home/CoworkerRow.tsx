@@ -1,5 +1,3 @@
-import * as Haptics from 'expo-haptics'
-import { SymbolView } from 'expo-symbols'
 import { useRef, type ReactNode } from 'react'
 import { Pressable, View } from 'react-native'
 import ReanimatedSwipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable'
@@ -7,16 +5,24 @@ import { useTranslations } from 'use-intl'
 
 import { AppText } from '@/components/ui/AppText'
 import { CoworkerAvatar } from '@/components/ui/CoworkerAvatar'
+import { Icon } from '@/components/ui/Icon'
 import { UnreadDot } from '@/components/ui/UnreadDot'
 import type { StatusLine } from '@/components/ui/status'
+import * as Haptics from '@/lib/haptics'
 import { useTimeAgo } from '@/lib/time'
 import type { Coworker } from '@/mocks/data'
 import { useTheme } from '@/theme/theme'
-import { brand, spacing } from '@/theme/tokens'
+import { brand, spacing, withAlpha } from '@/theme/tokens'
 
-export const AVATAR = 36
-// At the default text size: the padding around a name line (22) and a status line (20) under it.
-export const COWORKER_ROW_HEIGHT = 68
+export const AVATAR = 48
+// The Home's side margin, its row title and the line under it, at Apple's default Headline and Subheadline sizes.
+export const HOME_GUTTER = 20
+export const ROW_TITLE = { fontSize: 17, lineHeight: 22 } as const
+export const ROW_LINE = { fontSize: 15, lineHeight: 20 } as const
+export const ROW_PADDING = 17
+export const ROW_LINE_GAP = 4
+// At the default text size: the padding around a name line, the gap and the status line under it.
+export const COWORKER_ROW_HEIGHT = 2 * ROW_PADDING + ROW_TITLE.lineHeight + ROW_LINE_GAP + ROW_LINE.lineHeight
 const PIN_ACTION_WIDTH = 96
 
 export type PinControl = { pinned: boolean; onToggle: () => void }
@@ -36,7 +42,7 @@ type CoworkerRowProps = {
     pin?: PinControl
 }
 
-function PinSwipe({ pin, children }: { pin: PinControl; children: ReactNode }) {
+export function PinSwipe({ pin, children }: { pin: PinControl; children: ReactNode }) {
     const swipeable = useRef<SwipeableMethods>(null)
     const t = useTranslations('mobileHome')
     const label = pin.pinned ? t('row.unpin') : t('row.pin')
@@ -55,8 +61,8 @@ function PinSwipe({ pin, children }: { pin: PinControl; children: ReactNode }) {
             overshootRight={false}
             onSwipeableOpen={toggle}
             renderRightActions={() => (
-                <Pressable onPress={() => swipeable.current?.close()} accessibilityElementsHidden style={{ width: PIN_ACTION_WIDTH, alignItems: 'center', justifyContent: 'center', gap: 2, backgroundColor: brand.base }}>
-                    <SymbolView name={pin.pinned ? 'pin.slash.fill' : 'pin.fill'} size={18} weight="semibold" tintColor="#ffffff" />
+                <Pressable onPress={() => swipeable.current?.close()} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: PIN_ACTION_WIDTH, alignItems: 'center', justifyContent: 'center', gap: 2, backgroundColor: brand.base }}>
+                    <Icon name={pin.pinned ? 'pin-off' : 'pin'} size={18} bold color="#ffffff" />
                     <AppText variant="caption" medium maxFontSizeMultiplier={1.2} style={{ color: '#ffffff' }}>
                         {label}
                     </AppText>
@@ -87,23 +93,21 @@ export function CoworkerRow({ coworker, line, minutesAgo, unread, selected = fal
             accessibilityState={{ selected }}
         >
             {({ pressed }) => (
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.lg, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, opacity: pressed ? 0.6 : 1 }}>
-                    <View style={{ paddingTop: 2 }}>
-                        <CoworkerAvatar coworker={coworker} size={AVATAR} facing="right" />
-                    </View>
-                    <View style={{ flex: 1, gap: 2 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.lg, paddingVertical: ROW_PADDING, paddingHorizontal: HOME_GUTTER, opacity: pressed ? 0.6 : 1 }}>
+                    <CoworkerAvatar coworker={coworker} size={AVATAR} facing="right" />
+                    <View style={{ flex: 1, gap: ROW_LINE_GAP }}>
                         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm }}>
-                            <AppText variant="headline" numberOfLines={1} maxFontSizeMultiplier={1.4} style={{ flex: 1 }}>
+                            <AppText variant="headline" numberOfLines={1} maxFontSizeMultiplier={1.4} style={[ROW_TITLE, { flex: 1 }]}>
                                 {coworker.name}
                             </AppText>
                             {minutesAgo !== null && (
-                                <AppText variant="footnote" tone="muted" maxFontSizeMultiplier={1.4}>
+                                <AppText variant="callout" maxFontSizeMultiplier={1.4} style={{ color: withAlpha(theme.mutedForeground, 0.6) }}>
                                     {timeAgo(minutesAgo)}
                                 </AppText>
                             )}
                         </View>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                            <AppText variant="callout" tone={line.tone} numberOfLines={1} maxFontSizeMultiplier={1.4} style={{ flex: 1 }}>
+                            <AppText variant="callout" tone={line.tone} numberOfLines={1} maxFontSizeMultiplier={1.4} style={[ROW_LINE, { flex: 1 }]}>
                                 {line.text}
                             </AppText>
                             {unread && <UnreadDot />}

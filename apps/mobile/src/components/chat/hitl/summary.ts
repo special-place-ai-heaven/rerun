@@ -1,10 +1,12 @@
-import { pendingApprovals, pendingMcpSignIn, pendingQuestions, pendingSecrets, pendingServices, pendingTakeover, type HitlKind } from '@rerun/contracts'
-import type { SFSymbol } from 'expo-symbols'
+import { pendingApprovals, pendingMcpSignIn, pendingQuestions, pendingSecrets, pendingServices, pendingSpend, pendingTakeover, type HitlKind } from '@rerun/contracts'
 import type { useTranslations } from 'use-intl'
+
+import type { IconName } from '@/components/ui/Icon'
+
 
 type HitlTranslator = ReturnType<typeof useTranslations<'mobileHitl'>>
 
-const SYMBOLS: Record<HitlKind, SFSymbol> = { question: 'questionmark.bubble', approval: 'checkmark.shield', secret: 'lock', mcp: 'link', service: 'link', takeover: 'display' }
+const SYMBOLS: Record<HitlKind, IconName> = { question: 'message-circle-question', approval: 'shield-check', secret: 'lock', mcp: 'link', service: 'link', takeover: 'monitor', spend: 'circle-dollar-sign' }
 
 // What is waiting at the end of the thread, the web's words (`pendingHitlLabel`) in the app's language.
 function pendingLabel(kind: HitlKind, input: Record<string, unknown>, t: HitlTranslator): string {
@@ -23,11 +25,13 @@ function pendingLabel(kind: HitlKind, input: Record<string, unknown>, t: HitlTra
             return t('pending.service', { count: pendingServices(input).length })
         case 'takeover':
             return t('pending.takeover')
+        case 'spend':
+            return t('pending.spend')
     }
 }
 
 // The web's cue for a pending block, with the system's symbols.
-export function summarizePendingHitl(kind: HitlKind, input: Record<string, unknown>, t: HitlTranslator): { symbol: SFSymbol; label: string } {
+export function summarizePendingHitl(kind: HitlKind, input: Record<string, unknown>, t: HitlTranslator): { symbol: IconName; label: string } {
     return { symbol: SYMBOLS[kind], label: pendingLabel(kind, input, t) }
 }
 
@@ -48,6 +52,8 @@ export function firstAsk(kind: HitlKind, input: Record<string, unknown>): string
             return textOf(pendingMcpSignIn(input).reason)
         case 'takeover':
             return textOf(pendingTakeover(input).reason)
+        case 'spend':
+            return pendingSpend(input).purpose
     }
 }
 

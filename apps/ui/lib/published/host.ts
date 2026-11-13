@@ -22,10 +22,6 @@ function hostname(host: string): string {
     return host.split(':')[0].toLowerCase()
 }
 
-export function isPublishingEnabled(): boolean {
-    return publishHost() !== null
-}
-
 export function isReservedSlug(slug: string): boolean {
     return RESERVED_SLUGS.has(slug) || slug.startsWith('xn--')
 }
@@ -78,4 +74,10 @@ export function publishedSiteOrigin(slug: string): string | null {
 // Storage would show these as source text, so their link has to point at the publish host.
 export function rendersAsPage(kind: string, contentType: string): boolean {
     return kind === 'site' || contentType.startsWith('text/html')
+}
+
+// On the publish host the link of a single file opens the viewer page; its bytes are at `/__rerun/raw`.
+export function publishedRawFileUrl(slug: string): string | null {
+    const origin = publishedSiteOrigin(slug)
+    return origin ? `${origin}/__rerun/raw` : null
 }

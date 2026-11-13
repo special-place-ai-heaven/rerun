@@ -14,15 +14,17 @@ import {
 import { extractPublishedSlug, PUBLISHED_SITE_ROUTE } from '@/lib/published/host'
 import { STAGING_GATE_CHALLENGE, stagingGateVerdict } from '@/lib/staging-gate'
 import { updateSession } from '@/supabase/middleware'
+import { DESKTOP_SHELL_PREVIEW_HEADER, DESKTOP_SHELL_PREVIEW_PARAM } from '@/lib/desktop-shell/preview'
 import {
     APP_GATED_PATHS,
+    DESKTOP_SHELL_PLATFORMS,
     BRAND_GATE_COOKIE,
     BRAND_GATE_MAX_AGE,
     BRAND_GATE_PARAM,
     brandGateVerdict,
     isGatedPath,
 } from '@rerun/contracts'
-import { NextResponse, type NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
 // The labs are work in progress, so they answer 404 unless the request carries the shared design
 // system token, as `?key=` or in the cookie that grants it. Same token and same cookie as the
@@ -104,7 +106,18 @@ export async function proxy(request: NextRequest) {
         })
     }
 
-    return updateSession(request)
+    return updateSession(withDesktopShellPreview(request))
+}
+
+// The lab of the desktop chrome (/render/lab/desktop-shell) frames the app in iframes: the app there
+// renders as it does inside the desktop app, for the platform the lab asks for. Only an iframe asks:
+// a page opened with the parameter renders as a browser.
+function withDesktopShellPreview(request: NextRequest): NextRequest {
+    const platform = request.nextUrl.searchParams.get(DESKTOP_SHELL_PREVIEW_PARAM)
+    if (!platform || request.headers.get('sec-fetch-dest') !== 'iframe' || !(DESKTOP_SHELL_PLATFORMS as readonly string[]).includes(platform)) return request
+    const headers = new Headers(request.headers)
+    headers.set(DESKTOP_SHELL_PREVIEW_HEADER, platform)
+    return new NextRequest(request, { headers })
 }
 
 export const config = {
@@ -141,9 +154,11 @@ export const config = {
          *   published host: a visitor without a session is sent to sign in, never handed one)
          * - desktop-view (the screen of a coworker in the iOS app's web view: the ticket in its
          *   fragment is the only key, there is no session to refresh nor one to provision)
+         * - api/desktop/config (asked by the desktop app before it shows the server, staging
+         *   included: it carries no session and must answer before anyone signs in)
          * Feel free to modify this pattern to include more paths.
          */
-        '/((?!_next/static|_next/image|favicon.ico|api/version|api/t/|api/files|api/llm/|api/v1/|api/host-metrics|api/public/|og/|render/|email/|r/|p/|published-auth|desktop-view|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!_next/static|_next/image|favicon.ico|api/version|api/desktop/config|api/t/|api/files|api/llm/|api/v1/|api/host-metrics|api/public/|og/|render/|email/|r/|p/|published-auth|desktop-view|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
         // The labs put back in, for the gate alone: proxy() returns before it ever reaches
         // updateSession(). The UI kit (/render/kit) and the OG renders, /render/brand and
         // /render/templates, stay out: the screenshot service captures those on every card.

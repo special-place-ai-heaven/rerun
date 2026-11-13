@@ -221,6 +221,16 @@ describe('current time', () => {
         expect(nowBlock(new Date('2026-08-16T14:32:07Z'))).toBe('<now>\n2026-08-16T14:32:07Z (Sunday, 16 August 2026, 14:32 UTC)\n</now>')
     })
 
+    // A routine written in English by a French team still reports in French; without a workspace
+    // language the run keeps the language of its instruction, as before.
+    it('falls back on the workspace language for a run nobody started', async () => {
+        const french = { ...agent, config: agentConfigSchema.parse({ name: 'Prompt test', provider: 'rerun', language: 'fr', tools: { memory: false, db: false, schedule: false } }) }
+        expect(await buildSystemPrompt(french, { source: 'schedule', slug: 'daily', name: 'daily' })).toContain('and failing that French, the language of this workspace')
+        expect(await buildSystemPrompt(agent, { source: 'schedule', slug: 'daily', name: 'daily' })).toContain('and failing that the language its instruction is written in.')
+        const { stable } = await buildSystemPromptBlocks(french, { source: 'chat' })
+        expect(stable).toContain('French, the language of this workspace')
+    })
+
     it('names the language of the user in the turn block of an install, and adds nothing without one', () => {
         expect(userLanguageBlock('French')).toMatch(/^<user_language>\nFrench: /)
         expect(userLanguageBlock(undefined)).toBe('')
@@ -395,34 +405,36 @@ describe('paid data section', () => {
         expect(section).not.toContain('indexed in its description')
     })
 
-    it('spends small batches without asking, whether or not approvals are on, and asks in plain words before a big one', async () => {
-        for (const requestApproval of [true, false]) {
-            const prompt = await buildSystemPrompt(agentWith({ paidData: true, requestApproval }), { source: 'chat' })
-            expect(prompt).not.toContain('request_spend')
-            expect(prompt).not.toContain('Spend without asking')
-            expect(prompt).toContain('Up to 200 credits over a task, you use it without asking first')
-            expect(prompt).toContain('about how many credits it costs')
-            expect(prompt).toContain('say in one short line of your message what you are about to buy')
-            expect(prompt).toContain('with no card and no tool (not ask_user, not request_approval)')
-        }
+    it('asks with a priced spend card before the first paid call of a task, and offers a declined spend only once', async () => {
+        const section = await paidDataSection()
+        expect(section).toContain('call request_spend once for the batch')
+        expect(section).toContain('your turn ends on that card')
+        expect(section).toContain('call request_spend again for what is left, with soFar')
+        expect(section).toContain('do not propose the same spend again in that conversation unless they ask')
+        expect(section).not.toContain('without asking first')
     })
 
-    it('buys a big spend without asking when nobody typed the run: a routine, a webhook', async () => {
+    it('asks the same way when nobody typed the run, a routine or a webhook: the card waits in the inbox', async () => {
         for (const trigger of [
             { source: 'schedule', slug: 'weekly', name: 'Weekly' },
             { source: 'trigger', slug: 'hook', name: 'Hook' },
         ] as const) {
             const prompt = await buildSystemPrompt(agentWith({ paidData: true, askUser: true }), trigger)
-            expect(prompt).toContain('You use it without asking first: call it directly')
-            expect(prompt).not.toContain('big spend')
+            expect(prompt).toContain('call request_spend once for the batch')
         }
     })
 
-    it('buys a big spend without asking as an ephemeral delegate, which has no user to answer', async () => {
-        const delegate = { ...agent, config: agentConfigSchema.parse({ name: 'Prompt test delegate', provider: 'rerun', ephemeral: true, tools: { paidData: true, memory: false, db: false, schedule: false } }) }
-        const prompt = await buildSystemPrompt(delegate, { source: 'chat' })
-        expect(prompt).toContain('You use it without asking first: call it directly')
-        expect(prompt).not.toContain('big spend')
+    it('buys without asking once the user allowed it, and says what the spend got and cost', async () => {
+        const allowed = { ...agent, config: agentConfigSchema.parse({ name: 'Prompt test agent', provider: 'rerun', paidDataAlwaysAllow: true, tools: { paidData: true } }) }
+        const prompt = await buildSystemPrompt(allowed, { source: 'chat' })
+        expect(prompt).toContain('The user allowed you to use it without asking first, so call it directly')
+        expect(prompt).not.toContain('request_spend')
+    })
+
+    it('names the settings that unlock paid data where nobody can approve a spend', async () => {
+        const prompt = await buildSystemPrompt(agentWith({ paidData: true, requestApproval: false }), { source: 'chat' })
+        expect(prompt).toContain('switch on Request approval for you, or to switch on Spend without asking')
+        expect(prompt).not.toContain('request_spend')
     })
 
     it('sizes a spend to the plan unless the user asked for a volume, and keeps the data off the screen', async () => {

@@ -300,9 +300,12 @@ def builder_lock():
             pass
 
 
-def cap_check():
+def cap_check(quiet=False):
+    """Refuse at the cap; with quiet, return True when there is no room instead of refusing."""
     active = [(r, d) for r, d, p in wt_dirs() if not os.path.exists(marker(r, run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=p, check=False).stdout.strip()))]
     if len(active) >= max_builders():
+        if quiet:
+            return True
         die("%d builders are already active (%s). At most %d at once. Return BLOCKED to @boss." % (len(active), ", ".join("/".join(x) for x in active), max_builders()))
 
 
@@ -427,6 +430,8 @@ def cmd_wt(a):
     mem = avail_mem_gb()
     if mem is not None and mem < MIN_FREE_MEM_GB:
         die("%.1f GB of memory available, floor is %d GB. Tell @boss." % (mem, MIN_FREE_MEM_GB))
+    if du_gb(WORK) > MAX_WORK_GB or cap_check(quiet=True):
+        wt_sweep(True, only="REMOVE")  # finished worktrees go first; RESCUE stays with the explicit `wt sweep --apply`
     if du_gb(WORK) > MAX_WORK_GB:
         die("/data/work is over %d GB. Tell @boss; old worktrees need `wt done`." % MAX_WORK_GB)
     cap_check()  # early refusal before any fetch or push; repeated under the lock below
@@ -454,6 +459,7 @@ def cmd_wt(a):
         json.dump({"repo": full, "issue": issue, "chunk": chunk, "branch": branch, "base": base,
                    "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "owner": owner,
                    "run": os.environ.get("FACTORY_RUN") or "unknown"}, f)
+    install_deps(path)
     ex = os.path.join(p, ".git", "info", "exclude")
     if ".symforge" not in open(ex).read():
         open(ex, "a").write("\n.symforge/\n.symforge-knowledge.toml\n")
@@ -463,12 +469,28 @@ def cmd_wt(a):
     print("Next: edit here, quick checks only (lint, type check, named test files), commit, then `pr-open`.")
 
 
+def install_deps(path):
+    """Install dependencies in a fresh worktree that has a pnpm lockfile. Never fails `wt new`."""
+    if not os.path.isfile(os.path.join(path, "pnpm-lock.yaml")):
+        return
+    t0 = time.time()
+    try:
+        r = run(["pnpm", "install", "--frozen-lockfile", "--prefer-offline"], cwd=path, check=False, timeout=300)
+        err = None if r.returncode == 0 else ((r.stderr or r.stdout or "").strip().splitlines() or ["exit %d" % r.returncode])[0]
+    except (OSError, subprocess.SubprocessError) as e:
+        err = (str(e).splitlines() or [type(e).__name__])[0]
+    if err is None:
+        print("dependencies installed in %d s" % (time.time() - t0))
+    else:
+        print("dependencies NOT installed: %s" % err[:200])
+
+
 def pr_lookup(full, branch):
     """PRs with head `branch` as [{number, state OPEN|CLOSED|MERGED, headRefOid}], or None when GitHub cannot be asked."""
-    r = run([GH, "pr", "list", "-R", full, "--head", branch, "--state", "all", "--limit", "20", "--json", "number,state,headRefOid"], check=False)
     try:
+        r = run([GH, "pr", "list", "-R", full, "--head", branch, "--state", "all", "--limit", "20", "--json", "number,state,headRefOid"], check=False)
         return None if r.returncode else json.loads(r.stdout or "[]")
-    except ValueError:
+    except (ValueError, OSError):  # OSError: gh missing or not startable
         return None
 
 
@@ -500,7 +522,7 @@ def sweep_verdict(full, r, d, path):
     return "KEEP", "active: idle %dh, %s" % (idle, work or "no merged or closed PR"), prs
 
 
-def wt_sweep(apply):
+def wt_sweep(apply, only=None):
     """Dry run unless apply. REMOVE and RESCUE go through `wt done`, which saves unpushed commits or refuses."""
     n = {"KEEP": 0, "REMOVE": 0, "RESCUE": 0}
     for r, d, path in wt_dirs():
@@ -508,7 +530,7 @@ def wt_sweep(apply):
         verdict, why, prs = sweep_verdict(full, r, d, path)
         n[verdict] += 1
         print("%-6s %s/%s  %s" % (verdict, r, d, why))
-        if not apply or verdict == "KEEP":
+        if not apply or verdict == "KEEP" or (only and verdict != only):
             continue
         try:
             cmd_wt(["done", full] + d.split("-", 1))

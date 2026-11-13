@@ -33,6 +33,13 @@ class Runner(unittest.TestCase):
         self.assertIn("name: rerun-dev", self.c)
         self.assertNotIn("networks:", self.c)
 
+    def test_compose_builds_from_factory_runner_dockerfile(self):
+        self.assertRegex(self.c, r"(?m)^    build:\n(      .*\n)*?      dockerfile: factory-runner\.Dockerfile$")
+        self.assertNotRegex(self.c, r"(?m)^    image:")
+        self.assertNotRegex(self.c, r"gh[pousr]_\w{10}|github_pat_|(?i:token)\w*\s*[:=]\s*[^\s$]")
+        self.assertNotIn("env_file", self.c)
+        self.assertNotIn("ports:", self.c)
+
     def test_only_the_dev_key_and_url(self):
         self.assertIn("RERUN_DEV_ENGINE_KEY: ${RERUN_DEV_ENGINE_KEY:?", self.c)
         self.assertIn("RERUN_DEV_ENGINE_URL: http://engine-dev:3000", self.c)

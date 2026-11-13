@@ -58,6 +58,40 @@ flowchart LR
 Each stage is a typed task with its own queue. What one stage produces is what the next stage's task points at: the
 research note, the spec in `specs/`, the plan on the issue, the cut.
 
+## 2a. The floor: belts, parts and assemblies
+
+Rob, 2026-11-13: "think of loops like conveyor belts ... a task is a product, being handed from one conveyor belt to
+the next, not in a linear fashion in a straight line, but can go sideways, depending on which conveyor belt is free,
+each task needs several work done to it ... several are worked on in their respective conveyor belts, and at several
+points they come together and join to form a cohesive whole, they must undergo quality control before being assembled
+into a larger whole still, at the end a whole vehicle comes out."
+
+| On the factory floor | In this machine |
+|---|---|
+| A conveyor belt with its stations | the queue of one worker type, with its main coworker and ghosts |
+| A part | a task |
+| The work a part needs, in order | the task's **route**: its list of operations, each naming a belt. Example: code, then correctness review and data review side by side, then checks |
+| A part going sideways to whichever belt is free | an operation goes to any free worker of its type; operations whose order does not matter run at the same time |
+| Parts joining into a sub-assembly | a **join**: a task of type quality control whose dependencies are the parts it joins |
+| Quality control before the next assembly | the join runs the done-tests of that piece of the spec on the joined code; tasks of the next level depend on the join, so nothing is built on an unchecked piece |
+| The vehicle | the feature, merged into `dev` and delivered |
+
+A join needs no machinery of its own. It is one more task in the same dependency graph, so joins nest to any depth:
+parts into sub-assemblies, sub-assemblies into the feature, features into a release.
+
+```mermaid
+flowchart LR
+  P1["part: contract"] --> Q1{"quality control: engine side"}
+  P2["part: storage"] --> Q1
+  P3["part: engine route"] --> Q1
+  P4["part: app client"] --> Q2{"quality control: app side"}
+  P5["part: screen"] --> Q2
+  Q1 --> ASM["assembly: the feature on its branch"]
+  Q2 --> ASM
+  ASM --> Q3{"quality control: the whole against its spec"}
+  Q3 --> V["the vehicle: merged into dev, delivered"]
+```
+
 ## 3. The life of one task
 
 This is the thread. A task keeps it from the cut to the merge, whoever works on it and however many ghosts are running.
@@ -158,7 +192,7 @@ flowchart TB
 - Tasks of a feature merge into a **feature branch**, not into `dev`. A convergence that fails holds nothing back on
   `dev` and never needs a revert. A single small fix has no feature branch and goes straight to `dev`.
 - The join is code: the delegator knows the tasks of a feature from the cut and queues the spec review when the last
-  one merges.
+  one merges. A feature may have joins below it (section 2a): each is a quality-control task that later tasks depend on.
 - The spec review reads the spec and the whole diff, and for interface work looks at the running product. Its exit is
   the spec's own done-tests, run by CI on the integrated head.
 
@@ -171,7 +205,7 @@ One beat every 30 seconds (it exists: `poll_s`). On every beat, in this order:
 | 1 | Writes the heartbeat: the time and one line of state per type and per feature | the container's health check fails when the heartbeat is older than 2 minutes | new |
 | 2 | Resolves leases with no run id | 3 beats, then the task is Ready again | idle code (`limits.resolve_pending`) |
 | 3 | Reads every running run: wall time, last step, tokens | 45 minutes; 10 minutes without a step; 400,000 tokens; then the run is cancelled and the attempt counted | idle code (`limits.run_outcome`); cancelling needs an account tool |
-| 4 | Checks ended runs against evidence and goal | never the run's own text alone | idle code (`evidence.py`); goal check live since #177 |
+| 4 | Checks ended runs against evidence and goal | never the run's own text alone | idle code (`evidence.py`); the goal check is merged (#171 to #177) and reaches the server with the next update |
 | 5 | Fills the queues: ready set per type, ceilings, leases | a ready task not started for 10 minutes with room under the ceiling is reported as starved | partly live (`queued` state); the full rule is idle code (`readyq.eligible`) |
 | 6 | Watches checks of accepted tasks | waits while a check is running; gives up only when none is running and one is red, or after 60 minutes | live, with a flat 30-minute limit |
 | 7 | Checks joins: features whose last task merged | queues the spec review | new |
@@ -231,7 +265,7 @@ A gate is a refusal in code. Each sits at a place work already passes through.
 | Room | `wt new` | no slot, low memory, low disk | live |
 | Diff inside its paths | `pr-open` | a changed file is outside the task's paths; a lockfile changes anything but the packages the task names; a workflow file; a secret | workflow files only; the path rule is idle code (`publish._outside`, `evidence.build`) |
 | Evidence | delegator, step 4 | no pushed branch, no pull request, the test file is not in the diff | idle (`evidence.py`) |
-| Goal | engine stop check | the answer does not end in the required form | live since #171 to #177 |
+| Goal | engine stop check | the answer does not end in the required form | merged (#171 to #177), not on the server yet |
 | Reviewers by risk | delegator | a diff that writes stored data, config, keys or sign-in has no verdict from the reviewer of that area | idle (`roster.required`, `risk`) |
 | Verdict at this commit | merge | the pull request moved since the review | live (`--match-head-commit`) |
 | Red before green | merge | the task's test never failed without the change | live only in the hand tool (`gate.py` through `merge-dev`) |
@@ -271,25 +305,31 @@ The repository holds two halves of this machine that do not know each other.
 
 **The decision:** the delegator stays the one process and is seated on the idle half.
 
-| Part of the machine | Today | Becomes | Prerequisite |
+| Part of the machine | Today | Becomes | Prerequisite ("checked" means read in the code on 2026-11-13) |
 |---|---|---|---|
-| State | JSON file, no history | `store.py` ledger | none; one writer already |
-| May this start? | first free name, dependency check | `readyq.eligible` with types added | the worker type on every task |
-| Stage ended? | the run's last line, plus the goal | `evidence.py` and the goal | none |
-| Clocks | none per run | `limits.run_outcome` | an account tool to cancel a run: none of the 41 account tools does, and the engine route `POST .../runs/:rid/cancel` exists. The stall clock needs nothing new: `get_run` already returns the live step count, and the delegator notes when it last moved |
-| Retry | one resend | the classes of section 3, with `store.attempts` | none |
-| Who reviews | first free reviewer | `roster.required` by the files in the diff | none |
-| Merge | checks green, verdict, head match | the same plus `gate.py` | none |
-| Ghosts | one job per named coworker | parallel runs with `copy_index` | `send_message` passes the number through; ceilings in config |
-| Convergence | every task merges into `dev`; parents closed by hand | feature branch and join | `wt new --base` exists; CI must run on feature branches |
-| Numbers and timeline | none | `measures.py`, `status_report.py`, the gantt of section 6 | the ledger |
-| Heartbeat | none | a line per beat and a container health check | none |
-| Front of the line | plans written and cut by hand through Boss | research, spec, plan as typed tasks | the stage skills; `specs/` as the place for specs |
+| State | JSON file, no history | `store.py` ledger | checked: `store.py` wants one writer (it takes a lock file beside the database) and a path, both there in the dispatcher's state volume. The open jobs of the JSON file are read into it once |
+| May this start? | first free name, dependency check | `readyq.eligible` with types added | checked: it reads `deps`, `paths`, `job` and `attempts` of a task as data. Today an issue carries its dependencies in one line the parser reads, and its paths as prose under **Files**. The cut must write paths and the test file in a form a script reads (the fields `ledger.shape` already checks) |
+| Stage ended? | the run's last line, plus the goal | `evidence.py` and the goal | checked: `evidence.build` looks for the branch `chunk/<issue>-<id>` (what `wt new` makes), a commit after the start, the test file in the diff and every file inside the paths. Same prerequisite as the row above |
+| Clocks | none per run | `limits.run_outcome` | checked: none of the 41 account tools cancels a run; the engine route `POST .../runs/:rid/cancel` exists, so one account tool is missing. `run_outcome` wants the time of the last step, which `get_run` does not return; it returns the live step count, and the delegator notes when that last moved |
+| A lease with no run id | the job ends blocked | back to Ready after 3 beats | checked: `limits.resolve_pending` finds the run by a trigger name the dispatcher does not use. The dispatcher gets the run id from `send_message` at once; for the rare cut-off send it lists the coworker's runs started after the intent (`list_runs`) |
+| Retry | one resend | the classes of section 3, with `store.attempts` | checked: the counter is per job and chunk; nothing else needed |
+| Cut shape at intake | dependency line only | `ledger.shape` plus cycle and shared-path checks | checked: shape exists; the cycle and shared-path checks are new code (`readyq.overlap` gives the path rule) |
+| Heartbeat | none | a line per beat and a container health check | checked: `deploy/vps/factory-dispatcher.yml` has no health check today |
+| Numbers and timeline | none | `measures.py`, `status_report.py`, the gantt of section 6 | checked in part: `status_report.py` imports `runner_loop` and `trigger`, so it must be cut loose from them first |
+| Who reviews | first free reviewer | `roster.required` by the files in the diff | not yet hunted. Known: `roster.json` names KENT as the builder of the tests area while `dispatch.json` uses him as a reviewer, so the roster is out of date |
+| Merge | checks green, verdict, head match | the same plus `gate.py` | not yet hunted. Known: the red-before-green check wants an earlier red run of the test, which a job with one push never has |
+| Ghosts | one job per named coworker | parallel runs with `copy_index` | not yet hunted beyond the probe. Known: `send_message` has no field for the number today |
+| Convergence | every task merges into `dev`; parents closed by hand | feature branch and joins | not yet hunted. Known: `wt new --base` exists; the checks do not run on feature branches today |
+| Front of the line | plans written and cut by hand through Boss | research, spec, plan as typed tasks | not yet hunted |
 
 **Deleted as this lands** (principle 6: every new part deletes something): `runner_loop.py`, `trigger.py`,
 `stub_model.py`, `realmodel.py`, `batch.py` and the stub stages in `runner.json`; the JSON state file; the
 `auto_plan_marker` switch; the two fixed lists of names in `dispatch.json`; the watching and label-moving that is done
-by hand today.
+by hand today. Who still uses them, read on 2026-11-13: `runner_loop.py` is imported by `status_report.py` and started
+by `deploy/vps/factory-runner.yml`; `trigger.py` is imported by `runner_loop.py` and `status_report.py`; `batch.py` by
+`runner_loop.py`; `stub_model.py` is started by `deploy/vps/stub-model.yml`; all but `stub_model.py` and
+`realmodel.py` are in the file list of `install.sh`. Whether the old runner's container still runs on the server is
+not checked.
 
 **Open before building**
 
@@ -307,9 +347,9 @@ Each phase is one cut of a few tasks, ends in something a person can see, and na
 | Phase | Outcome | Contents | Answers which faults of section 8 |
 |---|---|---|---|
 | **A. The delegator stops losing work** | no job needs a hand to move again | ledger for state; the three clocks and cancel; retry classes; cut-shape gate at intake; heartbeat and health check; `status` with the timeline | 3, 4, 5, 8, 9 |
-| **B. Queues by type and ghosts** | six ready tasks of one type start six workers | types from the roster; a queue per type; ghosts with `copy_index`; ceilings; staggered starts; the review queued with its code task | throughput on wide cuts |
+| **B. Queues by type and ghosts** | six ready tasks of one type start six workers | types from the roster; a queue per type; ghosts with `copy_index`; ceilings; staggered starts; a route on every task, the review queued with its code task | throughput on wide cuts |
 | **C. Gates where work passes** | no diff outside its task, no risky diff without its reviewer | path and lockfile rule in `pr-open`; reviewers by risk; evidence check; `gate.py` at the merge | 2, 6 |
-| **D. Convergence** | a feature reaches `dev` only as a whole that meets its spec | feature in the cut; feature branch; join; spec review; done-tests on the whole; close and the three numbers | 1, and parents closed by hand |
+| **D. Convergence** | a feature reaches `dev` only as a whole that meets its spec | feature in the cut; feature branch; joins as quality-control tasks, at as many levels as the cut names; spec review; done-tests on the whole; close and the three numbers | 1, and parents closed by hand |
 | **E. The front of the line** | research, spec and plan are tasks like any other | stage skills and exit checks; plan review by someone else; the arbiter; the approval card | 7 |
 | **F. Deliver and learn** | an update verifies itself; the line changes one thing and measures it | check after an update; defects linked to their job for 7 days; proposals with keep or remove (#115) | escaped defects |
 

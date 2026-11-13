@@ -199,11 +199,6 @@
             "title": "Não foi possível carregar seu plano",
             "description": "A Stripe não respondeu. Sua assinatura não foi alterada, tente de novo em instantes.",
             "retry": "Tentar de novo"
-        },
-        "lifetime": {
-            "title": "Plano vitalício",
-            "description": "Pago uma vez, seu para sempre. Coworkers e assentos ilimitados, rodando na sua própria IA.",
-            "connectAi": "Conectar sua IA"
         }
     },
     "postPayment": {

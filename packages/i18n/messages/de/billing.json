@@ -199,11 +199,6 @@
             "title": "Dein Tarif konnte nicht geladen werden",
             "description": "Stripe hat nicht geantwortet. Dein Abo bleibt unverändert, versuch es gleich noch einmal.",
             "retry": "Erneut versuchen"
-        },
-        "lifetime": {
-            "title": "Lifetime-Tarif",
-            "description": "Einmal bezahlt, für immer deins. Unbegrenzte Coworker und Plätze, mit deiner eigenen KI.",
-            "connectAi": "Deine KI verbinden"
         }
     },
     "postPayment": {

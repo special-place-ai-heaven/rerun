@@ -58,6 +58,10 @@ export const runs = sqliteTable('runs', {
     jobRef: text('job_ref'),
     branch: text('branch'),
     copyIndex: integer('copy_index'),
+    goalJson: text('goal_json'),
+    goalState: text('goal_state'),
+    goalTurns: integer('goal_turns'),
+    goalVerdictsJson: text('goal_verdicts_json'),
 })
 
 export const runSteps = sqliteTable('run_steps', {

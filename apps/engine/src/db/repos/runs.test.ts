@@ -6,7 +6,7 @@ process.env.RERUN_DATA_DIR = mkdtempSync(resolve(tmpdir(), 'rerun-runs-'))
 process.env.RERUN_API_KEY = ''
 
 const { afterEach, describe, expect, it, vi } = await import('vitest')
-const { aggregateUsageByDay, bumpRunStep, cancelRun, failInterruptedRuns, failRun, finishRun, getRun, listRunsByAgent, setRunContext, setRunLineage, startRun, updateRunLive } = await import('./runs.js')
+const { aggregateUsageByDay, bumpRunStep, cancelRun, failInterruptedRuns, failRun, finishRun, getRun, listRunsByAgent, recordGoalVerdict, setRunContext, setRunGoal, setRunLineage, startRun, updateRunLive } = await import('./runs.js')
 
 afterEach(() => {
     vi.useRealTimers()
@@ -227,5 +227,60 @@ describe('run lineage', () => {
         expect((await listRunsByAgent('lin2', { job: 'rerun#1' })).map(r => r.id).sort()).toEqual(['a', 'b'])
         expect((await listRunsByAgent('lin2', { branch: 'job/1' })).map(r => r.id).sort()).toEqual(['a', 'c'])
         expect((await listRunsByAgent('lin2', { job: 'rerun#1', branch: 'job/1' })).map(r => r.id)).toEqual(['a'])
+    })
+})
+
+describe('run goal', () => {
+    const goal = JSON.stringify({ text: 'ship it' })
+
+    it('sets the goal once, only while none is set', async () => {
+        await startRun('goal', 's1', 'g1')
+        expect(await getRun('goal', 'g1')).toMatchObject({ goalJson: null, goalState: null, goalTurns: null, goalVerdictsJson: null })
+        await setRunGoal('goal', 'g1', goal)
+        expect(await getRun('goal', 'g1')).toMatchObject({ goalJson: goal, goalState: 'running', goalTurns: 0, goalVerdictsJson: '[]' })
+        await setRunGoal('goal', 'g1', JSON.stringify({ text: 'other' }))
+        expect((await getRun('goal', 'g1'))?.goalJson).toBe(goal)
+    })
+
+    it('appends a verdict and counts the turn in one write, only while running', async () => {
+        await startRun('goal', 's1', 'g2')
+        await recordGoalVerdict('goal', 'g2', { turn: 1, met: true, reason: 'ignored' })
+        expect((await getRun('goal', 'g2'))?.goalVerdictsJson).toBeNull()
+        await setRunGoal('goal', 'g2', goal)
+        await recordGoalVerdict('goal', 'g2', { turn: 1, met: false, reason: 'no' })
+        await recordGoalVerdict('goal', 'g2', { turn: 2, met: true, reason: 'yes' })
+        const run = await getRun('goal', 'g2')
+        expect(run?.goalTurns).toBe(2)
+        expect(JSON.parse(run?.goalVerdictsJson ?? '')).toEqual([{ turn: 1, met: false, reason: 'no' }, { turn: 2, met: true, reason: 'yes' }])
+    })
+
+    it('finishRun sets the goal state with the status', async () => {
+        await startRun('goal', 's1', 'g3')
+        await setRunGoal('goal', 'g3', goal)
+        await finishRun('goal', 'g3', null, 1, null, undefined, 'not_met')
+        expect(await getRun('goal', 'g3')).toMatchObject({ status: 'done', goalState: 'not_met' })
+        await startRun('goal', 's1', 'g3b')
+        await finishRun('goal', 'g3b', null, 1)
+        expect((await getRun('goal', 'g3b'))?.goalState).toBeNull()
+    })
+
+    it('fail, cancel and interrupted turn a running goal into unchecked and leave the rest', async () => {
+        for (const id of ['g4', 'g5', 'g6', 'g7']) await startRun('goalend', 's1', id)
+        for (const id of ['g4', 'g5', 'g6']) await setRunGoal('goalend', id, goal)
+        await failRun('goalend', 'g4', 'boom')
+        await cancelRun('goalend', 'g5')
+        await failInterruptedRuns('goalend')
+        expect((await getRun('goalend', 'g4'))?.goalState).toBe('unchecked')
+        expect((await getRun('goalend', 'g5'))?.goalState).toBe('unchecked')
+        expect((await getRun('goalend', 'g6'))?.goalState).toBe('unchecked')
+        expect((await getRun('goalend', 'g7'))?.goalState).toBeNull()
+    })
+
+    it('does not touch a goal state already settled', async () => {
+        await startRun('goalend2', 's1', 'g8')
+        await setRunGoal('goalend2', 'g8', goal)
+        await finishRun('goalend2', 'g8', null, 1, null, undefined, 'met')
+        await failRun('goalend2', 'g8', 'late')
+        expect((await getRun('goalend2', 'g8'))?.goalState).toBe('met')
     })
 })

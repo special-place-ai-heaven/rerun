@@ -100,13 +100,36 @@ describe('run lineage migration', () => {
         expect(columns).toEqual(expect.arrayContaining(LINEAGE))
         const indexSql = "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'runs_agent_job_started_idx'"
         expect((await first.client.execute(indexSql)).rows).toHaveLength(1)
-        expect(await sqliteVersion(first.client)).toBe(5)
+        expect(await sqliteVersion(first.client)).toBe(6)
         closeSystemDb('v4')
 
         const second = await getSystemDb('v4')
         expect(await columnsOf('v4', 'runs')).toEqual(columns)
         expect((await second.client.execute(indexSql)).rows).toHaveLength(1)
-        expect(await sqliteVersion(second.client)).toBe(5)
+        expect(await sqliteVersion(second.client)).toBe(6)
+    })
+})
+
+describe('run goal migration', () => {
+    const GOAL = ['goal_json', 'goal_state', 'goal_turns', 'goal_verdicts_json']
+
+    it('adds four nullable goal columns to a db at version 5, once', async () => {
+        mkdirSync(agentDataDir('v5goal'), { recursive: true })
+        const old = createClient({ url: `file:${systemDbPath('v5goal')}` })
+        await migrateSqlite(old, SYSTEM_DB_MIGRATIONS.filter(step => step.version <= 5), systemDbPath('v5goal'))
+        await old.execute("INSERT INTO runs (id, agent_id, session_id, started_at) VALUES ('r1', 'v5goal', 's', 'x')")
+        old.close()
+
+        const first = await getSystemDb('v5goal')
+        const columns = await columnsOf('v5goal', 'runs')
+        expect(columns).toEqual(expect.arrayContaining(GOAL))
+        const row = (await first.client.execute("SELECT goal_json, goal_state, goal_turns, goal_verdicts_json FROM runs WHERE id = 'r1'")).rows[0]
+        expect([row.goal_json, row.goal_state, row.goal_turns, row.goal_verdicts_json]).toEqual([null, null, null, null])
+        await expect(first.client.execute("UPDATE runs SET goal_state = 'bogus' WHERE id = 'r1'")).rejects.toThrow()
+        expect(await sqliteVersion(first.client)).toBe(6)
+        expect(SYSTEM_DB_MIGRATIONS.at(-1)).toMatchObject({ version: 6, id: 'run-goal' })
+        closeSystemDb('v5goal')
+        expect(await columnsOf('v5goal', 'runs')).toEqual(columns)
     })
 })
 

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, isNull, sql } from 'drizzle-orm'
 import type { ContextOccupancy } from '@rerun/contracts'
 import { getSystemDb } from '../systemDb.js'
 import { runs, type RunRow } from '../schema.js'
@@ -90,6 +90,10 @@ export async function startRun(agentId: string, sessionId: string, id: string = 
         jobRef: null,
         branch: null,
         copyIndex: null,
+        goalJson: null,
+        goalState: null,
+        goalTurns: null,
+        goalVerdictsJson: null,
     }
     const { db } = await getSystemDb(agentId)
     await db.insert(runs).values(row)
@@ -110,6 +114,30 @@ export async function setRunLineage(agentId: string, id: string, patch: RunLinea
     const { db } = await getSystemDb(agentId)
     await db.update(runs).set(patch).where(eq(runs.id, id))
 }
+
+export async function setRunGoal(agentId: string, id: string, goalJson: string): Promise<void> {
+    const { db } = await getSystemDb(agentId)
+    await db
+        .update(runs)
+        .set({ goalJson, goalState: 'running', goalTurns: 0, goalVerdictsJson: '[]' })
+        .where(and(eq(runs.id, id), isNull(runs.goalJson)))
+}
+
+export type GoalVerdict = { turn: number; met: boolean; reason: string }
+
+export async function recordGoalVerdict(agentId: string, id: string, verdict: GoalVerdict): Promise<void> {
+    const { db } = await getSystemDb(agentId)
+    await db
+        .update(runs)
+        .set({
+            goalVerdictsJson: sql`json_insert(coalesce(${runs.goalVerdictsJson}, '[]'), '$[#]', json(${JSON.stringify(verdict)}))`,
+            goalTurns: sql`coalesce(${runs.goalTurns}, 0) + 1`,
+        })
+        .where(and(eq(runs.id, id), eq(runs.goalState, 'running')))
+}
+
+// A goal still running when its run ends was never checked against a final answer.
+const goalUnchecked = sql`CASE WHEN ${runs.goalState} = 'running' THEN 'unchecked' ELSE ${runs.goalState} END`
 
 export async function bumpRunStep(agentId: string, id: string, stepCount: number): Promise<void> {
     const { db } = await getSystemDb(agentId)
@@ -132,7 +160,7 @@ export async function updateRunLive(agentId: string, id: string, { stepCount, us
 
 type UsageTokens = { inputTokens?: number; outputTokens?: number; totalTokens?: number; reasoningTokens?: number; cachedInputTokens?: number }
 
-export async function finishRun(agentId: string, id: string, usage: UsageTokens | null | undefined, stepCount: number, costMicros: number | null = null, context?: ContextOccupancy): Promise<void> {
+export async function finishRun(agentId: string, id: string, usage: UsageTokens | null | undefined, stepCount: number, costMicros: number | null = null, context?: ContextOccupancy, goalState?: 'met' | 'not_met'): Promise<void> {
     const { db } = await getSystemDb(agentId)
     await db.update(runs).set({
         status: 'done',
@@ -145,17 +173,18 @@ export async function finishRun(agentId: string, id: string, usage: UsageTokens 
         cachedInputTokens: usage?.cachedInputTokens ?? null,
         reasoningTokens: usage?.reasoningTokens ?? null,
         totalTokens: usage?.totalTokens ?? null,
+        ...(goalState ? { goalState } : {}),
     }).where(eq(runs.id, id))
 }
 
 export async function failRun(agentId: string, id: string, error: string): Promise<void> {
     const { db } = await getSystemDb(agentId)
-    await db.update(runs).set({ status: 'error', finishedAt: nowIso(), error }).where(eq(runs.id, id))
+    await db.update(runs).set({ status: 'error', finishedAt: nowIso(), error, goalState: goalUnchecked }).where(eq(runs.id, id))
 }
 
 export async function cancelRun(agentId: string, id: string): Promise<void> {
     const { db } = await getSystemDb(agentId)
-    await db.update(runs).set({ status: 'cancelled', finishedAt: nowIso() }).where(eq(runs.id, id))
+    await db.update(runs).set({ status: 'cancelled', finishedAt: nowIso(), goalState: goalUnchecked }).where(eq(runs.id, id))
 }
 
 export type InterruptedRun = { id: string; sessionId: string; triggerSource: string | null; triggerSlug: string | null; startedAt: string }
@@ -169,6 +198,6 @@ export async function failInterruptedRuns(agentId: string): Promise<InterruptedR
         .from(runs)
         .where(eq(runs.status, 'running'))
     if (stale.length === 0) return []
-    await db.update(runs).set({ status: 'error', finishedAt: nowIso(), error: 'interrupted: engine restarted' }).where(eq(runs.status, 'running'))
+    await db.update(runs).set({ status: 'error', finishedAt: nowIso(), error: 'interrupted: engine restarted', goalState: goalUnchecked }).where(eq(runs.status, 'running'))
     return stale
 }

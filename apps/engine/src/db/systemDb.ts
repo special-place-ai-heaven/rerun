@@ -200,6 +200,13 @@ const RUN_LINEAGE_COLUMNS = [
     'branch TEXT',
     'copy_index INTEGER',
 ]
+// The goal a run was given, where it stands, and the verdict of every final answer checked against it.
+const RUN_GOAL_COLUMNS = [
+    'goal_json TEXT',
+    "goal_state TEXT CHECK (goal_state IN ('running','met','not_met','unchecked'))",
+    'goal_turns INTEGER',
+    'goal_verdicts_json TEXT',
+]
 const RUN_STEP_CACHE_COST_COLUMNS = ['cache_write_tokens INTEGER', 'cost_micros INTEGER']
 
 // Every paid data call indexed by the values it returned, so a table cell can be traced back to the
@@ -272,6 +279,13 @@ export const SYSTEM_DB_MIGRATIONS: SqliteMigration[] = [
         up: async client => {
             await ensureColumns(client, 'runs', RUN_LINEAGE_COLUMNS)
             await client.execute('CREATE INDEX IF NOT EXISTS runs_agent_job_started_idx ON runs(agent_id, job_ref, started_at)')
+        },
+    },
+    {
+        version: 6,
+        id: 'run-goal',
+        up: async client => {
+            await ensureColumns(client, 'runs', RUN_GOAL_COLUMNS)
         },
     },
 ]

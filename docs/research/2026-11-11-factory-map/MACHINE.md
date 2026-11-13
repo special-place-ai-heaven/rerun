@@ -30,30 +30,29 @@ Three findings from outside decided three of these lines:
 ## 2. The line
 
 Six stages, as Rob named them: research, spec, plan, task, work, verify. Then the whole converges, is delivered, and
-the line learns. A diamond is a gate: code that refuses.
+the line learns. The text on an arrow is the gate between two stages: code that refuses.
 
 ```mermaid
-flowchart TB
+flowchart LR
   subgraph BEFORE["Before any code"]
-    direction LR
-    R["Research: facts with file and line"] --> G1{"facts exist?"}
-    G1 --> S["Spec: goal and done-tests"] --> G2{"can a script run every done-test?"}
-    G2 --> P["Plan: design, rejected options, risks"] --> G3{"challenged by someone else?"}
-    G3 --> T["Tasks: the cut, typed, with dependencies"] --> G4{"cut parses, no cycle, no shared path?"}
+    direction TB
+    R["Research<br/>facts with file and line"] -->|"gate: the facts exist"| S["Spec<br/>goal and done-tests"]
+    S -->|"gate: a script can run every done-test"| P["Plan<br/>design, rejected options, risks"]
+    P -->|"gate: challenged by someone else"| T["Tasks<br/>the cut, typed, with dependencies"]
   end
-  subgraph BUILD["Building, one thread per task"]
-    direction LR
-    Q["Queue per worker type"] --> W["Work: main coworker or a ghost"] --> G5{"evidence on GitHub and goal met?"}
-    G5 --> V["Verify: review at this exact commit, checks"] --> G6{"accepted, green, inside its paths?"}
+  subgraph BUILD["Building: one thread per task"]
+    direction TB
+    Q["Queue per worker type"] -->|"gate: room under every ceiling"| W["Work<br/>main coworker or a ghost"]
+    W -->|"gate: evidence on GitHub, goal met"| V["Verify<br/>review at this exact commit, checks"]
   end
   subgraph AFTER["The whole feature"]
-    direction LR
-    C["Converge: all tasks on the feature branch"] --> G7{"done-tests of the spec pass on the whole?"}
-    G7 --> D["Deliver: update, health, smoke"] --> L["Learn: measure, propose, keep or remove"]
+    direction TB
+    C["Converge<br/>all tasks on the feature branch"] -->|"gate: the spec's done-tests pass on the whole"| D["Deliver<br/>update, health, smoke"]
+    D --> L["Learn<br/>measure, propose, keep or remove"]
+    L -.-> FB["back to Research<br/>rules, packets, limits"]
   end
-  G4 --> Q
-  G6 --> C
-  L -. "rules, packets, limits" .-> R
+  BEFORE -->|"gate: cut parses, no cycle, no shared path"| BUILD
+  BUILD -->|"gate: accepted, green, inside its paths"| AFTER
 ```
 
 Each stage is a typed task with its own queue. What one stage produces is what the next stage's task points at: the
@@ -97,7 +96,7 @@ stateDiagram-v2
 ## 4. Queues, the delegator and ghosts
 
 ```mermaid
-flowchart LR
+flowchart TB
   CUT["The cut: typed tasks with dependencies"] --> LED[("Ledger")]
   LED --> QC["coder queue"]
   LED --> QR["reviewer queue"]

@@ -4,9 +4,10 @@ checks -> merge on live coworkers. Server port of ~/.claude/scripts/rerun-factor
 One pass is single-threaded and never waits on a coworker: each unfinished job moves at most one step. Every change is
 written to the ledger (store.py) at once as a transitions row, and a send is recorded as an intent row before it goes
 out, so a restart never sends a step twice."""
-import argparse, datetime, json, os, re, subprocess, sys, tempfile, time, urllib.error, urllib.request
+import argparse, datetime, hashlib, json, os, re, subprocess, sys, tempfile, time, urllib.error, urllib.request
 
 import clocks
+import cutshape
 import store as ledger_store
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -199,10 +200,8 @@ def make_gh(token, run=subprocess.run):
 
 
 def depends_on(issue):
-    """Issue numbers on the first 'Depends on:' line of the body (own number ignored); none when there is no such line."""
-    m = re.search(r"(?mi)^[^\n]*?Depends on(?:\*\*)?\s*:[^\n]*", issue.get("body") or "")
-    nums = [int(n) for n in re.findall(r"#(\d+)", m.group(0))] if m else []
-    return sorted({n for n in nums if n != issue["number"]})
+    """Issue numbers the body depends on (own number ignored): a wrapper over cutshape.parse."""
+    return cutshape.parse(issue)["deps"]
 
 
 def checks_verdict(runs):
@@ -263,6 +262,7 @@ class Dispatcher:
         issues = json.loads(self.gh(["issue", "list", "-R", self.repo, "--label", self.label, "--state", "open",
                                      "--json", "number,title,body", "--limit", "100"]))
         open_numbers = None
+        shape = cutshape.check(issues)
         for i in sorted(issues, key=lambda i: i["number"]):
             if room <= 0:
                 break
@@ -270,7 +270,25 @@ class Dispatcher:
             # An ended job lost its label when it was reported: the label being back means "run it again".
             if old and old["state"] != "waiting" and not (old["state"] in END and old.get("relabelled")):
                 continue
-            deps = depends_on(i)
+            errors = shape.get(i["number"]) or []
+            if errors:
+                # Not started: one comment per text of the issue; a changed body is read again on the next beat.
+                digest = hashlib.sha256((i.get("body") or "").encode()).hexdigest()[:16]
+                if self.store.get_all(str(i["number"])).get("cutshape") != digest:
+                    self.gh(["issue", "comment", str(i["number"]), "-R", self.repo, "--body", cutshape.comment(errors)])
+                    self.store.set(str(i["number"]), "cutshape", digest)
+                    log(i["number"], "not started: the issue text is not readable (%d problem%s)" % (len(errors), "" if len(errors) == 1 else "s"))
+                continue
+            parsed = cutshape.parse(i)
+            if parsed["worker"] != "coder":
+                t = parsed["worker"]
+                if self.store.get_all(str(i["number"])).get("worker_queue") != t:
+                    self.gh(["issue", "comment", str(i["number"]), "-R", self.repo, "--body",
+                             "worker type %s has no queue yet (phase B of #198)" % t])
+                    self.store.set(str(i["number"]), "worker_queue", t)
+                    log(i["number"], "not started: worker type %s has no queue yet" % t)
+                continue
+            deps = parsed["deps"]
             if deps:
                 if open_numbers is None:
                     open_numbers = {o["number"] for o in json.loads(self.gh(
@@ -281,7 +299,8 @@ class Dispatcher:
                     if not old or old.get("waiting") != unmet or old.get("waits_on_returned", []) != ret:
                         line = "waits on " + ", ".join(("returned #%d" if d in ret else "#%d") % d for d in unmet)
                         data = {"issue": i["number"], "title": i["title"], "body": i.get("body") or "", "state": "waiting",
-                                "round": 1, "waiting": unmet}
+                                "round": 1, "waiting": unmet, "worker": parsed["worker"], "paths": parsed["paths"],
+                                "test": parsed["test"]}
                         if ret:
                             data["waits_on_returned"] = ret
                         self.save(data, line)
@@ -294,7 +313,8 @@ class Dispatcher:
                     self.gh(["issue", "comment", str(i["number"]), "-R", self.repo, "--body",
                              "SMALL FIX: taken by the factory dispatcher on the owner's label."])
                     log(i["number"], "plan line posted")
-            job = {"issue": i["number"], "title": i["title"], "body": i.get("body") or "", "state": "queued", "round": 1}
+            job = {"issue": i["number"], "title": i["title"], "body": i.get("body") or "", "state": "queued", "round": 1,
+                   "worker": parsed["worker"], "paths": parsed["paths"], "test": parsed["test"]}
             if old and old.get("pr") and json.loads(self.gh(["pr", "view", str(old["pr"]), "-R", self.repo, "--json", "state"])).get("state") == "OPEN":
                 # Put back in with its pull request still open: that one is reviewed, a second build would open a duplicate.
                 job.update(state="review_wait", pr=old["pr"], builder=old.get("builder"))

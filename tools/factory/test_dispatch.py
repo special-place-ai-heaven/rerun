@@ -16,6 +16,11 @@ def run_shape(rid, steps, started, status="running", tokens=120000):
             "totalTokens": tokens, "goal": {"lastLineForms": [{"prefix": "PR:", "rest": "pull-url"}, {"prefix": "BLOCKED:", "rest": "sentence"}],
                                            "turnLimit": 3, "state": "running", "verdicts": []}}
 
+def ready(extra="", deps="none"):
+    """An issue body the cut-shape gate reads: one dependency line, one file, the test file."""
+    return "%s\n**Depends on**: %s\n**Worker**: coder\n**Files**\n- `a/b.py`\n- `a/test_b.py`\n**Test file**: `a/test_b.py`\n" % (extra, deps)
+
+
 PR_LINE = "Done.\nPR: https://github.com/o/r/pull/42"
 
 
@@ -23,7 +28,7 @@ class World:
     """Fake account server and gh. A coworker run stays running until the test finishes it."""
 
     def __init__(self, issues=None):
-        self.issues = issues if issues is not None else [{"number": 5, "title": "Fix x", "body": "", "comments": []}]
+        self.issues = issues if issues is not None else [{"number": 5, "title": "Fix x", "body": ready(), "comments": []}]
         self.sends, self.runs, self.order = [], {}, []
         self.gh_calls, self.merges = [], []
         self.workflows, self.pr_state, self.clock = {}, "OPEN", 1000.0
@@ -191,13 +196,13 @@ class Intake(Base):
         self.assertEqual(self.state(), "building")
 
     def test_no_plan_comment_when_the_issue_has_a_plan_line(self):
-        self.w.issues[0]["body"] = "intro\nPLAN READY: three chunks"
+        self.w.issues[0]["body"] = ready("intro\nPLAN READY: three chunks")
         self.tick()
         self.assertEqual(self.w.issue(5)["comments"], [])
         self.assertEqual(len(self.w.sends), 1)
 
     def test_max_jobs_limits_intake(self):
-        self.w.issues = [{"number": n, "title": "t%d" % n, "body": "SMALL FIX", "comments": []} for n in (1, 2, 3)]
+        self.w.issues = [{"number": n, "title": "t%d" % n, "body": ready("SMALL FIX"), "comments": []} for n in (1, 2, 3)]
         self.cfg["max_jobs"] = 2
         self.tick()
         self.assertEqual(self.job_ids(), ["1", "2"])
@@ -205,13 +210,13 @@ class Intake(Base):
 
 class Depends(Base):
     def job(self, n, line, title=None):
-        return {"number": n, "title": title or "t%d" % n, "body": "intro\n" + line + "\nmore", "comments": []}
+        return {"number": n, "title": title or "t%d" % n, "body": ready("intro\nmore", line), "comments": []}
 
     def open_calls(self):
         return [c for c in self.w.gh_calls if c[:2] == ["issue", "list"] and "--label" not in c]
 
     def test_waits_while_dependency_is_open_then_is_taken(self):
-        self.w.issues = [self.job(5, "**Depends on**: #7")]
+        self.w.issues = [self.job(5, "#7")]
         self.tick(3)
         self.assertEqual(self.w.issue(5)["comments"], [])
         self.assertEqual(self.out.getvalue().count("waits on #7"), 1)
@@ -224,19 +229,19 @@ class Depends(Base):
         self.assertNotIn("waiting", json.loads(self.w.rows("SELECT data FROM jobs")[0][0]))
 
     def test_waiting_line_not_repeated_after_a_restart(self):
-        self.w.issues = [self.job(5, "Depends on: #7")]
+        self.w.issues = [self.job(5, "#7")]
         self.tick(3, fresh=True)
         self.assertEqual(self.out.getvalue().count("waits on #7"), 1)
 
     def test_none_and_no_line_are_taken_as_before(self):
-        self.w.issues = [self.job(5, "**Depends on**: none"), {"number": 6, "title": "t6", "body": "", "comments": []}]
+        self.w.issues = [self.job(5, "none"), {"number": 6, "title": "t6", "body": ready(), "comments": []}]
         self.tick()
         self.assertEqual(self.state(5), "building")
         self.assertEqual(self.state(6), "building")
         self.assertEqual(self.open_calls(), [])
 
     def test_waiting_issue_does_not_use_room(self):
-        self.w.issues = [self.job(5, "**Depends on**: #7"), self.job(6, "**Depends on**: none")]
+        self.w.issues = [self.job(5, "#7"), self.job(6, "none")]
         self.cfg["max_jobs"] = 1
         self.tick()
         self.assertEqual(self.state(6), "building")
@@ -244,16 +249,57 @@ class Depends(Base):
         self.assertEqual(self.state(5), "waiting")
 
     def test_open_issues_read_once_per_pass(self):
-        self.w.issues = [self.job(5, "**Depends on**: #7"), self.job(6, "**Depends on**: #129")]
+        self.w.issues = [self.job(5, "#7"), self.job(6, "#129")]
         self.tick()
         self.assertEqual(len(self.open_calls()), 1)
 
     def test_partial_dependencies_log_only_the_open_one(self):
-        self.w.issues = [self.job(5, "**Depends on**: #135, #129 (a note in brackets)")]
+        self.w.issues = [self.job(5, "#135, #129 (a note in brackets)")]
         self.tick()
         self.assertIn("waits on #129", self.out.getvalue())
         self.assertNotIn("#135", self.out.getvalue())
         self.assertEqual(self.w.sends, [])
+
+
+class IntakeGate(Base):
+    def cut(self, n, body):
+        return {"number": n, "title": "t%d" % n, "body": body, "comments": []}
+
+    def test_number_on_the_next_line_is_not_started_and_gets_one_comment(self):
+        self.w.issues = [self.cut(5, ready().replace("**Depends on**: none", "**Depends on**:\n#7"))]
+        self.tick(2)
+        self.assertEqual(self.w.sends, [])
+        self.assertEqual(len(self.w.issue(5)["comments"]), 1)
+        self.assertIn("dependency line", self.w.issue(5)["comments"][0])
+        self.assertEqual(self.w.rows("SELECT job FROM jobs"), [])
+
+    def test_a_changed_body_is_read_again_and_commented_again(self):
+        self.w.issues = [self.cut(5, "no shape")]
+        self.tick()
+        self.w.issues[0]["body"] = "still no shape"
+        self.tick()
+        self.assertEqual(len(self.w.issue(5)["comments"]), 2)
+
+    def test_a_cycle_holds_both_issues(self):
+        self.w.issues = [self.cut(5, ready(deps="#6")), self.cut(6, ready(deps="#5"))]
+        self.w.open_numbers = {5, 6}
+        self.tick(2)
+        self.assertEqual(self.w.sends, [])
+        for n in (5, 6):
+            self.assertEqual(len(self.w.issue(n)["comments"]), 1)
+            self.assertIn("in a cycle", self.w.issue(n)["comments"][0])
+
+    def test_a_readable_issue_starts_with_its_paths_in_the_ledger(self):
+        self.tick()
+        data = json.loads(self.w.rows("SELECT data FROM jobs WHERE job='5'")[0][0])
+        self.assertEqual((data["worker"], data["paths"], data["test"]), ("coder", ["a/b.py", "a/test_b.py"], "a/test_b.py"))
+        self.assertEqual(len(self.w.sends), 1)
+
+    def test_another_worker_type_is_not_started_and_gets_one_comment(self):
+        self.w.issues = [self.cut(5, ready().replace("coder", "reviewer"))]
+        self.tick(2)
+        self.assertEqual(self.w.sends, [])
+        self.assertEqual(self.w.issue(5)["comments"], ["worker type reviewer has no queue yet (phase B of #198)"])
 
 
 class BuildBrief(unittest.TestCase):
@@ -269,7 +315,7 @@ class OneBuilder(Base):
     builders = ["b1"]
 
     def test_two_jobs_never_share_a_coworker(self):
-        self.w.issues.append({"number": 6, "title": "Fix y", "body": "", "comments": []})
+        self.w.issues.append({"number": 6, "title": "Fix y", "body": ready(), "comments": []})
         self.tick(3)
         self.assertEqual([s[0] for s in self.w.sends], ["b1"])  # job 6 waits while b1 builds job 5
         self.assertEqual(self.state(6), "queued")
@@ -279,7 +325,7 @@ class OneBuilder(Base):
         self.assertIn("rerun #6", self.w.sends[1][1])
 
     def test_fix_waits_for_its_builder(self):
-        self.w.issues.append({"number": 6, "title": "Fix y", "body": "", "comments": []})
+        self.w.issues.append({"number": 6, "title": "Fix y", "body": ready(), "comments": []})
         self.to_review()  # b1 is now building job 6
         self.w.finish("r1", "VERDICT: REJECT @abcdef1: wrong")
         self.tick(2)
@@ -466,7 +512,7 @@ class Clocks(Base):
         self.assertIn("four refusals a second try did not clear: BLOCKED: 5 builders are already active", self.job_data()["reason"])
 
     def test_plan_fault_ends_returned_and_the_next_job_says_so(self):
-        self.w.issues.append({"number": 6, "title": "Next", "body": "Depends on: #5", "comments": []})
+        self.w.issues.append({"number": 6, "title": "Next", "body": ready(deps="#5"), "comments": []})
         self.w.open_numbers.add(5)
         self.tick()
         self.w.finish("b1", "BLOCKED: plan: a file outside its paths")
@@ -597,7 +643,7 @@ class Secrets(Base):
             return Proc(0, self.w.gh(argv[1:]))
 
         self.cfg["builders"].reverse()  # job 5 goes to b2 (a ValueError), job 6 to b1 (HTTP 500)
-        self.w.issues.append({"number": 6, "title": "Fix y", "body": "SMALL FIX", "comments": []})
+        self.w.issues.append({"number": 6, "title": "Fix y", "body": ready("SMALL FIX"), "comments": []})
         err = io.StringIO()
         d = D.Dispatcher(self.cfg, D.make_account("https://acct.example/mcp", self.KEY, opener), D.make_gh(self.TOKEN, run))
         with contextlib.redirect_stdout(self.out), contextlib.redirect_stderr(err):

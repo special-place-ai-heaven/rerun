@@ -39,6 +39,13 @@ def blocked_reason(out):
     return rest[-1][:200] if rest else "no final line"
 
 
+GOALS = {
+    "building": [{"prefix": "PR: ", "rest": "pull-url"}, {"prefix": "BLOCKED: ", "rest": "sentence"}],
+    "fixing": [{"prefix": "PUSHED: ", "rest": "sha"}, {"prefix": "BLOCKED: ", "rest": "sentence"}],
+    "reviewing": [{"prefix": "VERDICT: ", "rest": "sentence"}],
+}
+
+
 def issue_files(body):
     m = re.search(r"(?ms)^\*\*Files\*\*.*?\n(.*?)(?:\n\s*\n\*\*|\Z)", str(body or ""))
     paths = re.findall(r"`([^`\s]+)`", m.group(1)) if m else []
@@ -143,11 +150,12 @@ def make_account(url, key, opener=urllib.request.urlopen):
         except ValueError:
             raise Error("account %s failed: answer is not JSON" % tool) from None
         if msg.get("error"):
-            raise Error("account %s failed: error %s" % (tool, msg["error"].get("code")))
+            named = " invalid_goal" if "invalid_goal" in json.dumps(msg["error"]) else ""
+            raise Error("account %s failed: error %s%s" % (tool, msg["error"].get("code"), named))
         res = msg.get("result") or {}
         out = "".join(p.get("text", "") for p in res.get("content") or [] if p.get("type") == "text")
         if res.get("isError"):
-            raise Error("account %s failed: the tool reported an error" % tool)
+            raise Error("account %s failed: the tool reported an error%s" % (tool, " invalid_goal" if "invalid_goal" in out else ""))
         try:
             return json.loads(out)
         except ValueError:
@@ -297,7 +305,16 @@ class Dispatcher:
         """Record the intent, send, record the run id. An intent left without a run id is never sent again."""
         j.update(agent=agent, run=None, sending=step, state=state)
         self.save()
-        r = self.account("send_message", {"agentId": agent, "message": message, "waitSeconds": WAIT_S})
+        args = {"agentId": agent, "message": message, "waitSeconds": WAIT_S}
+        if state in GOALS:
+            args["goal"] = GOALS[state]
+            args["turnLimit"] = 3
+        try:
+            r = self.account("send_message", args)
+        except Error as e:
+            if "invalid_goal" in str(e):
+                return self.end(j, "failed", str(e)[:200])
+            raise
         j.update(run=r["runId"], sending=None)
         self.save()
         log(j["issue"], "%s -> %s (run %s)" % (step, self.names.get(agent, agent[:8]), r["runId"]))
@@ -316,6 +333,10 @@ class Dispatcher:
             return None
         if r.get("status") == "done":
             j["attempt"] = 1
+            g = r.get("goal")
+            j["not_met"] = None
+            if isinstance(g, dict) and g.get("state") == "not_met":
+                j["not_met"] = "goal not met after %s answers: %s" % (g.get("turns") or 3, str(g.get("reason") or "no reason given")[:150])
             return r.get("output") or ""
         why = "run %s of %s ended %s: %s" % (j["run"], self.names.get(j["agent"], j["agent"][:8]), r.get("status"), str(r.get("error") or "-")[:120])
         if j.get("attempt", 1) >= 2:
@@ -325,6 +346,12 @@ class Dispatcher:
         j["attempt"] = 2
         self.send(j, j["agent"], j["sending_step"] + " again", self.message(j), j["state"])
         return None
+
+    def not_met_reason(self, j, out):
+        """The BLOCKED: line when there is one; else, for a goal not met, the goal's own reason; else as before."""
+        if j.get("not_met") and not final_line(out, ("BLOCKED:",)):
+            return j["not_met"][:200]
+        return blocked_reason(out)
 
     def start(self, j, agent, step, state, **kw):
         j.update(kw, sending_step=step, attempt=1)
@@ -350,7 +377,7 @@ class Dispatcher:
                 found = self.find_pr(j, out)
                 if found:
                     j["pr"] = found
-                return self.end(j, "blocked", blocked_reason(out))
+                return self.end(j, "blocked", self.not_met_reason(j, out))
             self.to(j, "review_wait", "pull request #%s" % m.group(1), pr=int(m.group(1)))
         elif st == "review_wait":
             if self.conflicts(j):
@@ -369,6 +396,8 @@ class Dispatcher:
                 self.to(j, "checks", "accepted at %s" % j["head"][:7], checks_since=self.now())
             elif re.match(r"VERDICT:\s*REJECT", verdict) and j["round"] == 1:
                 self.to(j, "fix_wait", verdict[:160], review=out[-1500:])
+            elif j.get("not_met") and not verdict:
+                self.end(j, "blocked", self.not_met_reason(j, out))
             else:
                 self.end(j, "rejected", verdict[:200] or last_line(out))
         elif st == "fix_wait":
@@ -380,7 +409,7 @@ class Dispatcher:
                 return
             last = final_line(out, ("PUSHED:", "BLOCKED:"))
             if not (last and last.startswith("PUSHED:")):
-                return self.end(j, "blocked", blocked_reason(out))
+                return self.end(j, "blocked", self.not_met_reason(j, out))
             self.to(j, "review_wait", "fix pushed: " + last_line(out)[:80], round=2)
         elif st == "checks":
             self.checks(j)

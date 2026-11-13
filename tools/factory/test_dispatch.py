@@ -21,6 +21,9 @@ class World:
 
     def account(self, tool, args):
         if tool == "send_message":
+            if getattr(self, "invalid_goal", False) and args.get("goal"):
+                self.sends.append((args["agentId"], args["message"], args["waitSeconds"]))
+                raise D.Error("account send_message failed: error invalid_goal")
             rid = "run%d" % (len(self.sends) + 1)
             self.sends.append((args["agentId"], args["message"], args["waitSeconds"]))
             self.runs[rid] = {"status": "running"}
@@ -31,9 +34,11 @@ class World:
             return {"runId": rid, "status": "running"}
         return dict(self.runs[args["runId"]], runId=args["runId"])
 
-    def finish(self, agent, output, status="done"):
+    def finish(self, agent, output, status="done", goal=None):
         rid = [r for r, a in self.order if a == agent][-1]
         self.runs[rid] = {"status": status, "output": output, "error": "boom" if status == "error" else None}
+        if goal is not None:
+            self.runs[rid]["goal"] = goal
 
     def issue(self, n):
         return next(i for i in self.issues if i["number"] == int(n))
@@ -548,6 +553,78 @@ class Hardening(Base):
         self.w.runs.clear()
         self.tick(20)
         self.assertEqual(self.state(), "failed")
+
+
+NOT_MET = {"state": "not_met", "turns": 3, "reason": 'last line "Tools: shell 4 calls" matches none of PR:, BLOCKED:'}
+
+
+class Goals(Base):
+    def test_each_step_sends_its_goal_with_turn_limit_3(self):
+        goals = []
+        orig = self.w.account
+        def spy(tool, args):
+            if tool == "send_message":
+                goals.append((args.get("goal"), args.get("turnLimit")))
+            return orig(tool, args)
+        self.w.account = spy
+        self.to_review()
+        self.w.finish("r1", "VERDICT: REJECT @abcdef1: no")
+        self.tick(2)
+        self.assertEqual(goals, [
+            ([{"prefix": "PR: ", "rest": "pull-url"}, {"prefix": "BLOCKED: ", "rest": "sentence"}], 3),
+            ([{"prefix": "VERDICT: ", "rest": "sentence"}], 3),
+            ([{"prefix": "PUSHED: ", "rest": "sha"}, {"prefix": "BLOCKED: ", "rest": "sentence"}], 3)])
+
+    def test_building_not_met_blocks_with_the_goal_reason_and_no_resend(self):
+        self.tick()
+        self.w.finish("b1", "did things\nTools: shell 4 calls", goal=NOT_MET)
+        self.tick(2)
+        self.assertEqual(self.state(), "blocked")
+        self.assertIn("goal not met after 3 answers: last line", self.w.issue(5)["comments"][-1])
+        self.assertEqual(len(self.w.sends), 1)
+
+    def test_building_not_met_keeps_the_blocked_line(self):
+        self.tick()
+        self.w.finish("b1", "BLOCKED: no file\nTools: shell 4 calls", goal=NOT_MET)
+        self.tick()
+        self.assertIn("Reason: BLOCKED: no file", self.w.issue(5)["comments"][-1])
+
+    def test_building_not_met_keeps_the_pr_of_this_repo(self):
+        self.cfg["repo"] = "special-place-ai-heaven/rerun"
+        self.tick()
+        self.w.finish("b1", "opened https://github.com/special-place-ai-heaven/rerun/pull/171\nTools: shell 1 calls", goal=NOT_MET)
+        self.tick()
+        self.assertEqual(self.state(), "blocked")
+        self.assertIn("Pull request: #171", self.w.issue(5)["comments"][-1])
+
+    def test_goal_missing_or_null_goes_on_as_before(self):
+        for g in (None, "null"):
+            self.setUp(); self.d = None
+            self.tick()
+            self.w.finish("b1", PR_LINE)
+            if g == "null":
+                self.w.runs["run1"]["goal"] = None
+            self.tick()
+            self.assertEqual(self.state(), "review_wait")
+
+    def test_reviewing_not_met_with_a_reject_goes_to_the_fix_round(self):
+        self.to_review()
+        self.w.finish("r1", "VERDICT: REJECT @abc1234: " + "long sentence " * 10 + "\nTools: shell 2 calls", goal=NOT_MET)
+        self.tick()
+        self.assertEqual(self.state(), "fix_wait")
+
+    def test_reviewing_not_met_without_a_verdict_blocks(self):
+        self.to_review()
+        self.w.finish("r1", "looked fine\nTools: shell 2 calls", goal=NOT_MET)
+        self.tick()
+        self.assertEqual(self.state(), "blocked")
+
+    def test_invalid_goal_fails_the_job_and_is_sent_once(self):
+        self.w.invalid_goal = True
+        self.tick(3)
+        self.assertEqual(self.state(), "failed")
+        self.assertEqual(len(self.w.sends), 1)
+        self.assertIn("invalid_goal", self.w.issue(5)["comments"][-1])
 
 
 if __name__ == "__main__":

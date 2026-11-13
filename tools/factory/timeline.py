@@ -59,7 +59,8 @@ def status_lines(rows, now):
         pr = "pr #%s" % j["pr"] if j["pr"] else "pr -"
         w = data.get("waiting") or []
         waits = "waits on %s for %d min" % (", ".join("#%s" % n for n in w), max(0, now - end) // 60) if w else "no waits"
-        live.append("#%s %s for %d min | %s | %s" % (j["job"], j["state"], max(0, now - start) // 60, pr, waits))
+        reason = " | reason: %s" % data["wait_reason"] if data.get("wait_reason") else ""
+        live.append("#%s %s for %d min | %s | %s%s" % (j["job"], j["state"], max(0, now - start) // 60, pr, waits, reason))
     return live + done
 
 

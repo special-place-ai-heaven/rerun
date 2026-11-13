@@ -50,6 +50,16 @@ class Timeline(unittest.TestCase):
         self.assertEqual(lines[0], "#171 building for 10 min | pr - | no waits")
         self.assertEqual(lines[1], "#172 queued for 5 min | pr - | waits on #171 for 5 min")
 
+    def test_status_shows_the_reason_of_a_waiting_job(self):
+        self.st.put_job("171", "building", {}, at=at("18:00"))
+        self.st.put_job("172", "queued", {"waiting": [171], "wait_reason": "dependency"}, at=at("18:05"))
+        self.st.put_job("173", "review_wait", {"wait_reason": "plan limit"}, at=at("18:05"))
+        lines = T.status_lines(T.read_rows(self.path), T.parse(at("18:10")))
+        self.assertEqual(lines, [
+            "#171 building for 10 min | pr - | no waits",
+            "#172 queued for 5 min | pr - | waits on #171 for 5 min | reason: dependency",
+            "#173 review_wait for 5 min | pr - | no waits | reason: plan limit"])
+
     def test_end_states_listed_for_24_hours_and_crit_bars(self):
         self.st.put_job("1", "blocked", {}, reason="old", at="2026-11-10T10:00:00Z")
         self.st.put_job("2", "failed", {}, reason="boom", at=at("10:00"))

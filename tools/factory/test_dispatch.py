@@ -16,6 +16,7 @@ class World:
         self.workflows, self.pr_state, self.clock = {}, "OPEN", 1000.0
         self.cut_off_next_send = False
         self.mergeable, self.unlabelled = "MERGEABLE", set()
+        self.open_numbers = {7, 129}
 
     def account(self, tool, args):
         if tool == "send_message":
@@ -39,8 +40,10 @@ class World:
     def gh(self, args):
         a = list(args)
         self.gh_calls.append(a)
+        if a[:2] == ["issue", "list"] and "--label" not in a:
+            return json.dumps([{"number": n} for n in sorted(self.open_numbers)])
         if a[:2] == ["issue", "list"]:
-            return json.dumps([{"number": i["number"], "title": i["title"]} for i in self.issues if i["number"] not in self.unlabelled])
+            return json.dumps([{"number": i["number"], "title": i["title"], "body": i["body"]} for i in self.issues if i["number"] not in self.unlabelled])
         if a[:2] == ["issue", "view"]:
             i = self.issue(a[2])
             return json.dumps({"body": i["body"], "comments": [{"body": c} for c in i["comments"]]})
@@ -132,6 +135,60 @@ class Intake(Base):
         self.tick()
         with open(self.cfg["state_file"]) as f:
             self.assertEqual(sorted(json.load(f)["jobs"]), ["1", "2"])
+
+
+class Depends(Base):
+    def job(self, n, line, title=None):
+        return {"number": n, "title": title or "t%d" % n, "body": "intro\n" + line + "\nmore", "comments": []}
+
+    def open_calls(self):
+        return [c for c in self.w.gh_calls if c[:2] == ["issue", "list"] and "--label" not in c]
+
+    def test_waits_while_dependency_is_open_then_is_taken(self):
+        self.w.issues = [self.job(5, "**Depends on**: #7")]
+        self.tick(3)
+        self.assertEqual(self.w.issue(5)["comments"], [])
+        self.assertEqual(self.out.getvalue().count("waits on #7"), 1)
+        with open(self.cfg["state_file"]) as f:
+            self.assertEqual(json.load(f)["jobs"], {})
+        self.w.open_numbers.discard(7)
+        self.tick()
+        self.assertEqual(self.state(), "building")
+        self.assertEqual(len(self.w.sends), 1)
+        with open(self.cfg["state_file"]) as f:
+            self.assertNotIn("5", json.load(f).get("waiting", {}))
+
+    def test_waiting_line_not_repeated_after_a_restart(self):
+        self.w.issues = [self.job(5, "Depends on: #7")]
+        self.tick(3, fresh=True)
+        self.assertEqual(self.out.getvalue().count("waits on #7"), 1)
+
+    def test_none_and_no_line_are_taken_as_before(self):
+        self.w.issues = [self.job(5, "**Depends on**: none"), {"number": 6, "title": "t6", "body": "", "comments": []}]
+        self.tick()
+        self.assertEqual(self.state(5), "building")
+        self.assertEqual(self.state(6), "building")
+        self.assertEqual(self.open_calls(), [])
+
+    def test_waiting_issue_does_not_use_room(self):
+        self.w.issues = [self.job(5, "**Depends on**: #7"), self.job(6, "**Depends on**: none")]
+        self.cfg["max_jobs"] = 1
+        self.tick()
+        self.assertEqual(self.state(6), "building")
+        with open(self.cfg["state_file"]) as f:
+            self.assertEqual(sorted(json.load(f)["jobs"]), ["6"])
+
+    def test_open_issues_read_once_per_pass(self):
+        self.w.issues = [self.job(5, "**Depends on**: #7"), self.job(6, "**Depends on**: #129")]
+        self.tick()
+        self.assertEqual(len(self.open_calls()), 1)
+
+    def test_partial_dependencies_log_only_the_open_one(self):
+        self.w.issues = [self.job(5, "**Depends on**: #135, #129 (a note in brackets)")]
+        self.tick()
+        self.assertIn("waits on #129", self.out.getvalue())
+        self.assertNotIn("#135", self.out.getvalue())
+        self.assertEqual(self.w.sends, [])
 
 
 class OneBuilder(Base):

@@ -40,8 +40,9 @@ const PANEL = lines([
 ])
 
 // The engine only answers its own key, which every process on the screen already holds.
+// The header goes to curl on stdin: printf is a builtin, so no process has the token in its arguments.
 const openOnClick = (app: DesktopApp): string =>
-    `curl -fsS -m 60 -X POST -H "Authorization: Bearer $RERUN_DESKTOP_TOKEN" -H 'content-type: application/json' -d '{"app":"${app}"}' "$RERUN_DESKTOP_ENGINE/agents/$RERUN_DESKTOP_AGENT/desktop/apps"`
+    `printf 'Authorization: Bearer %s\\n' "$RERUN_DESKTOP_TOKEN" | curl -fsS -m 60 -X POST -H @- -H 'content-type: application/json' -d '{"app":"${app}"}' "$RERUN_DESKTOP_ENGINE/agents/$RERUN_DESKTOP_AGENT/desktop/apps"`
 
 // The first line an item prints is the icon tint2 draws: the one with a dot while the app has a window.
 function dockItem(iconsDir: string, { app, label, windowClass }: (typeof DOCK_APPS)[number]): string {

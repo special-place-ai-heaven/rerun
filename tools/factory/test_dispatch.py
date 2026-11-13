@@ -207,7 +207,7 @@ class Checks(Base):
         self.assertEqual(self.state(), "checks")
         self.w.workflows[HEAD] = [wf("ci", "failure", wid=1), wf("image", "success", wid=2)]
         self.tick()
-        self.assertEqual(self.state(), "fixing")
+        self.assertEqual(self.state(), "fix_wait")
 
     def test_nothing_passed_after_60_minutes_fails_with_what_was_running(self):
         self.to_checks()

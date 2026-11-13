@@ -5,7 +5,8 @@ import { resolve } from 'node:path'
 process.env.RERUN_DATA_DIR = mkdtempSync(resolve(tmpdir(), 'rerun-cx-loader-'))
 process.env.RERUN_API_KEY = ''
 
-const { beforeEach, describe, expect, it } = await import('vitest')
+const { beforeEach, describe, expect, it, vi } = await import('vitest')
+const { connectionSummarySchema } = await import('@rerun/contracts')
 const { mkdir, rm, writeFile } = await import('node:fs/promises')
 const { boxDefaultPath, connectionConfigPath, connectionDir, connectionEnvPath, connectionsDir, connectionsMigratedPath } = await import('../config/paths.js')
 const { connectionExists, isConnected, listConnectionIds, loadConnectionFromDisk, toSummary } = await import('./loader.js')
@@ -52,7 +53,7 @@ describe('isConnected', () => {
 describe('toSummary', () => {
     it('carries the config and the verdict, never the credential', () => {
         const summary = toSummary(loaded('anthropic', { ANTHROPIC_API_KEY: 'sk-secret' }))
-        expect(summary).toEqual({ id: 'cnx', ...config, connected: true, credentialRejected: false, planLimits: null, cliModels: null, providerModels: null, discoveredModels: null })
+        expect(summary).toEqual({ id: 'cnx', ...config, connected: true, credentialRejected: false, planLimits: null, signIn: null, cliModels: null, providerModels: null, discoveredModels: null })
         expect(JSON.stringify(summary)).not.toContain('sk-secret')
         expect(summary).not.toHaveProperty('env')
     })
@@ -60,6 +61,24 @@ describe('toSummary', () => {
     it('says when the provider turned the credential away, while it still reads as connected', async () => {
         recordCredentialRejected('cnx-rejected')
         expect(toSummary(loaded('claude', { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-dead' }, 'cnx-rejected'))).toMatchObject({ connected: true, credentialRejected: true })
+    })
+
+    it('carries the minutes the Claude sign-in has left and whether a renewal is due, never the key file\'s values', () => {
+        const NOW = Date.parse('2026-11-13T12:00:00.000Z')
+        const expiry = String(NOW + 3 * 3_600_000)
+        vi.useFakeTimers()
+        vi.setSystemTime(NOW)
+        try {
+            const env = { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-access-xyz', CLAUDE_CODE_OAUTH_REFRESH_TOKEN: 'sk-ant-ort-refresh-xyz', CLAUDE_CODE_OAUTH_EXPIRES_AT: expiry }
+            const summary = toSummary(loaded('claude', env))
+            expect(summary.signIn).toEqual({ minutesLeft: 180, renewalDue: true })
+            expect(connectionSummarySchema.parse(summary).signIn).toEqual({ minutesLeft: 180, renewalDue: true })
+            const json = JSON.stringify(summary)
+            for (const secret of [env.CLAUDE_CODE_OAUTH_TOKEN, env.CLAUDE_CODE_OAUTH_REFRESH_TOKEN, expiry]) expect(json).not.toContain(secret)
+            expect(toSummary(loaded('codex', env)).signIn).toBeNull()
+        } finally {
+            vi.useRealTimers()
+        }
     })
 })
 

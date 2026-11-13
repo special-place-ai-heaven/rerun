@@ -1,7 +1,8 @@
-# Runner image: python plus git and an askpass helper. No token is baked in; the token reaches git
-# at run time from the environment (FACTORY_GIT_TOKEN), only through the helper.
+# Runner image: python plus git, the gh CLI (Debian package, trixie) and an askpass helper. No token is baked
+# in; the token reaches git at run time from the environment (FACTORY_GIT_TOKEN), only through the helper,
+# and gh reads GH_TOKEN from the environment.
 FROM python:3.12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends git gh ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && printf '%s\n' '#!/bin/sh' \
       'case "$1" in Username*) echo x-access-token ;; *) echo "$FACTORY_GIT_TOKEN" ;; esac' \

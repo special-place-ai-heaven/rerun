@@ -1,8 +1,21 @@
-import contextlib, gc, io, json, os, sqlite3, sys, tempfile, unittest, unittest.mock, urllib.error
+import contextlib, datetime, gc, io, json, os, sqlite3, sys, tempfile, unittest, unittest.mock, urllib.error
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dispatch as D
 
 HEAD = "abcdef1234567890"
+T0 = datetime.datetime(2026, 11, 13, 18, 0, 0, tzinfo=datetime.timezone.utc).timestamp()
+
+
+def iso(t):
+    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def run_shape(rid, steps, started, status="running", tokens=120000):
+    """What get_run returns (apps/ui/lib/mcp/run-projection.ts)."""
+    return {"runId": rid, "status": status, "steps": steps, "startedAt": iso(started), "finishedAt": None, "error": None,
+            "totalTokens": tokens, "goal": {"lastLineForms": [{"prefix": "PR:", "rest": "pull-url"}, {"prefix": "BLOCKED:", "rest": "sentence"}],
+                                           "turnLimit": 3, "state": "running", "verdicts": []}}
+
 PR_LINE = "Done.\nPR: https://github.com/o/r/pull/42"
 
 
@@ -20,6 +33,7 @@ class World:
         self.open_prs = []
         self.ledger = None  # path of the ledger, set by Base; send_message checks the intent row there
         self.intent_seen = []
+        self.cancels, self.sent_at, self.hide_runs = [], {}, False
 
     @staticmethod
     def goal_ok(goal):
@@ -45,10 +59,19 @@ class World:
             self.sends.append((args["agentId"], args["message"], args["waitSeconds"]))
             self.runs[rid] = {"status": "running"}
             self.order.append((rid, args["agentId"]))
+            self.sent_at[rid] = self.clock
             if self.cut_off_next_send:
                 self.cut_off_next_send = False
                 raise D.Error("account send_message failed: TimeoutError")
             return {"runId": rid, "status": "running"}
+        if tool == "cancel_run":
+            self.cancels.append((args["agentId"], args["runId"]))
+            was = self.runs[args["runId"]].get("status") == "running"
+            self.runs[args["runId"]]["status"] = "cancelled"
+            return {"runId": args["runId"], "status": "cancelled", "wasRunning": was}
+        if tool == "list_runs":
+            return [] if self.hide_runs else [{"runId": r, "status": "running", "startedAt": iso(self.sent_at[r])}
+                                              for r, a in reversed(self.order) if a == args["agentId"]]
         return dict(self.runs[args["runId"]], runId=args["runId"])
 
     def rows(self, sql, *args):
@@ -381,6 +404,90 @@ class Flow(Base):
         self.assertEqual(self.state(), "failed")
 
 
+class Clocks(Base):
+    def job_data(self, n=5):
+        return json.loads(self.w.rows("SELECT data FROM jobs WHERE job=?", str(n))[0][0])
+
+    def test_stalled_run_is_cancelled_and_sent_once_more(self):
+        self.w.clock = T0
+        self.tick()
+        self.w.runs["run1"] = run_shape("run1", 7, T0)
+        self.tick()
+        self.assertEqual(self.w.cancels, [])
+        self.w.clock = T0 + 601
+        self.tick()
+        self.assertEqual(self.w.cancels, [("b1", "run1")])
+        self.assertEqual(len(self.w.sends), 2)
+        self.assertEqual(self.state(), "building")
+        self.w.runs["run2"] = run_shape("run2", 3, T0 + 601)
+        self.tick()
+        self.w.clock = T0 + 601 + 601
+        self.tick()
+        self.assertEqual(self.w.cancels, [("b1", "run1"), ("b1", "run2")])
+        self.assertEqual(len(self.w.sends), 2)
+        self.assertEqual(self.state(), "failed")
+        self.assertIn("stalled: no new step for 601 s", self.job_data()["reason"])
+
+    def refuse(self):
+        self.w.finish("b1", "BLOCKED: 5 builders are already active (wt refused)")
+        self.tick()
+
+    def test_no_room_refusal_waits_one_minute_and_is_not_an_attempt(self):
+        self.tick()
+        self.refuse()
+        self.assertEqual(self.state(), "queued")
+        self.assertEqual(len(self.w.sends), 1)
+        self.w.clock += 59
+        self.tick()
+        self.assertEqual(len(self.w.sends), 1)
+        self.w.clock += 1
+        self.tick()
+        self.assertEqual(len(self.w.sends), 2)
+        self.assertEqual(self.state(), "building")
+        self.assertEqual(self.job_data()["attempt"], 1)
+
+    def test_the_next_successful_transition_resets_the_refusal_count(self):
+        self.tick()
+        self.refuse()
+        self.assertEqual(self.w.rows("SELECT v FROM kv WHERE k='retry:transient'"), [("1",)])
+        self.w.clock += 60
+        self.tick()
+        self.w.finish("b1", PR_LINE)
+        self.tick()
+        self.assertEqual(self.state(), "review_wait")
+        self.assertEqual(self.w.rows("SELECT v FROM kv WHERE k='retry:transient'"), [])
+
+    def test_four_refusals_end_blocked(self):
+        for _ in range(4):
+            self.tick()
+            self.refuse()
+            self.w.clock += 240
+        self.assertEqual(self.state(), "blocked")
+        self.assertIn("four refusals a second try did not clear: BLOCKED: 5 builders are already active", self.job_data()["reason"])
+
+    def test_plan_fault_ends_returned_and_the_next_job_says_so(self):
+        self.w.issues.append({"number": 6, "title": "Next", "body": "Depends on: #5", "comments": []})
+        self.w.open_numbers.add(5)
+        self.tick()
+        self.w.finish("b1", "BLOCKED: plan: a file outside its paths")
+        self.tick()
+        self.assertEqual(self.state(), "returned")
+        self.assertEqual(self.job_data()["reason"], "BLOCKED: plan: a file outside its paths")
+        self.assertIn("returned to the planner", self.w.issue(5)["comments"][-1])
+        self.assertEqual(self.w.edits(5)[0][-1], "factory-blocked")
+        self.tick()
+        self.assertEqual(self.state(6), "waiting")
+        self.assertEqual(self.job_data(6)["waits_on_returned"], [5])
+        self.assertEqual(self.job_data(6)["waiting"], [5])
+        self.assertIn("waits on returned #5", self.out.getvalue())
+
+    def test_build_and_fix_briefs_name_the_plan_line(self):
+        j = {"issue": 5, "title": "T", "pr": 1, "review": "r"}
+        line = "If the plan itself is wrong (a file outside its paths, a test it cannot write), end with BLOCKED: plan: <why>."
+        self.assertIn(line, D.build_brief(j))
+        self.assertIn(line, D.fix_brief(j, 1, "r"))
+
+
 class Restart(Base):
     def test_fresh_dispatcher_every_pass_sends_each_step_once(self):
         self.tick(2, fresh=True)
@@ -398,13 +505,25 @@ class Restart(Base):
         self.assertEqual(len(self.w.issue(5)["comments"]), 2)  # plan line and the end comment
         self.assertEqual(len(self.w.edits(5)), 1)
 
-    def test_send_cut_off_after_it_went_out_is_never_sent_again(self):
+    def test_send_cut_off_after_it_went_out_is_found_in_the_run_list_and_never_sent_again(self):
         self.w.cut_off_next_send = True
         self.tick()
         self.tick(3, fresh=True)
         self.assertEqual(len(self.w.sends), 1)
-        self.assertEqual(self.state(), "blocked")
-        self.assertIn("not sent again", self.w.issue(5)["comments"][-1])
+        self.assertEqual(self.state(), "building")
+        self.assertEqual(self.w.rows("SELECT run_id, status FROM fires")[0], ("run1", "running"))
+
+    def test_send_never_found_in_three_beats_is_abandoned_and_goes_back_as_transient(self):
+        self.w.cut_off_next_send = True
+        self.w.hide_runs = True
+        self.tick()
+        self.tick(2)
+        self.assertEqual(self.state(), "building")
+        self.tick()
+        self.assertEqual(self.state(), "queued")
+        self.assertEqual(self.w.rows("SELECT status FROM fires")[0][0], "lost")
+        self.assertEqual(len(self.w.sends), 1)
+
 
     def test_merge_done_before_a_restart_is_not_repeated(self):
         self.to_checks()
@@ -698,9 +817,9 @@ class Final(Base):
         self.assertIn(self.state(), ("review_wait", "reviewing"))
 
     def test_blocked_at_the_end_of_a_joined_line_gives_its_reason(self):
-        self.build_out("wt new refused. BLOCKED: 16 builders are already active")
+        self.build_out("wt new refused. BLOCKED: the test cannot pass")
         self.assertEqual(self.state(), "blocked")
-        self.assertIn("Reason: BLOCKED: 16 builders are already active", self.w.issue(5)["comments"][-1])
+        self.assertIn("Reason: BLOCKED: the test cannot pass", self.w.issue(5)["comments"][-1])
 
     def test_verdict_at_the_end_of_a_joined_line_is_read(self):
         self.to_review()

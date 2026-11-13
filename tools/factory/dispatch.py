@@ -6,12 +6,15 @@ written to the ledger (store.py) at once as a transitions row, and a send is rec
 out, so a restart never sends a step twice."""
 import argparse, datetime, json, os, re, subprocess, sys, tempfile, time, urllib.error, urllib.request
 
+import clocks
 import store as ledger_store
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WAIT_S = 1  # smallest waitSeconds send_message takes: clamp() in apps/ui/lib/mcp/args.ts floors at 1
 RUNNING = ("building", "reviewing", "fixing")
-END = ("merged", "rejected", "blocked", "failed")
+END = ("merged", "rejected", "blocked", "failed", "returned")
+BACK = {"building": "queued", "reviewing": "review_wait", "fixing": "fix_wait"}  # where a transient failure sends a job back to
+LOST_BEATS = 3  # beats a send without a run id is looked for in list_runs
 OK_CONCLUSIONS = ("success", "skipped", "neutral")
 
 
@@ -21,6 +24,10 @@ class Error(Exception):
 
 def log(n, msg):
     print("%s #%s %s" % (datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), n, msg), flush=True)
+
+
+def iso(t, ms=False):
+    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S" + (".%f" if ms else "") + "Z")
 
 
 def last_line(text):
@@ -96,6 +103,8 @@ def build_brief(j):
         '4. Commit, push, and open one pull request into dev. Title: the issue title plus "(#%s)". Body: what changed, which test failed before and passes now, and the line "Closes #%s".' % (j["issue"], j["issue"]),
         '5. Leave the worktree open. It is closed after the merge by a sweep.',
         '',
+        'If the plan itself is wrong (a file outside its paths, a test it cannot write), end with BLOCKED: plan: <why>.',
+        '',
         'If the issue text is wrong or cannot be done as written, do not improvise: end with BLOCKED and the reason. Never merge, never deploy, never touch the live server, and print nothing from a key file. On GitHub write coworker names without the at-sign.',
         '',
         'Other jobs run beside yours right now, in other folders and other files. Stay inside your own worktree.',
@@ -129,6 +138,8 @@ def fix_brief(j, pr, review):
         str(review)[-1500:],
         '',
         'Fix exactly what blocks, in your open worktree for this job. Add or adjust the test, run only the test files you touched, commit and push to the same branch. No second pull request.',
+        '',
+        'If the plan itself is wrong (a file outside its paths, a test it cannot write), end with BLOCKED: plan: <why>.',
         '',
         final_state(j, '`PUSHED: <first 7 characters of the new commit>` or `BLOCKED: <one sentence>`'),
         TAIL,
@@ -223,9 +234,9 @@ class Dispatcher:
     def close(self):
         self.store.close()
 
-    def save(self, j, reason=None):
-        """One transitions row: the job as it is now, with its time."""
-        self.store.put_job(str(j["issue"]), j["state"], j, reason, j.get("run"))
+    def save(self, j, reason=None, reset=False):
+        """One transitions row: the job as it is now, with its time. reset: a successful transition clears the retry counts."""
+        self.store.put_job(str(j["issue"]), j["state"], j, reason, j.get("run"), reset_retries=reset)
 
     def jobs(self):
         return sorted(self.store.jobs(), key=lambda j: j["issue"])
@@ -239,7 +250,7 @@ class Dispatcher:
 
     def to(self, j, state, msg, **kw):
         j.update(kw, state=state)
-        self.save(j, msg)
+        self.save(j, msg, reset=True)
         log(j["issue"], msg)
 
     # --- intake
@@ -266,10 +277,15 @@ class Dispatcher:
                         ["issue", "list", "-R", self.repo, "--state", "open", "--json", "number", "--limit", "1000"]))}
                 unmet = [d for d in deps if d in open_numbers]
                 if unmet:
-                    if not old or old.get("waiting") != unmet:
-                        self.save({"issue": i["number"], "title": i["title"], "body": i.get("body") or "", "state": "waiting",
-                                   "round": 1, "waiting": unmet}, "waits on " + ", ".join("#%d" % d for d in unmet))
-                        log(i["number"], "waits on " + ", ".join("#%d" % d for d in unmet))
+                    ret = [d for d in unmet if (self.store.get_job(str(d)) or {}).get("state") == "returned"]
+                    if not old or old.get("waiting") != unmet or old.get("waits_on_returned", []) != ret:
+                        line = "waits on " + ", ".join(("returned #%d" if d in ret else "#%d") % d for d in unmet)
+                        data = {"issue": i["number"], "title": i["title"], "body": i.get("body") or "", "state": "waiting",
+                                "round": 1, "waiting": unmet}
+                        if ret:
+                            data["waits_on_returned"] = ret
+                        self.save(data, line)
+                        log(i["number"], line)
                     continue
             if self.cfg.get("auto_plan_marker", True):
                 v = json.loads(self.gh(["issue", "view", str(i["number"]), "-R", self.repo, "--json", "body,comments"]))
@@ -290,9 +306,11 @@ class Dispatcher:
 
     def send(self, j, agent, step, message, state):
         """Record the intent, send, record the run id. An intent left without a run id is never sent again."""
-        j.update(agent=agent, run=None, sending=step, state=state)
+        j.update(agent=agent, run=None, sending=step, state=state, not_before=None, lost_beats=0)
         self.save(j, step)
-        j["fire_id"] = self.store.intent(str(j["issue"]), "", step, coworker=self.names.get(agent, agent))
+        j["intent_at"] = iso(self.now())
+        j["fire_id"] = self.store.intent(str(j["issue"]), "", step, coworker=self.names.get(agent, agent), at=j["intent_at"])
+        self.store.set(str(j["issue"]), "seen", "")
         args = {"agentId": agent, "message": message, "waitSeconds": WAIT_S}
         if state in GOALS:
             # One object, as the account tool takes it (runGoalSchema in packages/contracts/src/run-goal.ts).
@@ -303,7 +321,10 @@ class Dispatcher:
             if "invalid_goal" in str(e):
                 self.store.abandon(j["fire_id"], str(e)[:200])
                 return self.end(j, "failed", str(e)[:200])
-            raise
+            # Whether it arrived is unknown: the next beats look for the run in list_runs (lost_run).
+            self.save(j, "send of '%s' raised" % step)
+            log(j["issue"], "send of '%s' raised: %s" % (step, e))
+            return
         self.store.fired(j["fire_id"], r["runId"])
         j.update(run=r["runId"], sending=None)
         self.save(j, "sent " + step)
@@ -317,10 +338,10 @@ class Dispatcher:
         return fix_brief(j, j["pr"], j["review"])
 
     def finished_run(self, j):
-        """The run's output once done; None while it runs or after a resend. A second error ends the job."""
+        """The run's output once done; None while it runs or after a resend, a transient back-off or an end."""
         r = self.account("get_run", {"agentId": j["agent"], "runId": j["run"]})
         if r.get("status") == "running":
-            return None
+            return self.clock_check(j, r)
         if r.get("status") == "done":
             j["attempt"] = 1
             g = r.get("goal")
@@ -332,13 +353,77 @@ class Dispatcher:
                 j["not_met"] = "goal not met after %s answers: %s" % (len(verdicts) or "its", why)
             return r.get("output") or ""
         why = "run %s of %s ended %s: %s" % (j["run"], self.names.get(j["agent"], j["agent"][:8]), r.get("status"), str(r.get("error") or "-")[:120])
+        row = dict(r, runId=r.get("runId") or j["run"], startedAt=r.get("startedAt") or "1970-01-01T00:00:00Z")
+        kind, _ = clocks.outcome(row, None, self.now(), self.cfg.get("clocks"))
+        if clocks.klass(kind, row) == "transient":
+            self.store.close_run(j["run"], "error", error=why[:200])
+            return self.transient(j, why)
+        return self.failed_attempt(j, why, "ended")
+
+    def failed_attempt(self, j, why, how):
+        """A failed attempt (class work or cancel): the step is sent once more; the second one ends the job."""
         if j.get("attempt", 1) >= 2:
-            self.end(j, "failed", why + " (second time)")
+            self.end(j, "failed", why + (" (second time)" if how == "ended" else ""))
             return None
         log(j["issue"], why + "; sending again")
         j["attempt"] = 2
         self.send(j, j["agent"], j["sending_step"] + " again", self.message(j), j["state"])
         return None
+
+    def clock_check(self, j, r):
+        """A running run: record its step count, then let the clocks decide whether it is cancelled."""
+        if "steps" not in r or "startedAt" not in r:
+            return None
+        n, now = str(j["issue"]), self.now()
+        try:
+            prev = json.loads(self.store.get_all(n).get("seen") or "null")
+        except ValueError:
+            prev = None
+        seen = clocks.seen_after(r, prev, iso(now, True))
+        if seen != prev:
+            self.store.set(n, "seen", json.dumps(seen))
+            if j.get("fire_id"):
+                self.store.steps_seen(j["fire_id"], seen["steps"], seen["at"])
+        kind, why = clocks.outcome(r, seen, now, self.cfg.get("clocks"))
+        if kind != "CANCEL":
+            return None
+        # Only a run id of this job's own ledger row is ever cancelled.
+        c = self.account("cancel_run", {"agentId": j["agent"], "runId": j["run"]})
+        log(j["issue"], "%s; cancelled (wasRunning %s)" % (why, c.get("wasRunning")))
+        self.store.close_run(j["run"], "cancelled", error=why[:200])
+        return self.failed_attempt(j, why, "cancel")
+
+    def transient(self, j, reason):
+        """Class transient: back to the state it was sent from, not before now + backoff; not a failed attempt."""
+        count = self.store.bump_retry(str(j["issue"]), "transient")
+        delay = clocks.backoff(count)
+        if delay is None:
+            return self.end(j, "blocked", "four refusals a second try did not clear: %s" % reason)
+        j.update(state=BACK[j["state"]], not_before=self.now() + delay, retry_attempt=j.get("attempt", 1), sending=None)
+        self.save(j, "transient %d: %s" % (count, reason[:160]))
+        log(j["issue"], "transient, back to %s for %d s: %s" % (j["state"], delay, reason[:160]))
+        return None
+
+    def lost_run(self, j):
+        """An intent with no run id: look for the run in list_runs for up to LOST_BEATS beats, adopt one that started
+        at or after the intent; none after that: abandon the intent, class transient."""
+        got = self.account("list_runs", {"agentId": j["agent"]})
+        runs = got.get("runs", []) if isinstance(got, dict) else got or []
+        known, since = self.store.known_run_ids(), j.get("intent_at")
+        mine = sorted((r for r in runs if isinstance(r, dict) and (r.get("runId") or r.get("id")) not in known
+                       and r.get("startedAt") and since and clocks.L.ts(r["startedAt"]) >= clocks.L.ts(since)),
+                      key=lambda r: clocks.L.ts(r["startedAt"]))
+        if mine:
+            rid = mine[0].get("runId") or mine[0].get("id")
+            self.store.fired(j["fire_id"], rid)
+            j.update(run=rid, sending=None)
+            self.save(j, "adopted run " + rid)
+            return log(j["issue"], "%s: run %s found in the run list" % (j["state"], rid))
+        j["lost_beats"] = j.get("lost_beats", 0) + 1
+        if j["lost_beats"] < LOST_BEATS:
+            return self.save(j, "no run yet for '%s' (beat %d)" % (j["sending"], j["lost_beats"]))
+        self.store.abandon(j["fire_id"], "no run found after %d beats" % LOST_BEATS)
+        self.transient(j, "'%s' went out without a run id and no run followed" % j["sending"])
 
     def not_met_reason(self, j, out):
         """The BLOCKED: line when there is one; else, for a goal not met, the goal's own reason; else as before."""
@@ -347,7 +432,7 @@ class Dispatcher:
         return blocked_reason(out)
 
     def start(self, j, agent, step, state, **kw):
-        j.update(kw, sending_step=step, attempt=1)
+        j.update(kw, sending_step=step, attempt=j.pop("retry_attempt", 1))
         self.send(j, agent, step, self.message(dict(j, state=state)), state)
 
     # --- one step per job
@@ -355,7 +440,9 @@ class Dispatcher:
     def step(self, j):
         st = j["state"]
         if j.get("sending"):
-            return self.end(j, "blocked", "sending '%s' failed or was cut off; whether it arrived is unknown, so it is not sent again" % j["sending"])
+            return self.lost_run(j)
+        if st in ("queued", "review_wait", "fix_wait") and j.get("not_before") and self.now() < j["not_before"]:
+            return
         if st == "queued":
             b = self.free("builders")
             if b:
@@ -370,7 +457,7 @@ class Dispatcher:
                 found = self.find_pr(j, out)
                 if found:
                     j["pr"] = found
-                return self.end(j, "blocked", self.not_met_reason(j, out))
+                return self.blocked(j, out)
             self.to(j, "review_wait", "pull request #%s" % m.group(1), pr=int(m.group(1)))
         elif st == "review_wait":
             if self.conflicts(j):
@@ -402,10 +489,18 @@ class Dispatcher:
                 return
             last = final_line(out, ("PUSHED:", "BLOCKED:"))
             if not (last and last.startswith("PUSHED:")):
-                return self.end(j, "blocked", self.not_met_reason(j, out))
+                return self.blocked(j, out)
             self.to(j, "review_wait", "fix pushed: " + last_line(out)[:80], round=2)
         elif st == "checks":
             self.checks(j)
+
+    def blocked(self, j, out):
+        """A build or fix that ended without its final line, by the class of its BLOCKED line."""
+        why = self.not_met_reason(j, out)
+        k = clocks.klass("BLOCKED", blocked=why)
+        if k == "transient":
+            return self.transient(j, why)
+        self.end(j, "returned" if k == "plan" else "blocked", why)
 
     def conflicts(self, j):
         """True when the pull request conflicts with dev: the builder merges dev in once, a second conflict ends the job."""
@@ -464,6 +559,8 @@ class Dispatcher:
             pr = "#%s" % j["pr"] if j.get("pr") else "none"
             if j["state"] == "merged":
                 text = "The factory dispatcher merged pull request %s at %s." % (pr, j["head"][:7])
+            elif j["state"] == "returned":
+                text = "The factory dispatcher stopped this job: returned to the planner. Pull request: %s. Reason: %s" % (pr, j.get("reason") or "-")
             else:
                 text = "The factory dispatcher stopped this job: %s. Pull request: %s. Reason: %s" % (j["state"], pr, j.get("reason") or "-")
             self.gh(["issue", "comment", n, "-R", self.repo, "--body", text])

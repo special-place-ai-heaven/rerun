@@ -262,11 +262,11 @@ export function codexMcpConfig(tools?: ToolSet, mcpServers: McpServer[] = []): R
 //
 // `sessionId` is what an OpenCode request names its conversation by: a one-shot call inside a run
 // (compaction, vision) passes the run's own, the others one of their own making.
-export type CliModelOptions = { system?: string; claudeTools?: readonly string[]; screenshots?: ScreenshotLookup; sessionId?: string }
+export type CliModelOptions = { system?: string; claudeTools?: readonly string[]; screenshots?: ScreenshotLookup; sessionId?: string; labels?: Record<string, string> }
 
 // What a run hands its model beyond the tools: the prompt and the screenshots for the CLIs, the
 // conversation for OpenCode.
-export type ResolveModelOptions = { system?: string; screenshots?: ScreenshotLookup; sessionId?: string }
+export type ResolveModelOptions = { system?: string; screenshots?: ScreenshotLookup; sessionId?: string; labels?: Record<string, string> }
 
 function oneShotSessionId(agent: LoadedAgent, options?: { sessionId?: string }): string {
     return options?.sessionId ?? `${agent.id}:one-shot`
@@ -300,7 +300,7 @@ export function withCardTagNudge(hooks: ClaudeHooks | undefined): ClaudeHooks {
 
 function claudeProvider(agent: LoadedAgent, tools?: ToolSet, mcpServers: RunMcpServer[] = [], capture?: ClaudeContextCapture, options: CliModelOptions = {}) {
     const { mcpServers: servers, allowedTools } = claudeMcpConfig(tools, mcpServers, options.screenshots)
-    const { cwd, env: agentEnv } = agentProcessEnv(agent)
+    const { cwd, env: agentEnv } = agentProcessEnv(agent, options.labels)
     return createClaudeCode({
         defaultSettings: {
             persistSession: false,
@@ -338,8 +338,8 @@ function connectionEnv(agent: LoadedAgent): Record<string, string> {
 // run — there is no token setting to pass. `env` is merged over process.env by the provider, so it
 // is given as an overlay that empties every engine variable the child must not see. The home is
 // the connection's, so agents sharing a subscription share one auth.json.
-function codexShared(agent: LoadedAgent): CodexExecSettings & CodexAppServerSettings {
-    const { cwd, env: agentEnv } = agentProcessEnv(agent)
+function codexShared(agent: LoadedAgent, labels?: Record<string, string>): CodexExecSettings & CodexAppServerSettings {
+    const { cwd, env: agentEnv } = agentProcessEnv(agent, labels)
     const path = codexPath()
     return {
         cwd,
@@ -352,10 +352,10 @@ export const CODEX_ONE_SHOT_INSTRUCTIONS = 'Do what the user message asks and an
 
 // One-shot calls (compaction, curator, vision, memory reconcile): no tools and no streaming needed,
 // so the cheaper exec transport avoids a persistent process nobody would be left to close.
-function codexExecProvider(agent: LoadedAgent) {
+function codexExecProvider(agent: LoadedAgent, labels?: Record<string, string>) {
     return createCodexExec({
         defaultSettings: {
-            ...codexShared(agent),
+            ...codexShared(agent, labels),
             approvalMode: 'never',
             sandboxMode: 'danger-full-access',
             skipGitRepoCheck: true,
@@ -372,7 +372,7 @@ function codexExecProvider(agent: LoadedAgent) {
 function codexAppServerProvider(agent: LoadedAgent, tools?: ToolSet, mcpServers: McpServer[] = [], options: CliModelOptions = {}) {
     return createCodexAppServer({
         defaultSettings: {
-            ...codexShared(agent),
+            ...codexShared(agent, options.labels),
             approvalPolicy: 'never',
             sandboxPolicy: 'danger-full-access',
             autoApprove: true,
@@ -440,7 +440,7 @@ function registryFor(agent: LoadedAgent, tools?: ToolSet, mcpServers?: McpServer
         rerun: openaiChat(openrouterCompatibleOptions(agent, 'rerun')),
         anthropic: createAnthropic({ apiKey: e.ANTHROPIC_API_KEY }),
         claude: claudeProvider(agent, tools, mcpServers, undefined, options),
-        codex: codexExecProvider(agent),
+        codex: codexExecProvider(agent, options?.labels),
         openai: createOpenAI({ apiKey: e.OPENAI_API_KEY }),
         google: createGoogleGenerativeAI({ apiKey: e.GOOGLE_GENERATIVE_AI_API_KEY ?? e.GOOGLE_API_KEY }),
         openrouter: openaiChat(openrouterCompatibleOptions(agent, 'openrouter')),
@@ -479,7 +479,7 @@ export type ResolvedModel = { model: LanguageModel; close: () => Promise<void>; 
 
 const noClose = async (): Promise<void> => {}
 
-export function resolveModel(agent: LoadedAgent, override?: ModelOverride, tools?: ToolSet, mcpServers?: RunMcpServer[], { system, screenshots, sessionId }: ResolveModelOptions = {}): ResolvedModel {
+export function resolveModel(agent: LoadedAgent, override?: ModelOverride, tools?: ToolSet, mcpServers?: RunMcpServer[], { system, screenshots, sessionId, labels }: ResolveModelOptions = {}): ResolvedModel {
     const { provider, model } = pairFor(agent, override)
     // `wrapLanguageModel` runs the list from the end: the guard sits nearest the model, so no other
     // middleware ever reads a fake tool call, the card tags go next, and the quick replies read the
@@ -488,12 +488,12 @@ export function resolveModel(agent: LoadedAgent, override?: ModelOverride, tools
     const cardTags = createCardTagGuard(agent.id, provider)
     const guard = createFakeToolCallGuard(agent.id)
     if (provider === 'codex') {
-        const codex = codexAppServerProvider(agent, tools, mcpServers, { system })
+        const codex = codexAppServerProvider(agent, tools, mcpServers, { system, labels })
         return { model: wrapLanguageModel({ model: codex(model), middleware: [codexMcpCompatibilityMiddleware, createCodexImageMiddleware(agent.id), replies.middleware, cardTags, guard] }), close: () => codex.close(), quickReplies: replies.read }
     }
     if (provider === 'claude') {
         const capture = claudeContextCapture(agent.resolved.connection?.id)
-        const claude = claudeProvider(agent, tools, mcpServers, capture, { system, screenshots, claudeTools: agent.config.tools.web ? CLAUDE_RUN_TOOLS : [] }).languageModel(model)
+        const claude = claudeProvider(agent, tools, mcpServers, capture, { system, screenshots, labels, claudeTools: agent.config.tools.web ? CLAUDE_RUN_TOOLS : [] }).languageModel(model)
         return { model: wrapLanguageModel({ model: claude, middleware: [claudeScreenshotMiddleware, replies.middleware, cardTags, guard] }), close: noClose, contextUsage: capture.read, quickReplies: replies.read }
     }
     // OpenCode runs in Rerun's own loop, on the SDK of whichever format the model is served on.

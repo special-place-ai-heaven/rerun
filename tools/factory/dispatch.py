@@ -417,6 +417,8 @@ def main(argv=None):
         print("dispatch: cannot read a key file: %s" % type(e).__name__, file=sys.stderr)
         return 1
     d = Dispatcher(cfg, account, gh)
+    log("-", "dispatcher started: %d builders, %d reviewers, label %s, repo %s" % (
+        len(cfg["builders"]), len(cfg["reviewers"]), cfg.get("label", "factory"), cfg["repo"]))
     if a.cmd == "once":
         d.once()
         return 0

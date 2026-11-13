@@ -85,6 +85,8 @@
         "triggerPayload.truncated": "Badge: the webhook body was cut because it was too long.",
         "video.play": "Accessible label. {name} is the video's file name.",
         "voice.discard": "Verb, tooltip: throws away the voice message being recorded.",
+        "voice.microphone": "Shown while the microphone is being opened, in the narrow bar of a question's answer. Short on purpose: it has to fit next to a waveform on a phone.",
+        "voice.transcribing": "Shown while a recording is being turned into words.",
         "voice.seek": "Accessible label of the waveform: clicking it jumps to that point of the recording.",
         "voice.transcript": "Tooltip of a button that shows the text transcribed from a voice message.",
         "webhookRun.label": "Divider in the thread where an incoming webhook started a run.",
@@ -303,6 +305,8 @@
         "sendFailed": "Could not send that recording.",
         "sendFailedHint": "Retry, or discard it.",
         "waitingForMicrophone": "Waiting for the microphone...",
+        "microphone": "Microphone...",
+        "transcribing": "Transcribing...",
         "hideTranscript": "Hide transcript",
         "transcript": "Transcript",
         "copyTranscript": "Copy transcript",
@@ -498,6 +502,14 @@
         },
         "subscribeToKeepWorking": "Subscribe to keep your coworkers working.",
         "resetsNextMonth": "It resets next month.",
+        "lifetime": {
+            "ownConnection": "Your lifetime plan runs on your own AI, and your {plan} plan is connected.",
+            "connectProvider": "Your lifetime plan runs on your own AI. Connect Claude or ChatGPT to keep your coworkers working.",
+            "body": "Your lifetime plan runs on your own AI.",
+            "connectTitle": "Connect your AI",
+            "connectDescription": "Claude, ChatGPT or an API key.",
+            "connectCta": "Connect"
+        },
         "trial": {
             "onPro": "You're on Pro.",
             "resuming": "Your coworker picks the task back up.",

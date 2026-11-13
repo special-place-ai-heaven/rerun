@@ -8,21 +8,22 @@ import { useTranslations } from 'use-intl'
 
 import { useAuth } from '@/auth/AuthProvider'
 import { coworkerEndpoints } from '@/chat/endpoints'
-import { lineOf, minutesSince, moodStatus, recentCoworkers, sectionsByBox, withPinned, type HomeCoworker } from '@/components/home/board'
+import { foremanOnBoard, lineOf, minutesSince, moodStatus, recentCoworkers, sectionsByBox, withPinned, type HomeCoworker } from '@/components/home/board'
 import { SkeletonFade, useBootFill } from '@/components/home/BootFill'
+import { GENERAL_PAGE_ID } from '@/components/chat/conversation-pages'
 import { LAST_CONVERSATION } from '@/components/chat/ForemanChat'
-import { CoworkerRow } from '@/components/home/CoworkerRow'
+import { CoworkerRow, HOME_GUTTER } from '@/components/home/CoworkerRow'
 import { ForemanRow } from '@/components/home/ForemanRow'
-import { HomeBottomBar } from '@/components/home/HomeBottomBar'
+import { HomeBottomBar, bottomBarInset } from '@/components/home/HomeBottomBar'
 import { HomeHeader } from '@/components/home/HomeHeader'
 import { HomeSkeleton } from '@/components/home/HomeSkeleton'
-import { NewCoworkerRow } from '@/components/home/NewCoworkerRow'
 import { PinnedAvatar, PinnedGrid, usePinnedCell } from '@/components/home/PinnedGrid'
 import { SectionHeader } from '@/components/home/SectionHeader'
 import { SortableGrid } from '@/components/home/SortableGrid'
 import { useForemanLast } from '@/components/home/useForemanLast'
 import { useGroupMode } from '@/components/home/useGroupMode'
 import { usePinnedAgents } from '@/components/home/usePinnedAgents'
+import { usePaneInsets } from '@/components/layout/PaneSize'
 import { inboxCount } from '@/components/inbox/inbox'
 import { AppText } from '@/components/ui/AppText'
 import { EdgeFade } from '@/components/ui/EdgeFade'
@@ -41,10 +42,11 @@ import { spacing } from '@/theme/tokens'
 export function HomeScreen({ sidebar = false }: { sidebar?: boolean }) {
     const theme = useTheme()
     const insets = useSafeAreaInsets()
+    const pane = usePaneInsets()
     const { session, me } = useAuth()
     const board = useBoard()
     const inbox = useInbox()
-    const [group, setGroup] = useGroupMode()
+    const [group] = useGroupMode()
     const [collapsed, setCollapsed] = useState<string[]>([])
     const fill = useBootFill(board.state === 'ready')
     const t = useTranslations('mobileHome')
@@ -64,7 +66,8 @@ export function HomeScreen({ sidebar = false }: { sidebar?: boolean }) {
     const pins = usePinnedAgents()
     const cell = usePinnedCell()
     const [reordering, setReordering] = useState(false)
-    const { pinned, others } = withPinned(board.state === 'ready' ? board.coworkers : [], pins.pinned)
+    const foremanPinned = pins.pinned.includes(FOREMAN_AGENT_ID)
+    const { pinned, others } = withPinned(board.state === 'ready' ? board.coworkers : [], pins.pinned, board.state === 'ready' ? foremanOnBoard(foreman.running) : undefined)
     const sections = board.state === 'ready' && group === 'box' ? sectionsByBox(others, board.boxes, t('untitledBox')) : []
     const recent = board.state === 'ready' && group === 'recent' ? recentCoworkers(others) : []
 
@@ -74,7 +77,7 @@ export function HomeScreen({ sidebar = false }: { sidebar?: boolean }) {
         if (unread !== null) setBadge(unread).catch(() => {})
     }, [unread])
 
-    const open = (coworker: HomeCoworker) => go({ pathname: '/chat/[id]', params: { id: coworker.latest?.id ?? 'new', to: coworker.id } })
+    const open = (coworker: HomeCoworker) => (coworker.id === FOREMAN_AGENT_ID ? openForeman() : go({ pathname: '/chat/[id]', params: { id: coworker.latest?.id ?? GENERAL_PAGE_ID, to: coworker.id } }))
 
     const warmUp = (coworker: HomeCoworker) => {
         const sessionId = coworker.latest?.id
@@ -92,15 +95,11 @@ export function HomeScreen({ sidebar = false }: { sidebar?: boolean }) {
 
     return (
         <View style={{ flex: 1, backgroundColor: theme.background }}>
-            <ScrollView scrollEnabled={!reordering} contentContainerStyle={{ paddingTop: headerHeight + spacing.lg, paddingBottom: insets.bottom + 120 }} contentInsetAdjustmentBehavior="never">
-                <AppText variant="largeTitle" maxFontSizeMultiplier={1} style={{ paddingHorizontal: spacing.xl, marginBottom: spacing.md }}>
-                    {t('title')}
-                </AppText>
-
+            <ScrollView scrollEnabled={!reordering} contentContainerStyle={{ paddingTop: headerHeight + spacing.xl, paddingBottom: insets.bottom + 120, paddingLeft: pane.left, paddingRight: pane.right }} contentInsetAdjustmentBehavior="never">
                 {board.state === 'loading' && <HomeSkeleton />}
 
                 {board.state === 'error' && (
-                    <View style={{ alignItems: 'flex-start', gap: spacing.md, paddingHorizontal: spacing.xl, paddingTop: spacing.lg }}>
+                    <View style={{ alignItems: 'flex-start', gap: spacing.md, paddingHorizontal: HOME_GUTTER, paddingTop: spacing.lg }}>
                         <AppText variant="callout" tone="muted">
                             {t('loadFailed')}
                         </AppText>
@@ -108,17 +107,11 @@ export function HomeScreen({ sidebar = false }: { sidebar?: boolean }) {
                     </View>
                 )}
 
-                {board.state === 'ready' && board.coworkers.length === 0 && (
-                    <AppText variant="callout" tone="muted" style={{ paddingHorizontal: spacing.xl, paddingTop: spacing.lg }}>
-                        {t('empty')}
-                    </AppText>
-                )}
-
                 <View>
                     {pinned.length > 0 && (
-                        <Animated.View layout={layout} entering={fill.playing ? fill.rowEntering(0) : undefined} style={{ marginBottom: spacing.sm }}>
+                        <Animated.View layout={layout} entering={fill.playing ? fill.rowEntering(0) : undefined} style={{ marginTop: spacing.md, marginBottom: spacing.lg }}>
                             {reordering && (
-                                <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.xl, paddingVertical: spacing.sm }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: HOME_GUTTER, paddingVertical: spacing.sm }}>
                                     <AppText variant="footnote" tone="muted" medium style={{ flex: 1 }}>
                                         {t('pinned.dragToReorder')}
                                     </AppText>
@@ -130,7 +123,7 @@ export function HomeScreen({ sidebar = false }: { sidebar?: boolean }) {
                                 </View>
                             )}
                             {reordering ? (
-                                <View style={{ paddingHorizontal: spacing.xl }}>
+                                <View style={{ paddingHorizontal: HOME_GUTTER }}>
                                     <SortableGrid items={pinned} columns={cell.columns} cellWidth={cell.width} renderCell={coworker => <PinnedAvatar coworker={coworker} cell={cell} animated={false} />} onReorder={pins.reorder} />
                                 </View>
                             ) : (
@@ -139,17 +132,27 @@ export function HomeScreen({ sidebar = false }: { sidebar?: boolean }) {
                         </Animated.View>
                     )}
 
-                    {board.state === 'ready' && <ForemanRow last={foreman} selected={openAgentId === FOREMAN_AGENT_ID} onPress={openForeman} />}
+                    {board.state === 'ready' && !foremanPinned && (
+                        <Animated.View key="foreman" layout={layout} entering={fill.playing ? fill.rowEntering(0) : FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
+                            <ForemanRow last={foreman} selected={openAgentId === FOREMAN_AGENT_ID} onPress={openForeman} pin={{ pinned: false, onToggle: () => pins.pin(FOREMAN_AGENT_ID) }} />
+                        </Animated.View>
+                    )}
+
+                    {board.state === 'ready' && board.coworkers.length === 0 && (
+                        <AppText variant="callout" tone="muted" style={{ paddingHorizontal: HOME_GUTTER, paddingTop: spacing.lg }}>
+                            {t('empty')}
+                        </AppText>
+                    )}
 
                     {recent.map((coworker, index) => (
-                        <Animated.View key={`recent:${coworker.id}`} layout={layout} entering={fill.rowEntering(index)} exiting={FadeOut.duration(120)}>
+                        <Animated.View key={`recent:${coworker.id}`} layout={layout} entering={fill.rowEntering(index + 1)} exiting={FadeOut.duration(120)}>
                             {coworkerRow(coworker)}
                         </Animated.View>
                     ))}
 
                     {sections.map((section, index) => (
-                        <Animated.View key={`box:${section.key}`} layout={layout} entering={fill.playing ? fill.rowEntering(index) : undefined} style={{ marginTop: spacing.sm }}>
-                            <SectionHeader label={section.label} count={section.members.length} collapsed={collapsed.includes(section.key)} onToggle={() => toggle(section.key)} divided={index > 0} />
+                        <Animated.View key={`box:${section.key}`} layout={layout} entering={fill.playing ? fill.rowEntering(index + 1) : undefined}>
+                            <SectionHeader label={section.label} count={section.members.length} collapsed={collapsed.includes(section.key)} onToggle={() => toggle(section.key)} />
                             {!collapsed.includes(section.key) &&
                                 section.members.map(coworker => (
                                     <Animated.View key={coworker.id} layout={layout} entering={fill.playing ? undefined : FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
@@ -159,23 +162,17 @@ export function HomeScreen({ sidebar = false }: { sidebar?: boolean }) {
                         </Animated.View>
                     ))}
 
-                    {board.state === 'ready' && (
-                        <Animated.View entering={fill.playing ? fill.rowEntering(recent.length + sections.length) : undefined}>
-                            <NewCoworkerRow onPress={() => router.push('/new-coworker')} />
-                        </Animated.View>
-                    )}
-
                     {fill.playing && <SkeletonFade reveal={fill.reveal} staggered={fill.staggered} />}
                 </View>
             </ScrollView>
 
-            <EdgeFade edge="top" height={headerHeight + spacing.lg} />
+            <EdgeFade edge="top" height={headerHeight + spacing.xl} />
             <EdgeFade edge="bottom" height={insets.bottom + 90} />
-            <Animated.View entering={fill.chromeEntering} pointerEvents="box-none" style={{ position: 'absolute', top: insets.top + spacing.sm, left: 0, right: 0 }}>
-                <HomeHeader group={group} onGroup={setGroup} />
+            <Animated.View entering={fill.chromeEntering} pointerEvents="box-none" style={{ position: 'absolute', top: insets.top + spacing.sm, left: pane.left, right: pane.right }}>
+                <HomeHeader inboxCount={inbox.state === 'ready' ? inboxCount(inbox.items) : 0} onInbox={() => router.push('/inbox')} onNewCoworker={() => router.push('/new-coworker')} />
             </Animated.View>
-            <Animated.View entering={fill.chromeEntering} pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: insets.bottom + spacing.sm }}>
-                <HomeBottomBar count={inbox.state === 'ready' ? inboxCount(inbox.items) : 0} onSearch={() => router.push('/search')} onInbox={() => router.push('/inbox')} />
+            <Animated.View entering={fill.chromeEntering} pointerEvents="box-none" style={{ position: 'absolute', left: pane.left, right: pane.right, bottom: bottomBarInset(insets.bottom) }}>
+                <HomeBottomBar onSearch={() => router.push('/search')} />
             </Animated.View>
         </View>
     )

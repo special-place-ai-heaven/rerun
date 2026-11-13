@@ -425,7 +425,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
             ctx.callTargets = callTargets
             return buildTools(ctx)
         })
-        const preparedP = CLI_PROVIDERS.has(provider) ? Promise.all(agent.config.mcpServers.map(s => prepareMcpServer(agent.id, s, agent.env))) : Promise.resolve([])
+        const preparedP = CLI_PROVIDERS.has(provider) ? Promise.all(agent.config.mcpServers.map(s => prepareMcpServer(agent.id, s, agent.env, agent.hubAgentId))) : Promise.resolve([])
         // Claude reaches its servers through the engine's connections; Codex starts its own without
         // holding up the model, so it keeps dialing them as declared.
         const mcpServersP = provider === 'claude' ? preparedP.then(servers => withPooledRelays(agent, servers)) : preparedP
@@ -461,6 +461,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
         const context = suffix ? [contextTextPart(suffix)] : []
         appendP = appendMessage(agent.id, sessionId, { role: 'user', content: [{ type: 'text', text: userText }, ...context] }, author)
         appendP.catch(err => logger.error({ err: String(err), agent: agent.id }, 'append user message failed'))
+        ctx.userTurnStored = appendP.catch(() => {})
 
         const turnText = shared ? signText(userText, author) : userText
         const turnMessages: ModelMessage[] = [...history, { role: 'user', content: [{ type: 'text', text: turnText }, ...context] }]

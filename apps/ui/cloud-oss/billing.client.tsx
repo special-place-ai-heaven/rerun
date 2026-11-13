@@ -43,6 +43,7 @@ export function BudgetExhaustedNotice({ ownConnection }: {
     trialing?: boolean
     paused?: boolean
     noCredit?: boolean
+    lifetime?: boolean
     coworker?: string
     priceArm?: PriceArm
     onPaid?: () => void

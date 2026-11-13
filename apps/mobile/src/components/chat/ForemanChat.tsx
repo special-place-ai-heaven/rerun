@@ -1,5 +1,4 @@
-import { FOREMAN_AGENT_ID, type AgentModels, type ForemanSurface } from '@rerun/contracts'
-import * as Haptics from 'expo-haptics'
+import { FOREMAN_AGENT_ID, FOREMAN_DISPLAY_NAME, type AgentModels, type ForemanSurface } from '@rerun/contracts'
 import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View } from 'react-native'
@@ -18,6 +17,7 @@ import { AppText } from '@/components/ui/AppText'
 import { PillButton } from '@/components/ui/PillButton'
 import { environment, webHost } from '@/config/environment'
 import { cachedForeman } from '@/data/local-cache'
+import * as Haptics from '@/lib/haptics'
 import { useTheme } from '@/theme/theme'
 import { spacing } from '@/theme/tokens'
 
@@ -32,7 +32,7 @@ import { useOpenChats } from './useOpenChats'
 // Opens the last conversation with the Foreman, as the web column does.
 export const LAST_CONVERSATION = 'last'
 
-const FOREMAN: Omit<ChatCoworker, 'role'> = { id: FOREMAN_AGENT_ID, kind: 'foreman', name: 'Rerun', status: 'idle' }
+const FOREMAN: Omit<ChatCoworker, 'role'> = { id: FOREMAN_AGENT_ID, kind: 'foreman', name: FOREMAN_DISPLAY_NAME, status: 'idle' }
 
 const TITLE_DELAY_MS = 4000
 

@@ -1,5 +1,5 @@
 import { pendingHitlLabel, type HitlCueCopy, type HitlKind } from '@rerun/contracts'
-import { LockIcon, MessageCircleQuestionIcon, MonitorIcon, PlugIcon, PlugSparkleIcon, ShieldAlertIcon, type LucideIcon } from '@/lib/icons'
+import { CoinsIcon, LockIcon, MessageCircleQuestionIcon, MonitorIcon, PlugIcon, PlugSparkleIcon, ShieldAlertIcon, type LucideIcon } from '@/lib/icons'
 
 export type PendingHitlSummary = {
     icon: LucideIcon

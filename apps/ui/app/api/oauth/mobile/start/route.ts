@@ -37,7 +37,6 @@ async function mcpOAuthRedirect(req: Request, target: { agentId: string; serverN
         clientId: clientInfo.clientId,
         clientSecret: clientInfo.clientSecret,
         redirectUri: callbackUrl(req),
-        scope: metadata.scopesSupported?.join(' '),
         mobileGrant: target.mobileGrant,
     }
     return redirect(buildAuthorizeUrl(metadata, ctx, challenge, state), { name: OAUTH_COOKIE_PREFIX + state, value: encodeContext(ctx), path: OAUTH_COOKIE_PATH })
@@ -62,7 +61,7 @@ export async function GET(req: Request) {
         // The ticket is spent here: the row it opens is where the callback parks the token, and what
         // the app claims afterwards with its bearer.
         await openPendingGrant(ticket)
-        const mobileGrant = mintCallbackGrant({ agentId, workspaceId, userId, jti })
+        const mobileGrant = mintCallbackGrant({ agentId, workspaceId, userId, jti, desktop: ticket.desktop })
 
         // The server's url is read off the agent now, never carried from the app: it is where the
         // token will be sent.
@@ -106,6 +105,6 @@ export async function GET(req: Request) {
 
         throw new Error(`${details.name} has no sign-in waiting.`)
     } catch (err) {
-        return redirect(appReturnUrl({ ok: false, error: err instanceof Error ? err.message : 'Could not start the sign-in' }))
+        return redirect(appReturnUrl({ ok: false, error: err instanceof Error ? err.message : 'Could not start the sign-in' }, ticket.desktop))
     }
 }

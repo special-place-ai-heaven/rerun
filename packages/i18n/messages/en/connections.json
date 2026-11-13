@@ -62,7 +62,8 @@
         },
         "opencodePlan": {
             "go": "Included in Go",
-            "console": "Console credits"
+            "console": "Console credits",
+            "free": "Free"
         },
         "unavailable": {
             "opencodeRetired": "No longer offered by OpenCode",
@@ -117,6 +118,7 @@
         "meter.planLimit": "Accessible label of a progress bar. {name} is the name of a plan window, such as 5-hour or Weekly.",
         "models.count": "How many of the models of this connection the coworkers can use, for example 3 of 8.",
         "opencode.count": "How many models of this catalog are switched on, for example 3 of 8 on.",
+        "opencode.free": "Badge beside an OpenCode model: its tokens cost nothing, the provider serves it for free.",
         "remove.fallBack.agents": "{agents} is a comma-separated list of coworker names.",
         "remove.fallBack.both": "{agents} is a comma-separated list of coworker names.",
         "remove.released.agents": "{agents} is a comma-separated list of coworker names.",
@@ -127,8 +129,8 @@
         "chatgpt.adminMessage": "A message the user copies and sends to their ChatGPT workspace admin. The quoted setting name must match ChatGPT's own label.",
         "chatgpt.stuck.expiredSelf": "<link> points at ChatGPT's security settings; the path must match ChatGPT's own labels.",
         "chatgpt.stuck.errorSelf": "<link> points at ChatGPT's security settings; the path must match ChatGPT's own labels.",
-        "chatgpt.remarks.grabCode": "Said by the Foreman, the assistant: now get a sign-in code.",
-        "claude.remarks.checking": "Said by the Foreman while the code is being checked; animated dots follow it.",
+        "chatgpt.remarks.grabCode": "Said by the Chief of Staff, the assistant: now get a sign-in code.",
+        "claude.remarks.checking": "Said by the Chief of Staff while the code is being checked; animated dots follow it.",
         "nameStep.title": "Title of the last step: give the connection a name.",
         "custom.probe.unreachableCloud": "{host} is a host name and port, such as localhost:11434.",
         "custom.probe.unreachableLocal": "{host} is a host name and port, such as localhost:11434.",
@@ -153,6 +155,7 @@
         "sources.tiers.smart": "Hint under the Rerun Smart model in a model picker.",
         "sources.opencodePlan.go": "Hint under an OpenCode model in a model picker: paid by the OpenCode Go subscription.",
         "sources.opencodePlan.console": "Hint under an OpenCode model in a model picker: paid with the OpenCode Console credits.",
+        "sources.opencodePlan.free": "Hint under an OpenCode model in a model picker: the provider serves it for free, nobody pays for its tokens.",
         "sources.unavailable.codexOutdated": "Why a model cannot be picked: the Codex command line tool on the user's machine is too old for it.",
         "sources.unavailable.notInChatgptPlan": "Why a model cannot be picked: the user's ChatGPT subscription does not include it.",
         "sources.unavailable.opencodeRetired": "Why a model cannot be picked: OpenCode stopped offering it.",
@@ -281,15 +284,15 @@
     },
     "opencode": {
         "goTitle": "Included in OpenCode Go",
-        "goHint": "Paid by your Go plan, within its 5-hour, weekly and monthly limits.",
+        "goHint": "Paid by your Go plan. The free ones are off until you switch them on.",
         "consoleTitle": "Console, paid with your credits",
-        "consoleHint": "Billed per token from your OpenCode credits. Off until you switch one on.",
+        "consoleHint": "Billed per token, off until you switch one on.",
         "included": "Included",
         "credits": "Credits",
+        "free": "Free",
         "new": "New",
         "noVision": "No vision",
         "search": "Search models",
-        "count": "{on} of {total} on",
         "emptySection": "OpenCode lists no model here right now.",
         "noMatch": "No model matches “{query}”."
     },

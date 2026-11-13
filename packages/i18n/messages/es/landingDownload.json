@@ -1,0 +1,58 @@
+{
+    "title": "Descarga la app de escritorio de Rerun",
+    "eyebrow": "App de escritorio",
+    "headline": "Rerun en tu escritorio",
+    "description": "Tus coworkers en una ventana propia, con notificaciones, un icono en la barra de menús o en la bandeja del sistema, y la pregunta rápida.",
+    "mac": "Descargar para macOS",
+    "windows": "Descargar para Windows",
+    "linux": "Descargar para Linux",
+    "allPlatforms": "Todas las plataformas",
+    "alternatives": {
+        "macIntel": "Descargar para un Mac con Intel",
+        "macAppleSilicon": "Descargar para un Mac con Apple Silicon",
+        "windowsArm64": "Descargar para Windows en Arm",
+        "windowsX64": "Descargar para Windows x64"
+    },
+    "beta": "Beta",
+    "webApp": "Rerun también funciona en tu navegador: <link>abre la app web</link>.",
+    "platforms": {
+        "label": "Descargar",
+        "title": "macOS, Windows y Linux",
+        "mac": {
+            "name": "macOS",
+            "requirements": "macOS 13 o posterior, Apple Silicon e Intel.",
+            "appleSilicon": "Apple Silicon",
+            "intel": "Intel"
+        },
+        "windows": {
+            "name": "Windows",
+            "requirements": "Windows 10 o posterior, x64 y Arm.",
+            "warning": "La app de Windows aún no está firmada. Si Windows muestra «Windows protegió su PC», haz clic en Más información y luego en Ejecutar de todas formas.",
+            "x64": "x64",
+            "arm64": "Arm"
+        },
+        "linux": {
+            "name": "Linux",
+            "requirements": "x64. El AppImage funciona en la mayoría de las distribuciones y se actualiza solo.",
+            "appImage": "AppImage",
+            "deb": ".deb (Debian, Ubuntu)",
+            "rpm": ".rpm (Fedora, openSUSE)"
+        }
+    },
+    "features": {
+        "label": "Lo que añade la app",
+        "title": "Todo Rerun, a un atajo",
+        "notifications": {
+            "title": "Notificaciones que te traen de vuelta",
+            "body": "Tus coworkers te avisan en cuanto estás en otra app, y un clic abre la conversación."
+        },
+        "quickAsk": {
+            "title": "Pregunta rápida",
+            "body": "⌘⇧Espacio en un Mac, Ctrl+Mayús+Espacio en Windows y Linux: una pregunta para tu Chief of Staff desde cualquier app, y la respuesta te espera en Rerun."
+        },
+        "always": {
+            "title": "Siempre en marcha",
+            "body": "Al cerrar la ventana, Rerun queda en la barra de menús o en la bandeja del sistema, con lo que te espera contado en su icono."
+        }
+    }
+}

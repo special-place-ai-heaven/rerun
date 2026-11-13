@@ -271,6 +271,11 @@
                 "blurb": "Lire leurs routines et leurs runs",
                 "help": "Permet au coworker de consulter les autres coworkers du workspace : leur statut, leurs tâches planifiées, leurs triggers et leurs runs récents, avec les outils appelés par chaque run quand il doit comprendre un échec. Il ne peut rien modifier. Un run peut contenir des données des apps connectées de l'autre coworker."
             },
+            "aiProviders": {
+                "label": "Voir ses fournisseurs d'IA",
+                "blurb": "Modèle utilisé, crédit et quotas",
+                "help": "Permet au coworker de savoir sur quel fournisseur d'IA et quel modèle il tourne, quels autres fournisseurs sont connectés au workspace, et ce qu'il reste sur chacun : le crédit Rerun et les limites d'un abonnement Claude, Codex ou OpenCode. Il ne peut rien modifier."
+            },
             "askUser": {
                 "label": "Vous poser des questions",
                 "blurb": "S'arrêter pour demander, avec des choix",
@@ -299,7 +304,7 @@
             "paidData": {
                 "label": "Leads, SEO et données sociales",
                 "blurb": "Payé avec vos crédits Rerun",
-                "help": "Permet au coworker de trouver des prospects, leurs e-mails pro, leurs numéros et des données d'entreprise, de consulter volumes de recherche, idées de mots-clés et backlinks, de lire les résultats Google et les commerces locaux, et de lire profils et publications publics sur LinkedIn, TikTok, Instagram, X, YouTube, Facebook et Reddit, sans abonnement Apollo, Semrush ou de scraping. Chaque appel est payé avec vos crédits Rerun, dépensés par le coworker quand une tâche le demande."
+                "help": "Permet au coworker de trouver des prospects, leurs e-mails pro, leurs numéros et des données d'entreprise, de consulter volumes de recherche, idées de mots-clés et backlinks, de lire les résultats Google et les commerces locaux, et de lire profils et publications publics sur LinkedIn, TikTok, Instagram, X, YouTube, Facebook et Reddit, sans abonnement Apollo, Semrush ou de scraping. Chaque appel est payé avec vos crédits Rerun, et le coworker vous demande d'abord de valider un coût estimé."
             },
             "requestSecret": {
                 "label": "Demander un identifiant",

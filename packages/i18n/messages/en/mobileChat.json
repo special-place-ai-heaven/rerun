@@ -50,8 +50,8 @@
             "tools": "What tools do you have access to?"
         },
         "team": {
-            "greeting": "Hi, I'm Rerun",
-            "greetingNamed": "Hi {firstName}, I'm Rerun",
+            "greeting": "Hi, I'm your Chief of Staff",
+            "greetingNamed": "Hi {firstName}, I'm your Chief of Staff",
             "greetingWithTeam": "{greeting}. Here is your team.",
             "emptySubtitle": "You have no coworkers yet. Tell me a job you would hand off and I'll build the first one.",
             "buildPrompt": "Build me a coworker that ",
@@ -135,7 +135,7 @@
             }
         },
         "retry": "Retry",
-        "role": "Your workspace assistant",
+        "role": "Your Chief of Staff",
         "unreachableBody": "Check your connection and try again.",
         "unreachableTitle": "We could not reach Rerun"
     },
@@ -145,14 +145,18 @@
         "conversations": "Conversations",
         "coworkerDetails": "Coworker details",
         "earlier": "Earlier",
-        "menuLabel": "{name}, {title}, conversations",
+        "general": "General",
+        "identityLabel": "{name}, {title}",
         "newChat": "New chat",
         "newConversation": "New conversation",
+        "newThread": "New thread",
         "sections": {
             "needs-you": "Needs you",
             "new": "Unread",
             "running": "Running"
-        }
+        },
+        "threadCount": "{count, plural, one {# thread} other {# threads}}",
+        "threads": "Threads"
     },
     "markdown": {
         "code": "code",
@@ -162,7 +166,7 @@
         "image": "Image"
     },
     "messages": {
-        "askRerun": "Ask Rerun",
+        "askRerun": "Ask your Chief of Staff",
         "badResponse": "Bad response",
         "compacting": "Compacting",
         "copy": "Copy",
@@ -208,7 +212,7 @@
         "answerPlaceholder": "Answer {name}",
         "attachFailed": "Could not attach the files",
         "defaultModel": "Default · {model}",
-        "foremanPlaceholder": "Ask Rerun anything",
+        "foremanPlaceholder": "Ask your Chief of Staff anything",
         "loadFailed": "We could not load this conversation.",
         "loading": "Loading the conversation",
         "messagePlaceholder": "Message {name}",
@@ -250,6 +254,19 @@
         "skip": "Skip",
         "skipTakeover": "Skip the browser takeover"
     },
+    "threadBranch": {
+        "needs": "Needs you",
+        "error": "Error",
+        "running": "Running",
+        "open": "Open thread {title}",
+        "opener": {
+            "schedule": "Scheduled run · {name}",
+            "trigger": "Webhook · {name}",
+            "askedBy": "Asked by {name}",
+            "askedByUnknown": "Asked by another coworker",
+            "started": "Started a thread"
+        }
+    },
     "voice": {
         "copyTranscript": "Copy transcript",
         "hideTranscript": "Hide transcript",
@@ -275,10 +292,14 @@
         "origins.payload": "The body of an HTTP request a webhook received.",
         "takeover.done": "Button: the person has finished using the coworker's browser and hands it back.",
         "empty.starters.capabilities": "One of four chips on an empty conversation with a coworker: tapped, it is sent as the user's own message to the coworker. Same for the other empty.starters keys.",
-        "empty.team.greetingWithTeam": "Title of the workspace assistant's empty conversation. {greeting} is the greeting sentence, for example \"Hi Alex, I'm Rerun\".",
+        "empty.team.greetingWithTeam": "Title of the Chief of Staff's empty conversation. {greeting} is the greeting sentence, for example \"Hi Alex, I'm your Chief of Staff\".",
         "empty.team.buildPrompt": "Prefilled in the composer: the start of the user's own sentence to the assistant, completed by them. Keep the trailing space.",
         "empty.team.handOff.prefill": "Prefilled in the composer: the start of the user's own sentence to the assistant. {mention} is a coworker's handle, like @scout. Keep the trailing space.",
         "empty.team.checkWorking.send": "Sent as the user's own message to the assistant. {mention} is a coworker's handle, like @scout. Same for checkIdle.send.",
-        "empty.team.template.send": "Sent as the user's own message to the assistant when the row is tapped. Same for guide.send."
+        "empty.team.template.send": "Sent as the user's own message to the assistant when the row is tapped. Same for guide.send.",
+        "threadBranch.open": "Accessibility label of a thread row in the coworker's General conversation. {title} is the thread's title.",
+        "threadBranch.opener.askedBy": "Stands in for the first message of a thread another coworker asked for. {name} is that coworker's name.",
+        "threadBranch.opener.schedule": "Stands in for the first message of a thread a schedule started. {name} is the routine's name.",
+        "threadBranch.opener.trigger": "Stands in for the first message of a thread a webhook started. {name} is the trigger's name."
     }
 }

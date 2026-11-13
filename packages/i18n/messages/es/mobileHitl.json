@@ -64,7 +64,12 @@
         "selectAll": "Selecciona todas las que correspondan",
         "typeAnswer": "Escribe tu respuesta…",
         "somethingElse": "Otra cosa",
-        "yourAnswer": "Tu respuesta"
+        "yourAnswer": "Tu respuesta",
+        "record": "Responder con tu voz",
+        "useRecording": "Usar esta grabación",
+        "discardRecording": "Descartar la grabación",
+        "retryRecording": "Reintentar la transcripción",
+        "uploadFailed": "No se pudieron adjuntar esos archivos. Inténtalo de nuevo."
     },
     "secret": {
         "labelOne": "Credencial necesaria",

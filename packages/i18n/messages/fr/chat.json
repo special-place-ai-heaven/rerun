@@ -230,7 +230,9 @@
         "startFailed": "Impossible de démarrer l'enregistrement.",
         "nothingHeard": "Rien n'a été entendu dans cet enregistrement.",
         "voiceMessageFailed": "Impossible d'envoyer votre message vocal.",
-        "nothingRecorded": "Rien n'a été enregistré."
+        "nothingRecorded": "Rien n'a été enregistré.",
+        "microphone": "Micro...",
+        "transcribing": "Transcription..."
     },
     "agentInstall": {
         "started": "Installation lancée",
@@ -406,6 +408,14 @@
         },
         "subscribeToKeepWorking": "Abonnez-vous pour que vos coworkers continuent de travailler.",
         "resetsNextMonth": "Ils se renouvellent le mois prochain.",
+        "lifetime": {
+            "ownConnection": "Votre offre à vie fonctionne avec votre propre IA, et votre abonnement {plan} est connecté.",
+            "connectProvider": "Votre offre à vie fonctionne avec votre propre IA. Connectez Claude ou ChatGPT pour que vos coworkers continuent de travailler.",
+            "body": "Votre offre à vie fonctionne avec votre propre IA.",
+            "connectTitle": "Connecter votre IA",
+            "connectDescription": "Claude, ChatGPT ou une clé API.",
+            "connectCta": "Connecter"
+        },
         "trial": {
             "onPro": "Vous êtes sur Pro.",
             "resuming": "Votre coworker reprend la tâche.",

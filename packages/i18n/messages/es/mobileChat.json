@@ -50,8 +50,8 @@
             "tools": "¿A qué herramientas tienes acceso?"
         },
         "team": {
-            "greeting": "Hola, soy Rerun",
-            "greetingNamed": "Hola {firstName}, soy Rerun",
+            "greeting": "Hola, soy tu Chief of Staff",
+            "greetingNamed": "Hola {firstName}, soy tu Chief of Staff",
             "greetingWithTeam": "{greeting}. Este es tu equipo.",
             "emptySubtitle": "Aún no tienes coworkers. Cuéntame un trabajo que delegarías y crearé el primero.",
             "buildPrompt": "Créame un coworker que ",
@@ -135,7 +135,7 @@
             }
         },
         "retry": "Reintentar",
-        "role": "El asistente de tu workspace",
+        "role": "Tu Chief of Staff",
         "unreachableBody": "Revisa tu conexión e inténtalo de nuevo.",
         "unreachableTitle": "No pudimos conectar con Rerun"
     },
@@ -145,14 +145,18 @@
         "conversations": "Conversaciones",
         "coworkerDetails": "Detalles del coworker",
         "earlier": "Anteriores",
-        "menuLabel": "{name}, {title}, conversaciones",
+        "general": "General",
+        "identityLabel": "{name}, {title}",
         "newChat": "Nuevo chat",
         "newConversation": "Nueva conversación",
+        "newThread": "Nuevo hilo",
         "sections": {
             "needs-you": "Te necesita",
             "new": "Sin leer",
             "running": "En curso"
-        }
+        },
+        "threadCount": "{count, plural, one {# hilo} other {# hilos}}",
+        "threads": "Hilos"
     },
     "markdown": {
         "code": "código",
@@ -162,7 +166,7 @@
         "image": "Imagen"
     },
     "messages": {
-        "askRerun": "Pregunta a Rerun",
+        "askRerun": "Pregunta a tu Chief of Staff",
         "badResponse": "Mala respuesta",
         "compacting": "Compactando",
         "copy": "Copiar",
@@ -208,7 +212,7 @@
         "answerPlaceholder": "Responder a {name}",
         "attachFailed": "No se pudieron adjuntar los archivos",
         "defaultModel": "Predeterminado · {model}",
-        "foremanPlaceholder": "Pregúntale lo que quieras a Rerun",
+        "foremanPlaceholder": "Pregunta lo que quieras a tu Chief of Staff",
         "loadFailed": "No pudimos cargar esta conversación.",
         "loading": "Cargando la conversación",
         "messagePlaceholder": "Escribir a {name}",
@@ -249,6 +253,19 @@
         "privacy": "Las cuentas en las que inicias sesión se quedan en el navegador de este coworker, en tu máquina.",
         "skip": "Omitir",
         "skipTakeover": "Omitir el control del navegador"
+    },
+    "threadBranch": {
+        "needs": "Te necesita",
+        "error": "Error",
+        "running": "En curso",
+        "open": "Abrir el hilo {title}",
+        "opener": {
+            "schedule": "Ejecución programada · {name}",
+            "trigger": "Webhook · {name}",
+            "askedBy": "Pedido por {name}",
+            "askedByUnknown": "Pedido por otro coworker",
+            "started": "Inició un hilo"
+        }
     },
     "voice": {
         "copyTranscript": "Copiar la transcripción",

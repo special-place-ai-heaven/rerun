@@ -1,6 +1,5 @@
 import { parseQuery, searchItems, type Box, type ConversationHit } from '@rerun/contracts'
 import { router } from 'expo-router'
-import { SymbolView } from 'expo-symbols'
 import { useEffect, useMemo, useState } from 'react'
 import { Pressable, ScrollView, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -15,8 +14,10 @@ import { ForemanOrb } from '@/components/orb/ForemanOrb'
 import { lineOf, minutesSince, moodStatus, toHomeCoworkers, type HomeCoworker } from '@/components/home/board'
 import { CoworkerRow } from '@/components/home/CoworkerRow'
 import { SectionHeader } from '@/components/home/SectionHeader'
+import { usePaneInsets } from '@/components/layout/PaneSize'
 import { AppText } from '@/components/ui/AppText'
 import { GlassButton } from '@/components/ui/GlassButton'
+import { Icon } from '@/components/ui/Icon'
 import { cachedBoard } from '@/data/local-cache'
 import { useTimeAgo } from '@/lib/time'
 import { fonts, radius, spacing } from '@/theme/tokens'
@@ -102,6 +103,7 @@ function useTeam(): Team | null {
 export default function Search() {
     const theme = useTheme()
     const insets = useSafeAreaInsets()
+    const pane = usePaneInsets()
     const team = useTeam()
     const t = useTranslations('mobileHome')
     const [query, setQuery] = useState('')
@@ -123,11 +125,11 @@ export default function Search() {
     }
 
     return (
-        <View style={{ flex: 1, backgroundColor: theme.background, paddingTop: insets.top + spacing.sm }}>
+        <View style={{ flex: 1, backgroundColor: theme.background, paddingTop: insets.top + spacing.sm, paddingLeft: pane.left, paddingRight: pane.right }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md }}>
-                <GlassButton symbol="chevron.left" label={t('search.back')} onPress={() => router.back()} />
+                <GlassButton symbol="chevron-left" label={t('search.back')} onPress={() => router.back()} />
                 <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, height: 44, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: theme.muted }}>
-                    <SymbolView name="magnifyingglass" size={15} tintColor={theme.mutedForeground} />
+                    <Icon name="search" size={15} color={theme.mutedForeground} />
                     <TextInput value={query} onChangeText={setQuery} placeholder={t('search.placeholder')} placeholderTextColor={theme.mutedForeground} autoFocus autoCorrect={false} autoCapitalize="none" returnKeyType="search" clearButtonMode="while-editing" style={{ flex: 1, fontFamily: fonts.regular, fontSize: 16, color: theme.foreground }} />
                 </View>
             </View>
@@ -147,7 +149,7 @@ export default function Search() {
                 )}
                 {foundCoworkers.length > 0 && (
                     <>
-                        <SectionHeader label={t('search.coworkers')} count={foundCoworkers.length} collapsed={collapsed.includes('coworkers')} onToggle={() => toggle('coworkers')} divided={asked.length > 0 && scope !== 'agents'} />
+                        <SectionHeader label={t('search.coworkers')} count={foundCoworkers.length} collapsed={collapsed.includes('coworkers')} onToggle={() => toggle('coworkers')} />
                         {!collapsed.includes('coworkers') && foundCoworkers.map(coworker => (
                             <CoworkerRow key={coworker.id} coworker={{ id: coworker.id, kind: 'coworker', name: coworker.name, status: moodStatus(coworker) }} line={lineOf(coworker, t)} minutesAgo={minutesSince(coworker.latest?.updatedAt)} unread={coworker.pending > 0} onPress={() => openCoworker(coworker)} />
                         ))}
@@ -155,7 +157,7 @@ export default function Search() {
                 )}
                 {hits.length > 0 && (
                     <>
-                        <SectionHeader label={t('search.conversations')} count={hits.length} collapsed={collapsed.includes('conversations')} onToggle={() => toggle('conversations')} divided />
+                        <SectionHeader label={t('search.conversations')} count={hits.length} collapsed={collapsed.includes('conversations')} onToggle={() => toggle('conversations')} />
                         {!collapsed.includes('conversations') && hits.map(hit => (
                             <ConversationRow key={hit.id} hit={hit} coworker={byId.get(hit.agentId)} onPress={() => router.push({ pathname: '/chat/[id]', params: { id: hit.id, to: hit.agentId } })} />
                         ))}

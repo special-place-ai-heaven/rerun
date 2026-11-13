@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { CLIENT_PLATFORMS, type ClientPlatform } from './client.js'
 import { conversationMessageSchema } from './conversation.js'
 import { INTAKE_KINDS } from './onboarding-intake.js'
 import { TEMPLATE_CATEGORIES } from './template-display.js'
@@ -7,6 +8,9 @@ import { TEMPLATE_CATEGORIES } from './template-display.js'
 // The foreman lives on every engine under this fixed id, outside the agent index: the board, the
 // `call_agent` roster and `GET /agents` never see it.
 export const FOREMAN_AGENT_ID = 'foreman'
+
+// What the user calls it. `foreman` stays the id, the kind and the route everywhere.
+export const FOREMAN_DISPLAY_NAME = 'Chief of Staff'
 
 // Carries the brief's `hubToken` on the foreman's calls to the hub, which signed it: the engine key
 // alone does not prove the caller is the foreman.
@@ -47,10 +51,14 @@ export const FOREMAN_PHASES = ['waitlist', 'discover', 'plan', 'trial', 'build',
 export const foremanPhaseSchema = z.enum(FOREMAN_PHASES)
 export type ForemanPhase = z.infer<typeof foremanPhaseSchema>
 
-// Where the onboarding is walked. The app sells nothing, so the hub keeps every price, card and
+// Where the onboarding is walked. The mobile app sells nothing, so the hub keeps every price, card and
 // payment out of what it says there, and its trial starts without a card.
-export const foremanClientSchema = z.enum(['web', 'ios'])
+export const foremanClientSchema = z.enum(['web', ...CLIENT_PLATFORMS])
 export type ForemanClient = z.infer<typeof foremanClientSchema>
+
+export function isMobileClient(client: ForemanClient | null | undefined): client is ClientPlatform {
+    return (CLIENT_PLATFORMS as readonly string[]).includes(client ?? '')
+}
 
 // GET /api/chat/foreman/state.
 export const foremanStateSchema = z.looseObject({ surface: foremanSurfaceSchema, phase: foremanPhaseSchema, firstName: z.string() })

@@ -35,10 +35,7 @@
         "askAnything": "Pregunta lo que quieras"
     },
     "header": {
-        "account": "Cuenta",
-        "view": "Vista",
-        "recent": "Recientes",
-        "byBox": "Por Box"
+        "account": "Cuenta"
     },
     "account": {
         "preferences": "Preferencias",
@@ -69,7 +66,7 @@
         "title": "Buscar",
         "back": "Atrás",
         "placeholder": "Buscar coworkers y conversaciones",
-        "askRerun": "Preguntar a Rerun",
+        "askRerun": "Pregunta a tu Chief of Staff",
         "quotedAsk": "“{query}”",
         "coworkers": "Coworkers",
         "conversations": "Conversaciones",

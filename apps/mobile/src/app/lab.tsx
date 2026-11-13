@@ -1,5 +1,4 @@
 import type { InboxItem, SkillProposal, SkillProposalStatus, WorkspaceSummary } from '@rerun/contracts'
-import { GlassView } from 'expo-glass-effect'
 import { Link, type Href } from 'expo-router'
 import type { ReactNode } from 'react'
 import { ScrollView, View } from 'react-native'
@@ -31,6 +30,7 @@ import { BUDDY_MOODS } from '@/components/buddy/look'
 import { CodeField } from '@/components/auth/CodeField'
 import { PhoneField } from '@/components/auth/PhoneField'
 import { ForemanOrb } from '@/components/orb/ForemanOrb'
+import { GlassSurface } from '@/components/ui/GlassSurface'
 import { PillButton } from '@/components/ui/PillButton'
 import { UpdateRequired } from '@/components/update/UpdateRequired'
 import { AppText } from '@/components/ui/AppText'
@@ -94,6 +94,11 @@ const SCREENS: { label: string; href: Href }[] = [
     { label: 'Viewer: photos, PDF', href: '/lab-markdown?part=viewer' },
     { label: 'Message times, light', href: '/lab-message-times' },
     { label: 'Message times, dark', href: '/lab-message-times?scheme=dark' },
+    { label: 'Icons', href: '/lab-icons' },
+    { label: 'Icons, dark', href: '/lab-icons?scheme=dark' },
+    { label: 'Icons, 24 pt', href: '/lab-icons?size=24' },
+    { label: 'Controls: menus, picker, pills', href: '/lab-controls' },
+    { label: 'Controls, dark', href: '/lab-controls?scheme=dark' },
     { label: 'Rerun on the Home', href: '/lab-foreman' },
     { label: 'Rerun chat, conversation', href: '/lab-chat?coworker=foreman&tabs=1&state=conversation' },
     { label: 'Rerun chat, running', href: '/lab-chat?coworker=foreman&tabs=1&state=running' },
@@ -108,10 +113,21 @@ const SCREENS: { label: string; href: Href }[] = [
     { label: 'Chat, streaming', href: '/lab-chat?tabs=3&active=1&state=streaming' },
     { label: 'Chat, loading', href: '/lab-chat?tabs=3&active=1&state=loading' },
     { label: 'Chat, approval', href: '/lab-chat?tabs=3&active=1&state=approval' },
+    { label: 'Threads, General', href: '/lab-threads' },
+    { label: 'Threads, General, dark', href: '/lab-threads?scheme=dark' },
+    { label: 'Threads, General with no message yet', href: '/lab-threads?general=empty' },
+    { label: 'Threads, General alone', href: '/lab-threads?general=empty&threads=none' },
     { label: 'Conversations A, native menu', href: '/lab-conversations?variant=a' },
     { label: 'Conversations B, sheet by date', href: '/lab-conversations?variant=b' },
     { label: 'Conversations C, sheet by state', href: '/lab-conversations?variant=c' },
     { label: 'Coworker details', href: '/lab-coworker?state=normal' },
+    { label: 'Side insets, Home', href: '/lab-insets?screen=home' },
+    { label: 'Side insets, coworker details', href: '/lab-insets?screen=coworker' },
+    { label: 'Side insets, chat', href: '/lab-insets?screen=chat' },
+    { label: 'Side insets, onboarding', href: '/lab-insets?screen=onboarding' },
+    { label: 'Side insets, no plan', href: '/lab-insets?screen=noplan' },
+    { label: 'Side insets, split, coworker details', href: '/lab-insets?screen=coworker&split=1' },
+    { label: 'Side insets, split, chat, dark', href: '/lab-insets?screen=chat&split=1&scheme=dark' },
     { label: 'Coworker details, loading', href: '/lab-coworker?state=loading' },
     { label: 'Coworker details, apps to connect', href: '/lab-coworker?state=to-connect' },
     { label: 'Coworker details, nothing yet', href: '/lab-coworker?state=empty' },
@@ -223,9 +239,9 @@ function LabRecorderRow({ status, error = null }: { status: 'starting' | 'record
         <View style={{ gap: spacing.sm }}>
             <VoiceRecorderBar status={status} error={error} getLiveState={labLiveState} />
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <RoundButton symbol="xmark" label="Discard recording" tone="plain" disabled={status === 'processing'} onPress={noop} />
+                <RoundButton symbol="x" label="Discard recording" tone="plain" disabled={status === 'processing'} onPress={noop} />
                 <View style={{ flex: 1 }} />
-                {status === 'failed' ? <RoundButton symbol="arrow.clockwise" label="Retry" tone="primary" onPress={noop} /> : <RoundButton symbol="arrow.up" label="Send" tone="primary" busy={status !== 'recording'} onPress={noop} />}
+                {status === 'failed' ? <RoundButton symbol="rotate-cw" label="Retry" tone="primary" onPress={noop} /> : <RoundButton symbol="arrow-up" label="Send" tone="primary" busy={status !== 'recording'} onPress={noop} />}
             </View>
         </View>
     )
@@ -257,7 +273,7 @@ function Pieces({ scheme }: { scheme: ColorScheme }) {
                     {['agent-scout', 'agent-ledger', 'agent-pulse', 'agent-inbox', 'agent-recap'].map(id => (
                         <CoworkerRow key={id} coworker={byId(id)} line={statusLine(byId(id), latestOf(id))} minutesAgo={byId(id).updatedMinutesAgo} unread={byId(id).unread} onPress={noop} />
                     ))}
-                    <SectionHeader label="Coworkers" count={3} collapsed onToggle={noop} divided />
+                    <SectionHeader label="Coworkers" count={3} collapsed onToggle={noop} />
                 </View>
                 <View style={{ flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.lg }}>
                     <LabChip coworker={byId('agent-pulse')} session={{ id: 'pulse-1', title: 'LinkedIn post on pricing', running: true, empty: false }} active />
@@ -269,7 +285,7 @@ function Pieces({ scheme }: { scheme: ColorScheme }) {
                     <RunStatus coworker={byId('agent-pulse')} phase="working" />
                 </View>
                 <View style={{ gap: spacing.sm, paddingHorizontal: spacing.md }}>
-                    <LabComposer placeholder="Ask Rerun anything" />
+                    <LabComposer placeholder="Ask your Chief of Staff anything" />
                     <LabComposer placeholder="Message Pulse" running />
                     <LabComposer placeholder="Message Pulse" value="Make it weekly instead" />
                     <LabComposer placeholder="Message Pulse" value="And add the Q1 renewals" running />
@@ -303,7 +319,7 @@ function Controls({ scheme }: { scheme: ColorScheme }) {
                 ))}
                 <View style={{ gap: spacing.sm }}>
                     <Button label="New chat" symbol="plus" size="lg" onPress={noop} />
-                    <Button label="Continue with email" variant="outline" size="lg" symbol="envelope" onPress={noop} />
+                    <Button label="Continue with email" variant="outline" size="lg" symbol="mail" onPress={noop} />
                     <Button label="Sending" size="lg" loading onPress={noop} />
                     <Button label="Disabled" size="lg" disabled onPress={noop} />
                     <Button label="Disabled" variant="outline" size="lg" disabled onPress={noop} />
@@ -332,9 +348,9 @@ function Controls({ scheme }: { scheme: ColorScheme }) {
 
 function LabChip({ coworker, session, active }: { coworker: Coworker; session: ChatTab; active: boolean }) {
     return (
-        <GlassView style={{ borderRadius: GLASS_BUTTON_SIZE / 2, overflow: 'hidden' }}>
+        <GlassSurface style={{ borderRadius: GLASS_BUTTON_SIZE / 2, overflow: 'hidden' }}>
             <ChipPage coworker={coworker} session={session} active={active} width={170} />
-        </GlassView>
+        </GlassSurface>
     )
 }
 

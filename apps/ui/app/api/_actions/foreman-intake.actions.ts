@@ -1,6 +1,6 @@
 'use server'
 
-import { SOFTWARE_STUDIO, type TemplateCategory } from '@rerun/contracts'
+import { isTemplateCategory, SOFTWARE_STUDIO, type TemplateCategory } from '@rerun/contracts'
 
 import { requireWorkspaceContext } from '@/app/api/_auth/ownership'
 import { decideIndustry } from '@/lib/company/decide-industry'
@@ -9,7 +9,6 @@ import { analyzeCompanyProfile } from '@/lib/company/profile'
 import { mergeForeman, readAnswers, saveForemanProfile, stampWorkspaceOnboarded } from '@/lib/foreman/profile'
 import { takeIntakeCall } from '@/lib/onboarding/anonymous-intake-quota'
 import { DEFAULT_BOX_NAMES } from '@/lib/onboarding/box-name-suggestions'
-import { isTemplateCategory } from '@/lib/onboarding/industries'
 import { clampBoxNames, intakeBoxes, intakeIndustry, type ForemanIntake } from '@/lib/onboarding/intake'
 import { proposeBoxNames } from '@/lib/onboarding/propose-boxes'
 

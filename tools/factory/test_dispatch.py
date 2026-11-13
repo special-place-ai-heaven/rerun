@@ -167,6 +167,7 @@ class Flow(Base):
         self.assertEqual(agent, "r1")
         self.assertIn("pull request #42 of rerun, for job #5", msg)
         self.assertIn("at commit abcdef1.", msg)
+        self.assertIn("Do not wait for them", msg)  # the checks are the dispatcher's gate, not the reviewer's
         self.assertEqual(self.state(), "reviewing")
 
     def test_no_pr_line_blocks_with_the_last_line(self):

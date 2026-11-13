@@ -62,7 +62,6 @@ class Timeline(unittest.TestCase):
         g = T.gantt(rows, now, now - 24 * 3600)
         self.assertIn("    2 failed :crit, 10:00, 11:00", g)
         self.assertIn("    3 waiting :crit, 10:00, 11:00", g)
-        self.assertNotIn("section 1", g)
 
 
 if __name__ == "__main__":

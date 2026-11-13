@@ -336,7 +336,10 @@ class Dispatcher:
             g = r.get("goal")
             j["not_met"] = None
             if isinstance(g, dict) and g.get("state") == "not_met":
-                j["not_met"] = "goal not met after %s answers: %s" % (g.get("turns") or 3, str(g.get("reason") or "no reason given")[:150])
+                # The engine's goal record carries one verdict per checked answer; the last one says why.
+                verdicts = [v for v in g.get("verdicts") or [] if isinstance(v, dict)]
+                why = str((verdicts[-1] if verdicts else {}).get("reason") or "no reason given")[:150]
+                j["not_met"] = "goal not met after %s answers: %s" % (len(verdicts) or "its", why)
             return r.get("output") or ""
         why = "run %s of %s ended %s: %s" % (j["run"], self.names.get(j["agent"], j["agent"][:8]), r.get("status"), str(r.get("error") or "-")[:120])
         if j.get("attempt", 1) >= 2:

@@ -129,6 +129,13 @@ def make_gh(token, run=subprocess.run):
     return call
 
 
+def depends_on(issue):
+    """Issue numbers on the first 'Depends on:' line of the body (own number ignored); none when there is no such line."""
+    m = re.search(r"(?mi)^[^\n]*?Depends on(?:\*\*)?\s*:[^\n]*", issue.get("body") or "")
+    nums = [int(n) for n in re.findall(r"#(\d+)", m.group(0))] if m else []
+    return sorted({n for n in nums if n != issue["number"]})
+
+
 def load_state(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -203,7 +210,9 @@ class Dispatcher:
         if room <= 0:
             return
         issues = json.loads(self.gh(["issue", "list", "-R", self.repo, "--label", self.label, "--state", "open",
-                                     "--json", "number,title", "--limit", "100"]))
+                                     "--json", "number,title,body", "--limit", "100"]))
+        open_numbers = None
+        waiting = self.state.setdefault("waiting", {})
         for i in sorted(issues, key=lambda i: i["number"]):
             if room <= 0:
                 break
@@ -211,6 +220,18 @@ class Dispatcher:
             # An ended job lost its label when it was reported: the label being back means "run it again".
             if old and not (old["state"] in END and old.get("relabelled")):
                 continue
+            deps = depends_on(i)
+            if deps:
+                if open_numbers is None:
+                    open_numbers = {o["number"] for o in json.loads(self.gh(
+                        ["issue", "list", "-R", self.repo, "--state", "open", "--json", "number", "--limit", "1000"]))}
+                unmet = [d for d in deps if d in open_numbers]
+                if unmet:
+                    if waiting.get(str(i["number"])) != unmet:
+                        waiting[str(i["number"])] = unmet
+                        self.save()
+                        log(i["number"], "waits on " + ", ".join("#%d" % d for d in unmet))
+                    continue
             if self.cfg.get("auto_plan_marker", True):
                 v = json.loads(self.gh(["issue", "view", str(i["number"]), "-R", self.repo, "--json", "body,comments"]))
                 texts = [v.get("body") or ""] + [c.get("body") or "" for c in v.get("comments") or []]
@@ -218,6 +239,7 @@ class Dispatcher:
                     self.gh(["issue", "comment", str(i["number"]), "-R", self.repo, "--body",
                              "SMALL FIX: taken by the factory dispatcher on the owner's label."])
                     log(i["number"], "plan line posted")
+            waiting.pop(str(i["number"]), None)
             self.state["jobs"][str(i["number"])] = {"issue": i["number"], "title": i["title"], "state": "queued", "round": 1}
             room -= 1
             self.save()

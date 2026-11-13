@@ -26,6 +26,9 @@ class ImageFiles(unittest.TestCase):
     def test_runs_unprivileged(self):
         self.assertRegex(self.text, r"(?m)^USER\s+(?!root)\S+")
 
+    def test_runner_uid_pinned(self):
+        self.assertRegex(self.text, r"useradd\b[^\n]*--uid 10001\b")
+
 
 if __name__ == "__main__":
     unittest.main()

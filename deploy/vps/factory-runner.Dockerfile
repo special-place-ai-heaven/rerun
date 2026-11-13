@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git gh ca-certi
       'case "$1" in Username*) echo x-access-token ;; *) echo "$FACTORY_GIT_TOKEN" ;; esac' \
       > /usr/local/bin/git-askpass \
     && chmod 755 /usr/local/bin/git-askpass \
-    && useradd --system --create-home runner
+    && useradd --system --uid 10001 --create-home runner
 ENV GIT_ASKPASS=/usr/local/bin/git-askpass GIT_TERMINAL_PROMPT=0
 USER runner
 WORKDIR /app

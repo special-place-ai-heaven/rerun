@@ -7,7 +7,7 @@
 #
 # The GitHub token is not in the environment: the host key file named by FACTORY_GH_TOKEN_FILE in
 # deploy/vps/.env is mounted read-only as the secret gh_token at /run/secrets/gh_token. On the host that
-# file is owned by the container's runner uid, mode 0400, in a directory only that uid enters.
+# file is owned by the container's runner uid (10001), mode 0400, in a directory only that uid enters.
 #
 # Deliberately absent: published ports, the docker socket, privileged mode, added capabilities,
 # host paths other than the read-only tools/factory mount, the live engine key.

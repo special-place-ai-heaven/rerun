@@ -276,7 +276,7 @@ The repository holds two halves of this machine that do not know each other.
 | State | JSON file, no history | `store.py` ledger | none; one writer already |
 | May this start? | first free name, dependency check | `readyq.eligible` with types added | the worker type on every task |
 | Stage ended? | the run's last line, plus the goal | `evidence.py` and the goal | none |
-| Clocks | none per run | `limits.run_outcome` | an account tool to cancel a run (the engine route exists) |
+| Clocks | none per run | `limits.run_outcome` | an account tool to cancel a run: none of the 41 account tools does, and the engine route `POST .../runs/:rid/cancel` exists. The stall clock needs nothing new: `get_run` already returns the live step count, and the delegator notes when it last moved |
 | Retry | one resend | the classes of section 3, with `store.attempts` | none |
 | Who reviews | first free reviewer | `roster.required` by the files in the diff | none |
 | Merge | checks green, verdict, head match | the same plus `gate.py` | none |

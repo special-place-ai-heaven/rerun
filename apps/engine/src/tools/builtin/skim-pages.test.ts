@@ -6,7 +6,7 @@ import { vi } from 'vitest'
 process.env.RERUN_DATA_DIR = mkdtempSync(resolve(tmpdir(), 'rerun-skim-'))
 
 const { beforeAll, describe, expect, it } = await import('vitest')
-const { skimPagesTools } = await import('./skim-pages.js')
+const { skimPagesTools, skimPagesEnabled } = await import('./skim-pages.js')
 const { createScreenshotStore } = await import('../../runtime/screenshots.js')
 const { workspaceDir } = await import('../../config/paths.js')
 
@@ -81,5 +81,13 @@ describe('skim_pages', () => {
         expect(r.tree).not.toContain('m.js')
         expect(r.exact.ids).toEqual([])
         expect(spy).toHaveBeenCalledOnce()
+    })
+})
+
+describe('skimPagesEnabled', () => {
+    it('is off unless skim is true', () => {
+        expect(skimPagesEnabled({ config: {} } as any)).toBe(false)
+        expect(skimPagesEnabled({ config: { pages: { skim: false } } } as any)).toBe(false)
+        expect(skimPagesEnabled({ config: { pages: { skim: true } } } as any)).toBe(true)
     })
 })

@@ -72,7 +72,6 @@ def runner_started_at():
 def _runs(eng, fires, cfg_agents):
     """{run_id: engine run row or None} for every fired run id."""
     out = {}
-    agents = {f.get("coworker") for f in fires} - {""}
     for f in fires:
         rid = f.get("run_id")
         if not rid or rid in out:

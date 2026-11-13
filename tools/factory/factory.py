@@ -553,7 +553,6 @@ def wt_context():
     if not cwd.startswith(WT + "/"):
         die("run this inside a worktree under %s (cd there in the same shell call)" % WT)
     top = run([GIT, "rev-parse", "--show-toplevel"], cwd=cwd).stdout.strip()
-    repo = top[len(WT) + 1:].split("/")[0]
     branch = run([GIT, "rev-parse", "--abbrev-ref", "HEAD"], cwd=top).stdout.strip()
     base = run([GIT, "config", "branch.%s.factorybase" % branch], cwd=top, check=False).stdout.strip()
     m = re.fullmatch(r"chunk/(\d+)-([a-z0-9]+)", branch)

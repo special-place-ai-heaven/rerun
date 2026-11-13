@@ -483,6 +483,21 @@ class Runner:
         return {"merged": merged, "busy": busy, "stages": stages, "leases": self.st.open_leases(),
                 "fired": self.st.fire_count(job), "cfg": self.cfg}
 
+TOKEN_FILE = "/run/secrets/gh_token"
+
+def load_token(cfg):
+    """Read the key file named by cfg gh_token_file once and put its content in GH_TOKEN and FACTORY_GIT_TOKEN.
+    A missing, unreadable or empty file raises RuntimeError naming the path only, never the content."""
+    path = cfg.get("gh_token_file") or TOKEN_FILE
+    try:
+        with open(path, encoding="utf-8") as f:
+            tok = f.read().strip()
+    except OSError as e:
+        raise RuntimeError("token file %s cannot be read (%s)" % (path, e.strerror or type(e).__name__))
+    if not tok:
+        raise RuntimeError("token file %s is empty" % path)
+    os.environ["GH_TOKEN"] = os.environ["FACTORY_GIT_TOKEN"] = tok
+
 def build(cfg=None, eng=None, clock=time.time, gh=None):
     """gh: the one GitHub client (ghclient.Client) for open_pr and issues; default made from cfg github_api / repo, token from GH_TOKEN."""
     cfg = load_runtime(cfg)
@@ -583,6 +598,11 @@ def main(argv=None):
             print("setup failed: %s" % ("unexpected engine answer" if isinstance(e, KeyError) else e), file=sys.stderr)
             return 1
         return 0
+    try:
+        load_token(cfg)
+    except RuntimeError as e:
+        print("runner: cannot start: %s" % e, file=sys.stderr)
+        return 1
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())

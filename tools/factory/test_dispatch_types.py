@@ -136,9 +136,10 @@ class Types(unittest.TestCase):
         self.assertIn("DIETER", str(e.exception))
         # Every coworker carries an id: list_agents is not called.
         c = {"repo": "o/r", "label": "factory", "types": {"coder": {"max_jobs": 1, "coworkers": [{"id": "b1", "name": "B1"}]}}}
-        c.update(ledger_file=":memory:", json_state_file="/nonexistent/x.json")
         asked = []
-        D.Dispatcher(c, lambda t, a: asked.append(t), lambda a: "[]").close()
+        with tempfile.TemporaryDirectory() as d:
+            c.update(ledger_file=os.path.join(d, "ledger.db"), json_state_file=os.path.join(d, "dispatch.json"))
+            D.Dispatcher(c, lambda t, a: asked.append(t), lambda a: "[]").close()
         self.assertEqual(asked, [])
 
 

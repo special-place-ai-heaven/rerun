@@ -2,7 +2,7 @@
 restart mid-job without a double fire."""
 import os, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import runner_loop as R, store as S, limits as L
+import runner_loop as R, limits as L
 
 T0 = 1_800_000_000.0
 

@@ -2,7 +2,7 @@
 An intent row is written and committed BEFORE a stage is fired; fired() adds the run id after.
 A crash in between leaves an intent with no run id: pending() lists it, the caller decides
 (resolve it against the engine, or refire once: refire count). No network, no engine key here."""
-import fcntl, json, os, sqlite3, time
+import fcntl, json, sqlite3, time
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS fires(

@@ -10,6 +10,7 @@ const { readFile } = await import('node:fs/promises')
 const { createServer } = await import('../server.js')
 const { createAgent } = await import('../../agents/factory.js')
 const { duplicateAgent } = await import('../../agents/duplicate.js')
+const { setSkillEnabled } = await import('../../skills/switch.js')
 const { configPath } = await import('../../config/paths.js')
 const { skillsListSchema } = await import('@rerun/contracts')
 
@@ -41,6 +42,15 @@ describe('skill switch', () => {
         expect((await put('alpha', { enabled: false })).status).toBe(200)
         expect((await put('alpha', { enabled: true })).status).toBe(200)
         expect(await bytes()).toBe(first)
+    })
+
+    it('keeps both changes when two switches are set at the same time', async () => {
+        const other = (await createAgent({ config: { name: 'switch-race' } })).id
+        const root = `/agents/${other}/skills`
+        await send('POST', '', { name: 'Gamma', body: 'g' }, root)
+        await send('POST', '', { name: 'Delta', body: 'd' }, root)
+        await Promise.all([setSkillEnabled(other, 'gamma', false), setSkillEnabled(other, 'delta', false)])
+        expect(JSON.parse(await bytes(other)).disabledSkills).toEqual(['delta', 'gamma'])
     })
 
     it('shows the flag in both lists and stores the slug once', async () => {

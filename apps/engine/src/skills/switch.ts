@@ -1,5 +1,6 @@
 import type { AgentConfig } from '@rerun/contracts'
 import { readAgentConfig } from '../agents/loader.js'
+import { withAgentLock } from '../agents/lock.js'
 import { writeAgentConfig } from '../agents/config-write.js'
 
 export function disabledSkillSet(config: Pick<AgentConfig, 'disabledSkills'>): Set<string> {
@@ -12,18 +13,23 @@ async function store(agentId: string, config: AgentConfig, off: Set<string>): Pr
     await writeAgentConfig(agentId, next)
 }
 
-export async function setSkillEnabled(agentId: string, slug: string, enabled: boolean): Promise<void> {
-    const config = await readAgentConfig(agentId)
-    const off = disabledSkillSet(config)
-    if (enabled) off.delete(slug)
-    else off.add(slug)
-    await store(agentId, config, off)
+// The agent lock is not reentrant: callers must not hold it already.
+export function setSkillEnabled(agentId: string, slug: string, enabled: boolean): Promise<void> {
+    return withAgentLock(agentId, async () => {
+        const config = await readAgentConfig(agentId)
+        const off = disabledSkillSet(config)
+        if (enabled) off.delete(slug)
+        else off.add(slug)
+        await store(agentId, config, off)
+    })
 }
 
 // A deleted skill must not leave its slug behind, or a new skill made under that name starts off.
-export async function forgetSkill(agentId: string, slug: string): Promise<void> {
-    const config = await readAgentConfig(agentId)
-    const off = disabledSkillSet(config)
-    if (!off.delete(slug)) return
-    await store(agentId, config, off)
+export function forgetSkill(agentId: string, slug: string): Promise<void> {
+    return withAgentLock(agentId, async () => {
+        const config = await readAgentConfig(agentId)
+        const off = disabledSkillSet(config)
+        if (!off.delete(slug)) return
+        await store(agentId, config, off)
+    })
 }

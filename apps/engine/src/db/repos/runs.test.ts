@@ -6,7 +6,7 @@ process.env.RERUN_DATA_DIR = mkdtempSync(resolve(tmpdir(), 'rerun-runs-'))
 process.env.RERUN_API_KEY = ''
 
 const { afterEach, describe, expect, it, vi } = await import('vitest')
-const { aggregateUsageByDay, bumpRunStep, cancelRun, failInterruptedRuns, failRun, finishRun, getRun, listRunsByAgent, setRunContext, startRun, updateRunLive } = await import('./runs.js')
+const { aggregateUsageByDay, bumpRunStep, cancelRun, failInterruptedRuns, failRun, finishRun, getRun, listRunsByAgent, setRunContext, setRunLineage, startRun, updateRunLive } = await import('./runs.js')
 
 afterEach(() => {
     vi.useRealTimers()
@@ -205,5 +205,27 @@ describe('aggregateUsageByDay', () => {
 
     it('is empty for an agent without runs', async () => {
         expect(await aggregateUsageByDay('nobody', null)).toEqual([])
+    })
+})
+
+describe('run lineage', () => {
+    it('round-trips the lineage fields and leaves them null at start', async () => {
+        const run = await startRun('lin', 's1', 'r-lin')
+        expect(run).toMatchObject({ initiatorAgentId: null, initiatorRunId: null, initiatorSessionId: null, initiatorUserId: null, jobRef: null, branch: null, copyIndex: null })
+        const patch = { initiatorAgentId: 'boss', initiatorRunId: 'r0', initiatorSessionId: 's0', initiatorUserId: 'u1', jobRef: 'rerun#128', branch: 'job/128', copyIndex: 2 }
+        await setRunLineage('lin', 'r-lin', patch)
+        expect(await getRun('lin', 'r-lin')).toMatchObject(patch)
+    })
+
+    it('filters by job and by branch', async () => {
+        await startRun('lin2', 's1', 'a')
+        await startRun('lin2', 's1', 'b')
+        await startRun('lin2', 's1', 'c')
+        await setRunLineage('lin2', 'a', { jobRef: 'rerun#1', branch: 'job/1' })
+        await setRunLineage('lin2', 'b', { jobRef: 'rerun#1', branch: 'job/other' })
+        await setRunLineage('lin2', 'c', { jobRef: 'rerun#2', branch: 'job/1' })
+        expect((await listRunsByAgent('lin2', { job: 'rerun#1' })).map(r => r.id).sort()).toEqual(['a', 'b'])
+        expect((await listRunsByAgent('lin2', { branch: 'job/1' })).map(r => r.id).sort()).toEqual(['a', 'c'])
+        expect((await listRunsByAgent('lin2', { job: 'rerun#1', branch: 'job/1' })).map(r => r.id)).toEqual(['a'])
     })
 })

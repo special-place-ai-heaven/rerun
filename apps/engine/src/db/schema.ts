@@ -51,6 +51,13 @@ export const runs = sqliteTable('runs', {
     startedAt: text('started_at').notNull(),
     finishedAt: text('finished_at'),
     error: text('error'),
+    initiatorAgentId: text('initiator_agent_id'),
+    initiatorRunId: text('initiator_run_id'),
+    initiatorSessionId: text('initiator_session_id'),
+    initiatorUserId: text('initiator_user_id'),
+    jobRef: text('job_ref'),
+    branch: text('branch'),
+    copyIndex: integer('copy_index'),
 })
 
 export const runSteps = sqliteTable('run_steps', {

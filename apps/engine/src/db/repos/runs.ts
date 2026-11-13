@@ -45,13 +45,15 @@ export async function getRun(agentId: string, id: string): Promise<RunRow | unde
     return rows[0]
 }
 
-export type RunFilter = { limit?: number; sessionId?: string; status?: string }
+export type RunFilter = { limit?: number; sessionId?: string; status?: string; job?: string; branch?: string }
 
-export async function listRunsByAgent(agentId: string, { limit = 50, sessionId, status }: RunFilter = {}): Promise<RunRow[]> {
+export async function listRunsByAgent(agentId: string, { limit = 50, sessionId, status, job, branch }: RunFilter = {}): Promise<RunRow[]> {
     const { db } = await getSystemDb(agentId)
     const conditions = [eq(runs.agentId, agentId)]
     if (sessionId) conditions.push(eq(runs.sessionId, sessionId))
     if (status) conditions.push(eq(runs.status, status))
+    if (job) conditions.push(eq(runs.jobRef, job))
+    if (branch) conditions.push(eq(runs.branch, branch))
     return db
         .select()
         .from(runs)
@@ -81,6 +83,13 @@ export async function startRun(agentId: string, sessionId: string, id: string = 
         startedAt: nowIso(),
         finishedAt: null,
         error: null,
+        initiatorAgentId: null,
+        initiatorRunId: null,
+        initiatorSessionId: null,
+        initiatorUserId: null,
+        jobRef: null,
+        branch: null,
+        copyIndex: null,
     }
     const { db } = await getSystemDb(agentId)
     await db.insert(runs).values(row)
@@ -90,6 +99,14 @@ export async function startRun(agentId: string, sessionId: string, id: string = 
 export type RunContextPatch = { provider: string; model: string; triggerSource: string; triggerSlug: string | null }
 
 export async function setRunContext(agentId: string, id: string, patch: RunContextPatch): Promise<void> {
+    const { db } = await getSystemDb(agentId)
+    await db.update(runs).set(patch).where(eq(runs.id, id))
+}
+
+export type RunLineagePatch = Partial<Pick<RunRow, 'initiatorAgentId' | 'initiatorRunId' | 'initiatorSessionId' | 'initiatorUserId' | 'jobRef' | 'branch' | 'copyIndex'>>
+
+export async function setRunLineage(agentId: string, id: string, patch: RunLineagePatch): Promise<void> {
+    if (Object.keys(patch).length === 0) return
     const { db } = await getSystemDb(agentId)
     await db.update(runs).set(patch).where(eq(runs.id, id))
 }

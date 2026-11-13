@@ -7,7 +7,8 @@ process.env.RERUN_API_KEY = ''
 
 const { describe, expect, it } = await import('vitest')
 const { createClient } = await import('@libsql/client')
-const { closeSystemDb, getSystemDb, systemDbExists } = await import('./systemDb.js')
+const { SYSTEM_DB_MIGRATIONS, closeSystemDb, getSystemDb, systemDbExists } = await import('./systemDb.js')
+const { migrateSqlite, sqliteVersion } = await import('./ladder.js')
 const { agentDataDir, systemDbPath } = await import('../config/paths.js')
 
 async function columnsOf(agentId: string, table: string): Promise<string[]> {
@@ -70,6 +71,42 @@ describe('getSystemDb on a legacy file', () => {
         const reopened = await getSystemDb('legacy')
         const res = await reopened.client.execute("SELECT source FROM sessions WHERE id = 's1'")
         expect(res.rows[0].source).toBe('trigger')
+    })
+})
+
+describe('run lineage migration', () => {
+    const LINEAGE = ['initiator_agent_id', 'initiator_run_id', 'initiator_session_id', 'initiator_user_id', 'job_ref', 'branch', 'copy_index']
+
+    it('adds the lineage columns and the job index to an existing db, once', async () => {
+        await seedLegacy('lineage')
+        const first = await getSystemDb('lineage')
+        expect(await columnsOf('lineage', 'runs')).toEqual(expect.arrayContaining(LINEAGE))
+        closeSystemDb('lineage')
+        const second = await getSystemDb('lineage')
+        const indexes = await second.client.execute("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'runs' AND name = 'runs_agent_job_started_idx'")
+        expect(indexes.rows).toHaveLength(1)
+        expect(first).not.toBe(second)
+    })
+
+    it('upgrades a db already at version 4 and changes nothing on a second open', async () => {
+        mkdirSync(agentDataDir('v4'), { recursive: true })
+        const old = createClient({ url: `file:${systemDbPath('v4')}` })
+        await migrateSqlite(old, SYSTEM_DB_MIGRATIONS.filter(step => step.version <= 4), systemDbPath('v4'))
+        expect(await sqliteVersion(old)).toBe(4)
+        old.close()
+
+        const first = await getSystemDb('v4')
+        const columns = await columnsOf('v4', 'runs')
+        expect(columns).toEqual(expect.arrayContaining(LINEAGE))
+        const indexSql = "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'runs_agent_job_started_idx'"
+        expect((await first.client.execute(indexSql)).rows).toHaveLength(1)
+        expect(await sqliteVersion(first.client)).toBe(5)
+        closeSystemDb('v4')
+
+        const second = await getSystemDb('v4')
+        expect(await columnsOf('v4', 'runs')).toEqual(columns)
+        expect((await second.client.execute(indexSql)).rows).toHaveLength(1)
+        expect(await sqliteVersion(second.client)).toBe(5)
     })
 })
 

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { providerSchema } from './agent.js'
 import { sessionSourceSchema } from './session.js'
 import { foremanBriefSchema } from './foreman.js'
+import { runGoalSchema } from './run-goal.js'
 
 // The engine has no notion of users: the hub names who typed a message and the engine keeps it as is.
 export const messageAuthorSchema = z.object({
@@ -30,6 +31,8 @@ export const chatRequestSchema = z.object({
     // The language the user reads the app in, sent with an install: its guide is the publisher's
     // words, so the coworker has nothing the user wrote to tell it from.
     userLanguage: z.string().optional(),
+    // What the final answer must end with. Checked by the engine; absent, no check.
+    goal: runGoalSchema.optional(),
 })
 
 export const contextOccupancySchema = z.object({

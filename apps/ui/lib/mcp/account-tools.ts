@@ -477,6 +477,16 @@ const AGENT_TOOL_DEFS = [
             required: ['agentId', 'runId'],
         },
     },
+    {
+        name: 'cancel_run',
+        description:
+            'Stops a running run of that coworker. A run that already ended is left as it is and is not an error: the answer carries its status and wasRunning false. Run statuses are running, done, error and cancelled (there is no queued state). wasRunning is true when the run was running just before this call.',
+        inputSchema: {
+            type: 'object',
+            properties: { agentId: { type: 'string' }, runId: { type: 'string' } },
+            required: ['agentId', 'runId'],
+        },
+    },
 
     {
         name: 'list_tables',

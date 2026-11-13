@@ -853,6 +853,15 @@
             "normal": "Normal",
             "detailed": "Detallado"
         },
+        "thinking": {
+            "label": "Nivel de razonamiento",
+            "helper": "Cuánto razona antes de responder. Más alto es más lento y más caro.",
+            "unsupported": "No se aplica en este proveedor.",
+            "none": "Sin definir",
+            "low": "Bajo",
+            "medium": "Medio",
+            "high": "Alto"
+        },
         "notifications": {
             "label": "Notificaciones",
             "choose": "Elige qué te llega"

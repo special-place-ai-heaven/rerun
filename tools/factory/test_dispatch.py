@@ -248,10 +248,20 @@ class Flow(Base):
         self.assertIn("merged pull request #42", self.w.issue(5)["comments"][-1])
         self.assertEqual(self.w.edits(5), [["issue", "edit", "5", "-R", "o/r", "--remove-label", "factory", "--add-label", "factory-done"]])
 
-    def test_failed_workflow_run_blocks_the_merge(self):
+    def test_failed_workflow_run_blocks_the_merge_and_goes_back_to_the_builder_once(self):
         self.to_checks()
         self.w.workflows[HEAD] = [wf("ci", "success", wid=1), wf("e2e", "failure", wid=2)]
         self.tick(2)
+        self.assertEqual(self.w.merges, [])
+        agent, msg, _ = self.w.sends[-1]
+        self.assertEqual(agent, "b1")
+        self.assertIn("checks failed", msg)
+        self.assertIn("e2e", msg)
+        self.assertEqual(self.state(), "fixing")
+        self.w.finish("b1", "PUSHED: 1234567")
+        self.tick(2)
+        self.w.finish("r1", "VERDICT: ACCEPT @abcdef1")
+        self.tick(2)  # the fake head is unchanged, so its checks fail a second time
         self.assertEqual(self.w.merges, [])
         self.assertEqual(self.state(), "failed")
         self.assertIn("e2e", self.w.issue(5)["comments"][-1])
@@ -490,6 +500,31 @@ class Hardening(Base):
         self.w.unlabelled.clear()
         self.tick()
         self.assertEqual(len(self.w.sends), sends + 1)
+        self.assertEqual(self.state(), "building")
+
+    def stopped_at_review(self):
+        self.to_review()
+        self.w.finish("r1", "VERDICT: BLOCKED @abcdef1: checks pending")
+        self.tick()
+        self.assertEqual(self.state(), "rejected")
+        return [s for s in self.w.sends if s[0] in self.builders]
+
+    def test_label_put_back_with_the_pull_request_still_open_goes_to_review_not_to_a_second_build(self):
+        builds = self.stopped_at_review()
+        self.w.unlabelled.clear()
+        self.tick(2)
+        self.assertEqual([s for s in self.w.sends if s[0] in self.builders], builds)
+        agent, msg, _ = self.w.sends[-1]
+        self.assertEqual(agent, "r1")
+        self.assertIn("pull request #42 of rerun", msg)
+        self.assertEqual(self.state(), "reviewing")
+
+    def test_label_put_back_after_its_pull_request_was_closed_builds_again(self):
+        builds = self.stopped_at_review()
+        self.w.pr_state = "CLOSED"
+        self.w.unlabelled.clear()
+        self.tick()
+        self.assertEqual(len([s for s in self.w.sends if s[0] in self.builders]), len(builds) + 1)
         self.assertEqual(self.state(), "building")
 
     def test_build_message_names_whose_words_are_instructions(self):

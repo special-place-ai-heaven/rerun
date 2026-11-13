@@ -55,6 +55,18 @@ describe('PATCH /agents/:id', () => {
         expect(res.status).toBe(400)
     })
 
+    it('persists a valid thinking level', async () => {
+        const { config } = await patchConfig({ thinkingLevel: 'high' })
+        expect(config.thinkingLevel).toBe('high')
+        expect((await patchConfig({ tools: { shell: false } })).config.thinkingLevel).toBe('high')
+    })
+
+    it('rejects a thinking level that is not low, medium or high', async () => {
+        const app = createServer()
+        const res = await app.request(`/agents/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ thinkingLevel: 'extreme' }) })
+        expect(res.status).toBe(400)
+    })
+
     it('repoints the agent at another box connection', async () => {
         const { config } = await patchConfig({ connectionId: 'cnx-other', provider: 'anthropic', model: 'claude-sonnet-4-6' })
         expect(config.connectionId).toBe('cnx-other')

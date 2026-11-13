@@ -164,6 +164,8 @@ export const agentConfigSchema = z.object({
     // two only say where to run it.
     model: z.string().nullable().default(null),
     verbosity: verbositySchema.default('normal'),
+    // How hard the model thinks: unset keeps the provider's own default. No default here, so a config saved without it stays byte-identical.
+    thinkingLevel: z.enum(['low', 'medium', 'high']).nullable().optional(),
     // The language of the agent's workspace, a short BCP 47 tag ("fr"): what it writes in when a run
     // was not started by a person and nobody has written in the session yet. The hub writes it from
     // `workspaces.locale`; null keeps the language of the run's instruction.

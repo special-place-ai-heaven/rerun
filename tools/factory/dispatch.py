@@ -242,10 +242,14 @@ class Dispatcher:
                              "SMALL FIX: taken by the factory dispatcher on the owner's label."])
                     log(i["number"], "plan line posted")
             waiting.pop(str(i["number"]), None)
-            self.state["jobs"][str(i["number"])] = {"issue": i["number"], "title": i["title"], "state": "queued", "round": 1}
+            job = {"issue": i["number"], "title": i["title"], "state": "queued", "round": 1}
+            if old and old.get("pr") and json.loads(self.gh(["pr", "view", str(old["pr"]), "-R", self.repo, "--json", "state"])).get("state") == "OPEN":
+                # Put back in with its pull request still open: that one is reviewed, a second build would open a duplicate.
+                job.update(state="review_wait", pr=old["pr"], builder=old.get("builder"))
+            self.state["jobs"][str(i["number"])] = job
             room -= 1
             self.save()
-            log(i["number"], "queued: " + i["title"][:120])
+            log(i["number"], ("back in at the review of #%s: " % job["pr"] if job.get("pr") else "queued: ") + i["title"][:120])
 
     # --- coworker runs
 
@@ -354,7 +358,13 @@ class Dispatcher:
         data = json.loads(self.gh(["api", "repos/%s/actions/runs?head_sha=%s&per_page=100" % (self.repo, j["head"])]))
         verdict, why = checks_verdict(data.get("workflow_runs") or [])
         if verdict == "FAIL":
-            return self.end(j, "failed", why)
+            if j.get("checks_fixed"):
+                return self.end(j, "failed", why)
+            return self.to(j, "fix_wait", why + "; back to the builder once", checks_fixed=True,
+                           review="Not a rejection of the change itself: GitHub's checks failed on commit %s (%s). Read the failed log "
+                                  "(`gh run list --commit %s`, then `gh run view <id> --log-failed`), fix the cause, run the failing test files, push. "
+                                  "A test that pins shipped behaviour is not edited to fit: where the failure says the change itself is wrong, end with BLOCKED."
+                                  % (j["head"][:7], why, j["head"]))
         if verdict == "WAIT":
             if self.now() - j["checks_since"] > self.cfg.get("checks_timeout_s", 1800):
                 self.end(j, "failed", "checks not passed after %d s: %s" % (self.cfg.get("checks_timeout_s", 1800), why))

@@ -25,9 +25,14 @@ def last_line(text):
 
 
 def final_line(out, prefixes):
-    """The last line of the output that starts with one of the prefixes, or None."""
-    found = [l.strip() for l in str(out or "").split("\n") if l.strip().startswith(tuple(prefixes))]
-    return found[-1] if found else None
+    """The last place where one of the prefixes starts a line or follows a space, up to the end of that line; or None.
+    The engine joins the text pieces of one answer with spaces, so a final line can sit at the end of a longer line."""
+    last = None
+    for p in prefixes:
+        for m in re.finditer(r"(?m)(?:^|(?<=\s))%s[^\n]*" % re.escape(p), str(out or "")):
+            if last is None or m.start() > last.start():
+                last = m
+    return last.group(0).strip() if last else None
 
 
 def blocked_reason(out):
@@ -36,7 +41,7 @@ def blocked_reason(out):
     if line:
         return line[:200]
     rest = [l.strip() for l in str(out or "").split("\n") if l.strip() and not l.strip().startswith("Tools:")]
-    return rest[-1][:200] if rest else "no final line"
+    return rest[-1][-200:] if rest else "no final line"
 
 
 GOALS = {
@@ -394,7 +399,7 @@ class Dispatcher:
             out = self.finished_run(j)
             if out is None:
                 return
-            verdict = (re.findall(r"(?m)^VERDICT:.*$", out) or [""])[-1]
+            verdict = final_line(out, ("VERDICT:",)) or ""
             if re.match(r"VERDICT:\s*ACCEPT", verdict):
                 self.to(j, "checks", "accepted at %s" % j["head"][:7], checks_since=self.now())
             elif re.match(r"VERDICT:\s*REJECT", verdict) and j["round"] == 1:

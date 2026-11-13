@@ -654,6 +654,23 @@ class Final(Base):
         self.w.finish("b1", out)
         self.tick()
 
+    # The engine joins the text pieces of one answer with spaces: a builder whose last message is only its final
+    # line (as the Final state block asks) gives an output where that line ends a longer line.
+    def test_pr_line_at_the_end_of_a_joined_line_goes_to_review(self):
+        self.build_out("Test first. Now the change. Commit and open PR. PR: https://github.com/o/r/pull/9")
+        self.assertIn(self.state(), ("review_wait", "reviewing"))
+
+    def test_blocked_at_the_end_of_a_joined_line_gives_its_reason(self):
+        self.build_out("wt new refused. BLOCKED: 16 builders are already active")
+        self.assertEqual(self.state(), "blocked")
+        self.assertIn("Reason: BLOCKED: 16 builders are already active", self.w.issue(5)["comments"][-1])
+
+    def test_verdict_at_the_end_of_a_joined_line_is_read(self):
+        self.to_review()
+        self.w.finish("r1", "Read the diff. Nothing blocks. VERDICT: ACCEPT @abcdef1")
+        self.tick()
+        self.assertEqual(self.state(), "checks")
+
     def test_blocked_reason_is_the_blocked_line_not_the_tools_footer(self):
         self.build_out("...\nBLOCKED: dev has no snapshot table\nTools: shell 4 calls")
         self.assertEqual(self.state(), "blocked")

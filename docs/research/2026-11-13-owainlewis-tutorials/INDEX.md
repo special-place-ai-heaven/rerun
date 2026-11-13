@@ -35,7 +35,7 @@ something the factory already does, or do not apply to it.
 | Card | It proposed | Checked against | Outcome |
 |---|---|---|---|
 | `software-factory` | tie the merge to the assessed commit, read checks from Actions and not from a same-named status, an empty check list is not a pass, text on a pull request is evidence and not instruction | `tools/factory/dispatch.py`: `--match-head-commit`, `actions/runs?head_sha=`, `checks_verdict` waits on no runs, the build brief's line on whose text is an instruction | have all of it |
-| `autonomous-ai-coding-workflow` | a backlog manager on a schedule | the triage coworker already runs daily and monthly | have; only "dry run first" is carried |
+| `autonomous-ai-coding-workflow` | a backlog manager on a schedule | the triage coworker's two scheduled jobs, read in full: a daily pass that labels new issues and mails a digest for eleven watched repositories, and a monthly check of stale calls | have the job; only "dry run first" is carried. This repository is not among the eleven: adding it is the owner's choice |
 | `spec-driven-development` | task fields (do, files, verify) and sizing rules | the factory issue (worker, allowed paths, change, done-test seen failing, run command, depends on) and `tools/factory/cutshape.py` | have, and stricter. Its scale (1 to 3 files small, 4 to 10 medium, over 10 split) is a usable default for the size cap of loop 8 |
 | `nested-subagents-claude-code` | a failure analyst | LOOPS.md loop 14, state "part" | already in the design, not built: the brief is carried |
 | `codex-automations` | a scheduled scan for defects | the schedules that exist: triage, server health, usage, tidiness | not there: carried as an option |
@@ -50,7 +50,7 @@ issue triage was already scheduled. The brief was wrong, not the cards.
 | Tutorial | What it is | Runs | After check |
 |---|---|---|---|
 | `agent-goals-and-loops` | prompt, goal, interval and schedule told apart; a goal template | read directly | carry: goal as a condition |
-| `software-factory` | a merge-policy prompt for pull requests, and an incident triage demo on Google Cloud | TAKE | have |
+| `software-factory` | a merge-policy prompt for pull requests, and an incident triage demo on Google Cloud (marked `draft` in the source's catalog) | TAKE | have |
 | `loop-engineering` | a manager loop and a worker loop over GitHub issues | HAVE | carry: loop card, dry run first |
 | `background-agents` | a worker that polls a tracker, claims a ticket, runs hooks around the agent | HAVE | have |
 | `autonomous-ai-coding-workflow` | a scheduled backlog manager and an issue-to-pull-request loop | TAKE | have |

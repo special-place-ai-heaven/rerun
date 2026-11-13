@@ -37,20 +37,24 @@ is the claim itself: an end state, the check that proves it, and what must not c
    `turnLimit`. The goal is stored as one text column, so the database does not change. A run without a
    condition behaves exactly as today.
 2. **The forms stay and go first.** They are the delegator's handle on the answer and they cost nothing. Only
-   when the last line passes and a condition is set does a small fast model get the condition and the run's
-   answers, and return one of three verdicts with a reason: met, not met, impossible. Not met sends the run
-   back with the reason, inside the same turn limit. Impossible ends the goal `not_met` at once with the reason.
-3. **The judge reads text and nothing else.** It gets the condition and the answers; no tool, no file, no
-   network. A condition must therefore ask for something the worker's own output can show ("the output of the
-   run command is shown and every named test passes"), which is the rule both harnesses give.
+   when the last line passes and a condition is set does a small fast model judge the condition and return one
+   of three verdicts with a reason: met, not met, impossible. Not met sends the run back with the reason, inside
+   the same turn limit. Impossible ends the goal `not_met` at once with the reason.
+3. **The judge calls no tool.** It reads text it is handed and nothing else: no file, no network. A condition
+   must therefore ask for something the run itself can show ("the output of the run command is shown and every
+   named test passes"), which is the rule both harnesses give. What exactly it is handed is open, below.
 4. **The condition is written in the owner's goal shape** (objective, non-goals, two to six success criteria,
    constraints) and the delegator renders it from the issue: the title is the objective; **Files** are the
    non-goals ("touch only these paths"); **Done-test** and **Run** are the success criteria; the builder's
    rules are the constraints. The blocked exit is part of the condition ("or the last line is BLOCKED with the
    one thing that stopped the work"). An issue whose condition does not fit in 4,000 characters fails the intake
-   check: it is too large a chunk.
-5. **Not met twice for the same reason ends the goal.** That is the standard's guard against a worker that
-   answers the judge without doing anything.
+   check: it is too large a chunk. Measured on the thirteen factory issues of 2026-11-13 (#205 to #215, #220,
+   #225): title, **Files**, **Done-test** and **Run** plus 600 characters of rules come to 1,300 to 2,400
+   characters, so the limit would have refused none of them.
+5. **A run sent back by the judge that answers without calling a tool, and is still not met, ends the goal.**
+   This is the guard both harnesses use against a worker that argues instead of working. The engine counts a
+   run's steps, so it can tell. It does not apply to a send-back for the form of the last line, where the
+   worker is told to write that line and redo nothing.
 6. **The condition is not proof.** The judge sees only what the run wrote. The delegator keeps its own checks:
    the pull request exists, the reviewed commit is the merged commit, the checks of that commit passed.
 7. **Off unless a run carries a condition.** The run page shows the condition and each verdict's reason. A
@@ -58,6 +62,11 @@ is the claim itself: an end state, the check that proves it, and what must not c
 
 ## Open before the cut
 
+- What the judge is handed. Claude Code's evaluator gets the conversation so far, tool results included. The
+  engine's Stop hook gets only the last answer. A judge that reads only the worker's own words would break the
+  rule of LOOPS.md that an exit check never rests on them, so it needs the run's tool output as well. Where
+  that comes from (the run's stored steps, or the transcript the harness keeps) is settled at the cut, and
+  until it is, the condition must not be switched on for a job.
 - Which model judges on a connection that is not Claude's, and what one verdict costs on each. On the Claude
   path it is the small fast model of that connection.
 - The other providers check the goal once, at the end, with no send-back. Whether they get the loop too is
@@ -68,7 +77,8 @@ is the claim itself: an end state, the check that proves it, and what must not c
 
 ## Build order
 
-1. Contract and account tool: `condition` in `runGoalSchema`, passed through `send_message`.
+1. Contract and account tool: `condition` in `runGoalSchema`, passed through `send_message`; the verdict
+   (`goalVerdictSchema`, today a strict `met` true or false) gains the third outcome, impossible.
 2. Engine: the judge, called from the Stop hook after the form check; verdicts recorded as today.
 3. Delegator: render the condition from the issue for build and fix runs; review runs keep their form.
 4. Run page: the condition and the reasons.

@@ -3,9 +3,8 @@ import { isDesktopShellChannel, type DesktopShellChannel } from '@rerun/contract
 // What a build bakes in, read from the environment of `electron-vite build`:
 //
 //   RERUN_DESKTOP_CHANNEL       stable | staging | dev (dev under `electron-vite dev`, stable otherwise)
-//   RERUN_DESKTOP_DEFAULT_URL   the server the app opens on. The official builds set it to
-//                               https://app.rerun.build or https://staging.rerun.build. A build from the
-//                               sources without it opens on the "Connect to your server" page.
+//   RERUN_DESKTOP_DEFAULT_URL   the server the app opens on. A build without it opens on the
+//                               "Connect to your server" page.
 export type BuildSettings = { channel: DesktopShellChannel; defaultServerUrl: string }
 
 export function buildSettings(env: NodeJS.ProcessEnv = process.env): BuildSettings {

@@ -1,7 +1,6 @@
 # Rerun desktop app
 
-An Electron shell around the Rerun web app: the window loads the server (`https://app.rerun.build`,
-or a self-hosted one) and everything a person sees is drawn by `apps/ui`. A web deploy reaches the
+An Electron shell around the Rerun web app: the window loads your server (set at build time, or typed on first launch) and everything a person sees is drawn by `apps/ui`. A web deploy reaches the
 app without a desktop release. The shell only adds what a browser tab cannot: a native window and
 menus, sign-in through the system browser, links and downloads that behave like a desktop app,
 updates of its own.
@@ -25,7 +24,7 @@ User-Agent and renders the desktop chrome from the first paint (`<html data-desk
 
 ```bash
 pnpm dev:desktop                 # the development app ("Rerun Dev") on this workspace's hub
-RERUN_DESKTOP_URL=https://staging.rerun.build pnpm dev:desktop
+RERUN_DESKTOP_URL=https://your-server.example pnpm dev:desktop
 ```
 
 `RERUN_DESKTOP_URL` points a development or staging build at any server; a packaged stable build
@@ -35,8 +34,8 @@ ignores it. `RERUN_DESKTOP_USER_DATA` gives a run a data folder of its own.
 
 | Channel | App | Id | URL scheme | Server |
 |---|---|---|---|---|
-| `stable` | Rerun | `build.rerun.desktop` | `rerun-desktop://` | `RERUN_DESKTOP_DEFAULT_URL` (app.rerun.build in the official build) |
-| `staging` | Rerun Staging | `build.rerun.desktop.staging` | `rerun-desktop-staging://` | staging.rerun.build |
+| `stable` | Rerun | `build.rerun.desktop` | `rerun-desktop://` | `RERUN_DESKTOP_DEFAULT_URL` |
+| `staging` | Rerun Staging | `build.rerun.desktop.staging` | `rerun-desktop-staging://` | `RERUN_DESKTOP_DEFAULT_URL` |
 | `dev` | Rerun Dev | `build.rerun.desktop.dev` | `rerun-desktop-dev://` | the local hub |
 
 Each has its own data folder, icon (`pnpm icons` draws them from the iOS icon) and update feed. A
@@ -93,7 +92,7 @@ follows the server the window shows, not only the configured one.
 ## Release
 
 ```bash
-RERUN_DESKTOP_CHANNEL=staging RERUN_DESKTOP_DEFAULT_URL=https://staging.rerun.build pnpm --filter rerun-desktop package
+RERUN_DESKTOP_CHANNEL=staging RERUN_DESKTOP_DEFAULT_URL=https://your-server.example pnpm --filter rerun-desktop package
 ```
 
 It makes one installer per architecture (a DMG for Apple Silicon and one for Intel, an NSIS installer for
@@ -101,8 +100,7 @@ x64 and one for Arm): a universal build carries Chromium twice. The updater take
 architecture from the feed.
 
 Unsigned (ad hoc on macOS) unless signing credentials are in the environment: see
-`electron-builder.config.ts`. The signed, notarized release and its upload to the update feed
-(`downloads.rerun.build/desktop/<channel>/`) run in Rerun Cloud's private repository. A bad release is
+`electron-builder.config.ts`. Updates are off until `RERUN_DESKTOP_UPDATE_URL` names a feed you host (generic provider: the installers and their latest*.yml); there is no default feed. A bad release is
 pulled by publishing a higher version; `DESKTOP_MIN_SHELL_VERSION` on the server makes older apps
 update before they load anything.
 

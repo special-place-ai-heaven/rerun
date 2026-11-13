@@ -6,7 +6,7 @@ import { CHANNEL_IDENTITIES } from './src/shared/channels'
 // Packaging of the three apps (Rerun, Rerun Staging, Rerun Dev), one per `RERUN_DESKTOP_CHANNEL`,
 // each with its own id, name, icon, URL scheme, data folder and update feed:
 //
-//   RERUN_DESKTOP_CHANNEL=stable RERUN_DESKTOP_DEFAULT_URL=https://app.rerun.build pnpm package
+//   RERUN_DESKTOP_CHANNEL=stable RERUN_DESKTOP_DEFAULT_URL=https://your-server.example pnpm package
 //
 // Signing and notarization switch on with their credentials, as in the release workflow:
 //   macOS     CSC_LINK + CSC_KEY_PASSWORD (Developer ID Application), APPLE_API_KEY + APPLE_API_KEY_ID
@@ -24,7 +24,7 @@ const e2e = process.env.RERUN_DESKTOP_E2E === '1'
 
 const identity = CHANNEL_IDENTITIES[channel]
 const icon = `resources/icons/${channel}/icon.png`
-const updateFeed = process.env.RERUN_DESKTOP_UPDATE_URL ?? `https://downloads.rerun.build/desktop/${channel}`
+const updateFeed = process.env.RERUN_DESKTOP_UPDATE_URL
 // Without a Developer ID (CI, a build from the sources) the app is signed ad hoc: Apple Silicon refuses
 // to run a binary whose signature the fuses broke, and an ad hoc one runs on the machine that built it.
 const developerId = Boolean(process.env.CSC_LINK || process.env.CSC_NAME)
@@ -49,7 +49,7 @@ const config: Configuration = {
     // Only the updater is a runtime dependency; everything else is bundled by electron-vite.
     npmRebuild: false,
     protocols: [{ name: identity.productName, schemes: [desktopShellScheme(channel)] }],
-    publish: [{ provider: 'generic', url: updateFeed }],
+    publish: updateFeed ? [{ provider: 'generic', url: updateFeed }] : undefined,
     electronFuses: {
         runAsNode: false,
         enableCookieEncryption: true,

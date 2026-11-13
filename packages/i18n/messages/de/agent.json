@@ -311,10 +311,6 @@
                 "blurb": "Sicher nach einem Schlüssel fragen",
                 "help": "Erlaubt dem Coworker, anzuhalten und dich in einem maskierten Formular nach einem API-Schlüssel oder Token zu fragen. Der Wert wird als Coworker-Variable gespeichert und gelangt nie in die Unterhaltung."
             }
-        },
-        "paidDataAlwaysAllow": {
-            "label": "Ohne Nachfrage ausgeben",
-            "description": "Überspringt die Kostenfreigabe, damit geplante und delegierte Aufgaben kostenpflichtige Daten nutzen können, während du weg bist."
         }
     },
     "agentPanelTriggers": {

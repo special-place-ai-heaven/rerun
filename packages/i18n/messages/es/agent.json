@@ -311,10 +311,6 @@
                 "blurb": "Esperar una clave, introducida de forma segura",
                 "help": "Permite al coworker pausar y pedirte una clave API o un token en un campo oculto. El valor se guarda como variable del coworker y nunca entra en la conversación."
             }
-        },
-        "paidDataAlwaysAllow": {
-            "label": "Gastar sin preguntar",
-            "description": "Omite la aprobación del costo, para que las tareas programadas y delegadas usen datos de pago mientras no estás."
         }
     },
     "agentPanelTriggers": {

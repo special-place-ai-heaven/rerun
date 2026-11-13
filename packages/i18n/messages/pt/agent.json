@@ -311,10 +311,6 @@
                 "blurb": "Pausa por uma chave, digitada com segurança",
                 "help": "Permite que o coworker pause e peça uma chave de API ou token em um formulário mascarado. O valor é guardado como variável do coworker e nunca entra na conversa."
             }
-        },
-        "paidDataAlwaysAllow": {
-            "label": "Gastar sem perguntar",
-            "description": "Pula a aprovação do custo, para que tarefas agendadas e delegadas usem dados pagos enquanto você está fora."
         }
     },
     "agentPanelTriggers": {

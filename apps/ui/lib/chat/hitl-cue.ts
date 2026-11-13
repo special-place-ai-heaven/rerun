@@ -18,7 +18,6 @@ const ICONS: Record<HitlKind, { icon: LucideIcon; tone: string }> = {
     mcp: { icon: PlugIcon, tone: NEUTRAL_TONE },
     service: { icon: PlugSparkleIcon, tone: NEUTRAL_TONE },
     takeover: { icon: MonitorIcon, tone: NEUTRAL_TONE },
-    spend: { icon: CoinsIcon, tone: DECISION_TONE },
 }
 
 // What the scroll cue says is waiting at the end of the thread, once the block is out of sight.

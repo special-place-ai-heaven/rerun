@@ -72,8 +72,7 @@ export function delegateTools(ctx: RunContext): ToolSet {
                     config.tools.suggestService = false
                     config.tools.requestSecret = false
                     // A delegate does one task and reports to its caller: nothing it could install,
-                    // schedule or publish on the account is wanted, nobody is there to be notified,
-                    // and a spend it cannot ask for only runs where the user waived the asking.
+                    // schedule or publish on the account is wanted, and nobody is there to be notified.
                     config.tools.hub = false
                     config.tools.trigger = false
                     config.tools.schedule = false

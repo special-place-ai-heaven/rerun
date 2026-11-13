@@ -390,10 +390,6 @@
                 "blurb": "Pause for a key, entered securely",
                 "help": "Lets the coworker pause and ask you for an API key or token in a masked form. The value is stored as a coworker variable and never enters the conversation."
             }
-        },
-        "paidDataAlwaysAllow": {
-            "label": "Spend without asking",
-            "description": "Skip the cost approval, so scheduled runs and delegated tasks can use paid data while you are away."
         }
     },
     "agentPanelTriggers": {

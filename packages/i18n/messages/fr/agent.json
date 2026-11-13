@@ -311,10 +311,6 @@
                 "blurb": "Attendre une clé, saisie en sécurité",
                 "help": "Permet au coworker de s'arrêter et de vous demander une clé API ou un jeton dans un champ masqué. La valeur est stockée comme variable du coworker et n'entre jamais dans la conversation."
             }
-        },
-        "paidDataAlwaysAllow": {
-            "label": "Dépenser sans demander",
-            "description": "Passe la validation du coût, pour que les tâches planifiées et déléguées utilisent les données payantes en votre absence."
         }
     },
     "agentPanelTriggers": {

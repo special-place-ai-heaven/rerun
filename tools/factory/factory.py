@@ -4,7 +4,7 @@ Commands: packet, wt, pr-open, ci-wait, risk, merge-dev, job-open, release-pr, r
 GitHub only through the gh/git wrappers; the token is never read or printed here."""
 import calendar, contextlib, json, os, re, signal, subprocess, sys, time, shutil, urllib.request
 
-GH, GIT = "/data/tools/bin/gh", "/data/tools/bin/git"
+GH, GIT = os.environ.get("FACTORY_GH") or "/data/tools/bin/gh", "/data/tools/bin/git"
 OWNERS = ("special-place-ai-heaven", "special-place-administrator")
 WORK = os.environ.get("FACTORY_WORK", "/data/work")
 REPOS, WT, STATE = WORK + "/repos", WORK + "/wt", WORK + "/state"

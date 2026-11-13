@@ -8,6 +8,7 @@ import argparse, datetime, hashlib, json, os, re, subprocess, sys, tempfile, tim
 
 import clocks
 import cutshape
+import pools
 import store as ledger_store
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -229,7 +230,7 @@ class Dispatcher:
         self.store = ledger_store.Store(cfg["ledger_file"])  # the delegator is the one writer
         self.store.import_json(cfg["json_state_file"])  # once; a second run finds it done
         self.beats = 0
-        self.names = {c["id"]: c["name"] for c in cfg["builders"] + cfg["reviewers"]}
+        self.names = pools.names(cfg)
 
     def close(self):
         self.store.close()
@@ -244,9 +245,8 @@ class Dispatcher:
     def busy(self):
         return {j["agent"] for j in self.jobs() if j["state"] in RUNNING and j.get("agent")}
 
-    def free(self, pool):
-        busy = self.busy()
-        return next((c["id"] for c in self.cfg[pool] if c["id"] not in busy), None)
+    def free(self, worker):
+        return pools.pick(self.cfg, worker, self.busy())
 
     def to(self, j, state, msg, **kw):
         j.update(kw, state=state)
@@ -257,7 +257,7 @@ class Dispatcher:
 
     def intake(self):
         open_jobs = [j for j in self.jobs() if j["state"] not in END + ("waiting",)]
-        room = self.cfg.get("max_jobs", 8) - len(open_jobs)
+        room = (pools.max_jobs(self.cfg, "coder") or 0) - len(open_jobs)
         if room <= 0:
             return
         issues = json.loads(self.gh(["issue", "list", "-R", self.repo, "--label", self.label, "--state", "open",
@@ -472,7 +472,7 @@ class Dispatcher:
         if st in ("queued", "review_wait", "fix_wait") and j.get("not_before") and self.now() < j["not_before"]:
             return
         if st == "queued":
-            b = self.free("builders")
+            b = self.free(j.get("worker", "coder"))
             if b:
                 self.start(j, b, "build", "building", builder=b)
         elif st == "building":
@@ -490,7 +490,7 @@ class Dispatcher:
         elif st == "review_wait":
             if self.conflicts(j):
                 return
-            r = self.free("reviewers")
+            r = self.free("reviewer")
             if not r:
                 return
             head = json.loads(self.gh(["pr", "view", str(j["pr"]), "-R", self.repo, "--json", "headRefOid"]))["headRefOid"]
@@ -678,7 +678,7 @@ def main(argv=None):
         return 1
     d = Dispatcher(cfg, account, gh)
     log("-", "dispatcher started: %d builders, %d reviewers, label %s, repo %s" % (
-        len(cfg["builders"]), len(cfg["reviewers"]), cfg.get("label", "factory"), cfg["repo"]))
+        len(pools.types(cfg).get("coder", {}).get("coworkers", [])), len(pools.types(cfg).get("reviewer", {}).get("coworkers", [])), cfg.get("label", "factory"), cfg["repo"]))
     if a.cmd == "once":
         d.once()
         d.close()

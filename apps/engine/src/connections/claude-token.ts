@@ -124,6 +124,18 @@ export async function ensureFreshClaudeToken(connection: LoadedConnection | null
     return task
 }
 
+// How long the sign-in has left and whether the engine is due to renew it, for connections it
+// renews (a refresh token and a finite expiry time). Returns only these two derived values.
+export function claudeSignInLeft(connection: LoadedConnection | null, now = Date.now()): { minutesLeft: number; renewalDue: boolean } | null {
+    if (!connection || !connection.env[REFRESH_KEY]) return null
+    const expiresAtRaw = connection.env[EXPIRES_KEY]
+    if (!expiresAtRaw) return null
+    const expiresAt = Number(expiresAtRaw)
+    if (!Number.isFinite(expiresAt)) return null
+    const msLeft = expiresAt - now
+    return { minutesLeft: Math.max(0, Math.floor(msLeft / 60_000)), renewalDue: msLeft <= IDLE_REFRESH_WINDOW_MS }
+}
+
 export function claudeTokenOf(connection: LoadedConnection | null): string | undefined {
     return connection?.env[TOKEN_KEY]
 }

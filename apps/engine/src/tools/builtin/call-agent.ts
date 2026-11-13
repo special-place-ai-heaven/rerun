@@ -66,8 +66,9 @@ export function callAgentTools(ctx: RunContext): ToolSet {
                 message: z.string().describe('The message to send'),
                 context: z.string().optional().describe('Optional background the target coworker needs'),
                 wait: z.boolean().default(false).describe('Wait for the answer and return it. Default false: dispatch and move on'),
+                branch: z.string().max(200).optional().describe('the git branch this work is for, when you know it'),
             }),
-            execute: async ({ agent, message, context, wait }, { toolCallId, abortSignal }) => {
+            execute: async ({ agent, message, context, wait, branch }, { toolCallId, abortSignal }) => {
                 const resolved = resolveTargetAgent(agent, targets)
 
                 // The CLI bridges hand over an id that is not the model's, so the UI pairs progress
@@ -123,7 +124,7 @@ export function callAgentTools(ctx: RunContext): ToolSet {
                 try {
                     // `fullStream` tees, so following the run for the caller's progress block and
                     // publishing it to the run hub can happen side by side.
-                    run = await startHeadlessRun(callee, session.id, prompt, undefined, { source: 'chat', callableAgentIds: ctx.callableAgentIds, calledBy: ctx.agent.id })
+                    run = await startHeadlessRun(callee, session.id, prompt, undefined, { source: 'chat', callableAgentIds: ctx.callableAgentIds, calledBy: ctx.agent.id, lineage: { initiatorAgentId: ctx.agent.id, initiatorRunId: ctx.runId, initiatorSessionId: ctx.sessionId, branch } })
                 } catch (err) {
                     // A run that never started emits no completion event of its own, so the session
                     // just mirrored on the hub would stay `working` forever.

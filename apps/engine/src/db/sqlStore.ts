@@ -6,13 +6,14 @@ const opening = new Map<string, Promise<Client>>()
 
 // WAL is a persistent header flag, so posting it once also lets the sqlite3 and python processes
 // that open the same file through RERUN_AGENT_DB / RERUN_SHARED_DB read while we write.
-// busy_timeout lives on the connection instead, so every client we open has to set its own.
+// busy_timeout lives on the connection, and libsql 0.18 opens several, so it goes in the client's
+// own `timeout` option, which covers all of them. synchronous is set per connection and only
+// reaches the first one.
 async function open(key: string, file: string, dir: string): Promise<Client> {
     mkdirSync(dir, { recursive: true })
-    const client = createClient({ url: `file:${file}` })
+    const client = createClient({ url: `file:${file}`, timeout: 5000 })
     try {
         await client.execute('PRAGMA journal_mode = WAL')
-        await client.execute('PRAGMA busy_timeout = 5000')
         await client.execute('PRAGMA synchronous = NORMAL')
     } catch (e) {
         client.close()

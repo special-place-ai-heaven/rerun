@@ -422,7 +422,9 @@ describe('run loop paths', () => {
             expect(outcome.kind).toBe('done')
             expect((await getRun(id, started.runId))?.stepCount).toBe(2)
             expect(stream.calls).toHaveLength(2)
-            expect(sent.filter(n => n.event === 'agent.notification')).toHaveLength(1)
+            const notifications = sent.filter(n => n.event === 'agent.notification')
+            expect(notifications).toHaveLength(1)
+            expect(notifications[0]).toMatchObject({ kind: 'question', message: 'Which color?', metadata: { toolCallId: 'call-1' } })
         })
     })
 

@@ -489,6 +489,21 @@ class Clocks(Base):
     def job_data(self, n=5):
         return json.loads(self.w.rows("SELECT data FROM jobs WHERE job=?", str(n))[0][0])
 
+    def test_a_build_at_450000_tokens_is_not_cancelled_with_the_shipped_settings(self):
+        self.cfg["clocks"] = D.settings()["clocks"]
+        self.w.clock = T0
+        self.tick()
+        self.w.runs["run1"] = run_shape("run1", 10, T0, tokens=450000)
+        self.tick()
+        self.w.clock = T0 + 300
+        self.w.runs["run1"] = run_shape("run1", 20, T0, tokens=450000)
+        self.tick()
+        self.assertEqual(self.w.cancels, [])
+        self.w.clock = T0 + 400
+        self.w.runs["run1"] = run_shape("run1", 30, T0, tokens=3100000)
+        self.tick()
+        self.assertEqual(self.w.cancels, [("b1", "run1")])
+
     def test_stalled_run_is_cancelled_and_sent_once_more(self):
         self.w.clock = T0
         self.tick()
@@ -569,7 +584,50 @@ class Clocks(Base):
         self.assertIn(line, D.fix_brief(j, 1, "r"))
 
 
+class Cut(BaseException):
+    """Ends a pass in the middle of a send; once() does not catch it."""
+
+
 class Restart(Base):
+    def test_delegator_stopped_during_a_send_adopts_the_run_after_restart(self):
+        real = self.w.account
+        def cut(tool, args):
+            r = real(tool, args)
+            if tool == "send_message":
+                raise Cut()
+            return r
+        self.d = self.new()
+        self.d.account = cut
+        with self.assertRaises(Cut), contextlib.redirect_stdout(self.out):
+            self.d.once()
+        self.close()
+        self.tick(3, fresh=True)
+        self.assertEqual(len(self.w.sends), 1)
+        self.assertEqual(self.state(), "building")
+        self.assertEqual(self.w.rows("SELECT run_id FROM fires")[0][0], "run1")
+
+    def import_state(self, job):
+        with open(self.cfg["json_state_file"], "w") as f:
+            json.dump({"jobs": {"5": dict(job, issue=5, title="Fix x", agent="b1")}}, f)
+
+    def test_imported_job_caught_mid_send_ends_blocked_at_once(self):
+        self.import_state({"state": "building", "sending": "build"})
+        self.tick()
+        self.assertEqual(self.state(), "blocked")
+        self.assertIn("sending 'build' was cut off before its intent was recorded", self.out.getvalue())
+        self.assertNotIn("KeyError", self.out.getvalue())
+        self.assertEqual(len(self.w.sends), 0)
+
+    def test_imported_run_older_than_ten_minutes_is_not_cancelled_at_the_first_beat(self):
+        self.import_state({"state": "building", "run": "r-old"})
+        self.w.clock = T0
+        self.w.runs["r-old"] = run_shape("r-old", 40, T0 - 1200)
+        self.tick()
+        self.assertEqual(self.w.cancels, [])
+        self.w.clock = T0 + 601
+        self.tick()
+        self.assertEqual(self.w.cancels, [("b1", "r-old")])
+
     def test_fresh_dispatcher_every_pass_sends_each_step_once(self):
         self.tick(2, fresh=True)
         self.w.finish("b1", PR_LINE)

@@ -328,9 +328,11 @@ class Dispatcher:
     def send(self, j, agent, step, message, state):
         """Record the intent, send, record the run id. An intent left without a run id is never sent again."""
         j.update(agent=agent, run=None, sending=step, state=state, not_before=None, lost_beats=0)
-        self.save(j, step)
+        # The intent is on the row before the first save: a delegator stopped while send_message is in flight leaves
+        # a row that lost_run can use.
         j["intent_at"] = iso(self.now())
         j["fire_id"] = self.store.intent(str(j["issue"]), "", step, coworker=self.names.get(agent, agent), at=j["intent_at"])
+        self.save(j, step)
         self.store.set(str(j["issue"]), "seen", "")
         args = {"agentId": agent, "message": message, "waitSeconds": WAIT_S}
         if state in GOALS:
@@ -401,6 +403,9 @@ class Dispatcher:
         except ValueError:
             prev = None
         seen = clocks.seen_after(r, prev, iso(now, True))
+        if prev is None and not j.get("fire_id"):
+            # A run sent before the ledger: startedAt says nothing of its last step; date the first sighting now.
+            seen = {"steps": seen["steps"], "at": iso(now, True)}
         if seen != prev:
             self.store.set(n, "seen", json.dumps(seen))
             if j.get("fire_id"):
@@ -428,6 +433,8 @@ class Dispatcher:
     def lost_run(self, j):
         """An intent with no run id: look for the run in list_runs for up to LOST_BEATS beats, adopt one that started
         at or after the intent; none after that: abandon the intent, class transient."""
+        if not j.get("fire_id") or not j.get("intent_at"):
+            return self.end(j, "blocked", "sending '%s' was cut off before its intent was recorded; whether it arrived is unknown, so it is not sent again" % j["sending"])
         got = self.account("list_runs", {"agentId": j["agent"]})
         runs = got.get("runs", []) if isinstance(got, dict) else got or []
         known, since = self.store.known_run_ids(), j.get("intent_at")

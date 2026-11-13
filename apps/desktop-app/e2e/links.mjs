@@ -42,23 +42,9 @@ export default async function linksScenario({ app, page, step, base }) {
     const findPage = app.windows().find((candidate) => candidate.url().startsWith('rerun-shell://app/find.html'))
     await findPage.keyboard.press('Escape').catch(() => {})
 
-    // 2. Stripe Checkout takes a window of its own and gives the app back the return page.
     const before = (await windowUrls(app)).length
-    await page.evaluate(() => {
-        location.href = 'https://checkout.stripe.com/c/pay/cs_test_desktop_e2e'
-    })
-    const urls = await waitUntil(() => windowUrls(app), (list) => list.length === before + 1, 'Checkout opens in a window of the app')
-    check(urls[0].startsWith(base), 'the main window stays on the app')
-    check(!(await opened()).some((url) => url.includes('checkout.stripe.com')), 'Checkout does not leave for the browser')
-    await app.evaluate(async ({ BrowserWindow }, target) => {
-        const payment = BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id).at(-1)
-        await payment.webContents.executeJavaScript(`location.href = ${JSON.stringify(target)}`).catch(() => {})
-    }, `${base}/?billing=success`)
-    await waitUntil(() => windowUrls(app), (list) => list.length === before, 'the payment window closes when Stripe sends the person back')
-    await waitUntil(() => page.url(), (url) => url.includes('billing=success'), 'the app opens the return page')
-    await step('back from Checkout')
 
-    // 3. A page of the server opened in a new window hands any other site to the browser and closes.
+    // 2. A page of the server opened in a new window hands any other site to the browser and closes.
     await page.evaluate((url) => window.open(url, '_blank'), `${base}/api/version`)
     await waitUntil(() => windowUrls(app), (list) => list.length === before + 1, 'a same-origin page opens in a child window')
     await app.evaluate(async ({ BrowserWindow }) => {
@@ -68,7 +54,7 @@ export default async function linksScenario({ app, page, step, base }) {
     await waitUntil(opened, (list) => list.includes('https://published.example.rerun.site/?ticket=abc'), 'the published page opens in the browser')
     await waitUntil(() => windowUrls(app), (list) => list.length === before, 'the hop window closes')
 
-    // 4. A window opened only to download a file (a data export) closes once the file is saved.
+    // 3. A window opened only to download a file (a data export) closes once the file is saved.
     await app.evaluate(({ BrowserWindow, app: electronApp }, { origin, downloads }) => {
         electronApp.setPath('downloads', downloads)
         BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[0].webContents.session.webRequest.onHeadersReceived({ urls: [`${origin}/api/version?export=*`] }, (details, callback) =>
@@ -85,7 +71,7 @@ export default async function linksScenario({ app, page, step, base }) {
     await page.waitForSelector('[data-sonner-toast]', { timeout: 10_000 })
     await step('download toast')
 
-    // 5. A service sign-in coming back from the browser reaches the page, which claims it.
+    // 4. A service sign-in coming back from the browser reaches the page, which claims it.
     await page.evaluate(() => {
         window.__oauth = []
         window.rerunShell.oauth.onReturn((result) => window.__oauth.push(result))

@@ -278,7 +278,7 @@ export async function buildSystemPrompt(agent: LoadedAgent, trigger: RunTrigger 
     if (agent.config.kind === 'foreman') return await buildForemanPrompt(agent, provider, order)
     const cfg = agent.config.tools
     const [skillIndex, scheduleIndex, triggerIndex, memoryIndex, dbSchema, sharedDbSchema, mcpIndex, brain] = await Promise.all([
-        cfg.skills ? buildSkillIndex(agent.id).catch(() => '') : Promise.resolve(''),
+        cfg.skills ? buildSkillIndex(agent.id, agent.config).catch(() => '') : Promise.resolve(''),
         cfg.schedule ? buildScheduleIndex(agent.id).catch(() => '') : Promise.resolve(''),
         cfg.trigger ? buildTriggerIndex(agent.id).catch(() => '') : Promise.resolve(''),
         cfg.memory ? buildMemoryIndex(agent.id).catch(() => '') : Promise.resolve(''),

@@ -2,7 +2,7 @@
 An intent row is written and committed BEFORE a stage is fired; fired() adds the run id after.
 A crash in between leaves an intent with no run id: pending() lists it, the caller decides
 (resolve it against the engine, or refire once: refire count). No network, no engine key here."""
-import fcntl, json, sqlite3, time
+import fcntl, json, os, sqlite3, time
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS fires(
@@ -31,7 +31,19 @@ CREATE TABLE IF NOT EXISTS leases(
 CREATE TABLE IF NOT EXISTS wakes(
   event TEXT NOT NULL, coworker TEXT NOT NULL, head TEXT NOT NULL, at TEXT NOT NULL,
   PRIMARY KEY(event, coworker, head));
+CREATE TABLE IF NOT EXISTS jobs(
+  job TEXT PRIMARY KEY, state TEXT NOT NULL, pr INTEGER, head TEXT, round INTEGER,
+  data TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS transitions(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT NOT NULL, at TEXT NOT NULL,
+  from_state TEXT, to_state TEXT NOT NULL, reason TEXT, round INTEGER, run_id TEXT);
+CREATE INDEX IF NOT EXISTS transitions_job ON transitions(job, id);
 """
+# no CHECK on jobs.state (SQLite cannot change one without a table rebuild): checked in put_job
+JOB_STATES = ("waiting", "queued", "building", "review_wait", "reviewing", "fix_wait", "fixing", "checks",
+              "merged", "rejected", "blocked", "failed", "returned")
+FIRE_COLUMNS = (("cache_read", "INTEGER"), ("cache_write", "INTEGER"), ("seconds", "INTEGER"),
+                ("steps", "INTEGER"), ("steps_at", "TEXT"))  # steps: last step count seen; steps_at: when it moved
 OPEN = ("intent", "running")
 
 
@@ -54,9 +66,9 @@ class Store:
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(SCHEMA)
         have = {r[1] for r in self.db.execute("PRAGMA table_info(fires)")}
-        for col in ("cache_read", "cache_write", "seconds"):  # old databases: add the cost columns
+        for col, typ in FIRE_COLUMNS:  # old databases: add the missing columns
             if col not in have:
-                self.db.execute(f"ALTER TABLE fires ADD COLUMN {col} INTEGER")
+                self.db.execute(f"ALTER TABLE fires ADD COLUMN {col} {typ}")
 
     def close(self):
         self.db.close()
@@ -255,6 +267,98 @@ class Store:
         """Free the key so the same wake can be recorded again. True when a row was held."""
         return self.db.execute("DELETE FROM wakes WHERE event=? AND coworker=? AND head=?",
                                (event, coworker, head)).rowcount == 1
+
+    def _write_job(self, job, state, data, reason, run_id, at):
+        """Upsert the jobs row and insert its transitions row. The caller holds the transaction."""
+        if state not in JOB_STATES:
+            raise ValueError(f"unknown job state: {state!r}")
+        data = dict(data or {})
+        old = self.db.execute("SELECT state FROM jobs WHERE job=?", (job,)).fetchone()
+        at = at or now()
+        self.db.execute(
+            "INSERT INTO jobs(job,state,pr,head,round,data,updated_at) VALUES(?,?,?,?,?,?,?) "
+            "ON CONFLICT(job) DO UPDATE SET state=excluded.state, pr=excluded.pr, head=excluded.head, "
+            "round=excluded.round, data=excluded.data, updated_at=excluded.updated_at",
+            (job, state, data.get("pr"), data.get("head"), data.get("round"), json.dumps(data), at))
+        self.db.execute("INSERT INTO transitions(job,at,from_state,to_state,reason,round,run_id) VALUES(?,?,?,?,?,?,?)",
+                        (job, at, old[0] if old else None, state, reason, data.get("round"), run_id))
+
+    def put_job(self, job, state, data, reason=None, run_id=None, at=None, reset_retries=False):
+        """One commit: the jobs row upserted and one transitions row (from the stored state, None for a new job).
+        A write that keeps the state still logs a row. Unknown state: ValueError, nothing written."""
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self._write_job(job, state, data, reason, run_id, at)
+            if reset_retries:
+                self.db.execute("DELETE FROM kv WHERE job=? AND k LIKE 'retry:%'", (job,))
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+
+    @staticmethod
+    def _job(r):
+        d = json.loads(r["data"])
+        d.update(state=r["state"], pr=r["pr"], head=r["head"], round=r["round"], updated_at=r["updated_at"])
+        return d
+
+    def get_job(self, job):
+        r = self.db.execute("SELECT * FROM jobs WHERE job=?", (job,)).fetchone()
+        return self._job(r) if r else None
+
+    def jobs(self):
+        return [self._job(r) for r in self.db.execute("SELECT * FROM jobs ORDER BY CAST(job AS INTEGER), job")]
+
+    def transitions_of(self, job):
+        return [dict(r) for r in self.db.execute("SELECT * FROM transitions WHERE job=? ORDER BY id", (job,))]
+
+    def steps_seen(self, fire_id, steps, at=None):
+        """Record the step count of a run; steps_at (the stall clock) moves only when the count changes.
+        Returns the stored steps_at."""
+        self.db.execute("UPDATE fires SET steps=?, steps_at=? WHERE id=? AND steps IS NOT ?",
+                        (steps, at or now(), fire_id, steps))
+        r = self.db.execute("SELECT steps_at FROM fires WHERE id=?", (fire_id,)).fetchone()
+        return r[0] if r else None
+
+    def retries(self, job, cls):
+        r = self.db.execute("SELECT v FROM kv WHERE job=? AND k=?", (job, "retry:" + cls)).fetchone()
+        return int(r[0]) if r else 0
+
+    def bump_retry(self, job, cls):
+        """One more retry of this class for the job. Returns the new count."""
+        n = self.retries(job, cls) + 1
+        self.set(job, "retry:" + cls, n)
+        return n
+
+    def import_json(self, path):
+        """Once: load the delegator's old JSON state file into jobs (+ one 'imported' transition each), then rename
+        it to path + '.imported'. Returns the number imported; 0 when already imported or the file is missing."""
+        if self.db.execute("SELECT 1 FROM kv WHERE job='-' AND k='imported_json'").fetchone():
+            return 0
+        n = 0
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            try:
+                with open(path) as fh:
+                    entries = json.load(fh).get("jobs", {})
+            except FileNotFoundError:
+                entries = {}
+            for key, job in entries.items():
+                state = job.get("state")
+                if state not in JOB_STATES:
+                    raise ValueError(f"job {key}: unknown state {state!r}")
+                if self.db.execute("SELECT 1 FROM jobs WHERE job=?", (str(key),)).fetchone():
+                    continue
+                self._write_job(str(key), state, job, "imported", None, None)
+                n += 1
+            self.set("-", "imported_json", now())
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+        if os.path.exists(path):
+            os.rename(path, path + ".imported")
+        return n
 
     def _rows(self, where, job):
         sql = "SELECT * FROM fires WHERE " + where + (" AND job=?" if job is not None else "") + " ORDER BY id"

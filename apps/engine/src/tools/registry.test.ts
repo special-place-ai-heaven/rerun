@@ -35,6 +35,9 @@ vi.mock('../desktop/session.js', async importOriginal => ({
     computerAvailable: () => state.desktop && state.capture,
 }))
 
+const skim = vi.hoisted(() => ({ on: false }))
+vi.mock('./builtin/skim-pages.js', async importOriginal => ({ ...(await importOriginal<typeof import('./builtin/skim-pages.js')>()), skimPagesEnabled: () => skim.on }))
+
 const { beforeEach, describe, expect, it } = await import('vitest')
 const { TOOL_KEYS } = await import('@rerun/contracts')
 const { buildTools } = await import('./registry.js')
@@ -82,6 +85,16 @@ describe('tool payload', () => {
 })
 
 describe('buildTools', () => {
+    it('offers skim_pages to nobody until the gate opens', async () => {
+        expect(await namesOf(ctxWith())).not.toContain('skim_pages')
+        skim.on = true
+        try {
+            expect(await namesOf(ctxWith())).toContain('skim_pages')
+        } finally {
+            skim.on = false
+        }
+    })
+
     it('gives a default agent every family except the ones that need a roster or a pending setup', async () => {
         const names = await namesOf(ctxWith())
         for (const [family, tools] of Object.entries(familyTools)) {

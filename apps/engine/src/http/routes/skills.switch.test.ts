@@ -13,6 +13,8 @@ const { duplicateAgent } = await import('../../agents/duplicate.js')
 const { setSkillEnabled } = await import('../../skills/switch.js')
 const { configPath } = await import('../../config/paths.js')
 const { skillsListSchema } = await import('@rerun/contracts')
+const { getAgent } = await import('../../agents/registry.js')
+const { buildSkillIndex } = await import('../../skills/index.js')
 
 const { migrate } = await import('../../db/migrate.js')
 const app = createServer()
@@ -94,5 +96,21 @@ describe('skill switch', () => {
     it('reads every skill as on when the answer has no enabled field', () => {
         const parsed = skillsListSchema.parse({ skills: [{ slug: 'a', name: 'A' }] })
         expect(parsed.skills[0]!.enabled).toBe(true)
+    })
+
+    it('a coworker that is already loaded is not offered a skill switched off', async () => {
+        const other = (await createAgent({ config: { name: 'switch-loaded' } })).id
+        const root = `/agents/${other}/skills`
+        await send('POST', '', { name: 'Omega', body: 'o' }, root)
+        await send('POST', '', { name: 'Sigma', body: 's' }, root)
+        await getAgent(other)
+        expect((await put('omega', { enabled: false }, root)).status).toBe(200)
+        const off = (await getAgent(other)).config
+        expect(off.disabledSkills).toContain('omega')
+        const indexOff = await buildSkillIndex(other, off)
+        expect(indexOff).toContain('Sigma')
+        expect(indexOff).not.toContain('Omega')
+        expect((await put('omega', { enabled: true }, root)).status).toBe(200)
+        expect(await buildSkillIndex(other, (await getAgent(other)).config)).toContain('Omega')
     })
 })

@@ -20,7 +20,7 @@
   "run_limit_s": 2700,
   "stall_s": 600,
   "token_cap": 400000,
-  "builder_capacity": 16,
+  "builder_capacity": 40,
   "per_job_cap": 2,
   "retries": 1,
   "model_tiers": {"small": "stub-small", "mid": "stub-mid", "large": "stub-large"},

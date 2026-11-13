@@ -129,6 +129,7 @@ import {
     engineSessionSchema,
     engineSessionsListSchema,
     engineSkillSchema,
+    engineSkillEnabledSchema,
     engineSkillsListSchema,
     engineSkillSummariesListSchema,
     engineSkillProposalSchema,
@@ -764,6 +765,10 @@ export async function fetchSkillArchive(conn: EngineConnection, agentId: string,
 
 export async function updateSkill(conn: EngineConnection, agentId: string, slug: string, patch: { description?: string; body?: string }): Promise<EngineSkill> {
     return request(conn, `/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(slug)}`, { method: 'PATCH', body: JSON.stringify(patch) }, d => engineSkillSchema.parse(d))
+}
+
+export async function setSkillEnabled(conn: EngineConnection, agentId: string, slug: string, enabled: boolean): Promise<{ slug: string; enabled: boolean }> {
+    return request(conn, `/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(slug)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) }, d => engineSkillEnabledSchema.parse(d))
 }
 
 export async function deleteSkill(conn: EngineConnection, agentId: string, slug: string): Promise<void> {

@@ -1,11 +1,12 @@
 import { streamText, ToolChoiceViolationError, type LanguageModelUsage, type ModelMessage, type StreamTextResult, type ToolSet, type UIMessageStreamWriter } from 'ai'
-import { RERUN_CONNECTION_ID, contextTextPart, type ContextOccupancy, type MessageAuthor } from '@rerun/contracts'
+import { RERUN_CONNECTION_ID, contextTextPart, type ContextOccupancy, type GoalVerdict, type MessageAuthor } from '@rerun/contracts'
 import { applyCaching, withTailBreakpoint } from '../agents/caching.js'
 import { mergeProviderOptions, reasoningProviderOptions } from '../agents/reasoning.js'
 import { prepareRunHistory } from './compaction/compact.js'
 import { repairToolPairs } from './compaction/repair.js'
 import { approvalSummary, canonicalHitlName, findPendingHitl, hitlStepLacksMessage, hitlTurnIsOver, isHitlToolName, secretSummary, takeoverSummary, type PendingHitl } from '../tools/builtin/hitl.js'
-import { CLI_PROVIDERS, resolveModel, type ModelOverride } from '../agents/providers.js'
+import { goalStopHook } from '../agents/claude-goal-hook.js'
+import { CLI_PROVIDERS, resolveModel, type GoalOption, type ModelOverride } from '../agents/providers.js'
 import { offersQuickReplies, quickRepliesCall, type QuickRepliesCapture } from '../agents/quick-replies-stream.js'
 import { codexThreadToResume, forgetCodexThread, rememberCodexThread } from '../agents/codex-threads.js'
 import { repairBoxDefault, resolveRunModel } from '../agents/availability.js'
@@ -26,7 +27,7 @@ import { listAgentIndex } from '../db/repos/agents.js'
 import { appendMessage, lastMessageId, listSessionAuthorIds, setMessageToolCalls } from '../db/repos/messages.js'
 import type { MessageRow } from '../db/schema.js'
 import { isSharedConversation, signText } from './message-authors.js'
-import { bumpRunStep, cancelRun, failRun, finishRun, setRunContext, setRunLineage, startRun, updateRunLive } from '../db/repos/runs.js'
+import { bumpRunStep, cancelRun, failRun, finishRun, recordGoalVerdict, setRunContext, setRunGoal, setRunLineage, startRun, updateRunLive } from '../db/repos/runs.js'
 import { insertRunStep, insertToolCall } from '../db/repos/telemetry.js'
 import { touchSession } from '../db/repos/sessions.js'
 import { logger } from '../lib/logger.js'
@@ -37,6 +38,7 @@ import { toolPayloadChars } from '../tools/payload.js'
 import { prepareMcpServer } from '../tools/mcp.js'
 import { withPooledRelays } from '../tools/mcp-relay.js'
 import { HostBreaker } from '../tools/host-breaker.js'
+import { checkGoal } from './goal-check.js'
 import type { PartialResult, RunContext, RunLineage, RunTrigger, SkillProposalNotice } from './context.js'
 import { parseJobRef } from './job-ref.js'
 import { partialResultsNote } from './partial-results.js'
@@ -239,6 +241,9 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
     let spawnToken: string | undefined
     let codexThreadId: string | undefined
     let steps = 0
+    let goalOption: GoalOption | undefined
+    let goalChecked: 'met' | 'not_met' | undefined
+    const goalOf = trigger.source === 'chat' ? trigger.goal : undefined
     // A CLI turn is one SDK step however many tools the CLI ran inside it, so its progress is the
     // tool calls seen on the stream: `step_count` means "tool calls" for these providers.
     let live: LiveCounter | undefined
@@ -307,7 +312,16 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
             const replies = quickReplies?.()
             if (replies && answerRow && !pending) await setMessageToolCalls(agent.id, answerRow.id, [quickRepliesCall(replies)]).catch(() => {})
             if (provider === 'codex') await keepCodexThread().catch(() => forgetCodexThread(agent.id, sessionId))
-            await finishRun(agent.id, run.id, settlement.usage, stepsToWrite(), settlement.costMicros, contextUsage?.()).catch(() => {})
+            if (goalOf) {
+                if (goalOption?.hook) goalChecked = goalOption.hook.state() === 'met' ? 'met' : 'not_met'
+                else {
+                    // Any other provider: one check on the final answer, no continuation.
+                    const verdict = checkGoal(goalOf, settlement.text, 1)
+                    await recordGoalVerdict(agent.id, run.id, verdict).catch(() => {})
+                    goalChecked = verdict.met ? 'met' : 'not_met'
+                }
+            }
+            await finishRun(agent.id, run.id, settlement.usage, stepsToWrite(), settlement.costMicros, contextUsage?.(), goalChecked).catch(() => {})
             await touchSession(agent.id, sessionId).catch(() => {})
             text = settlement.text
             usage = settlement.usage
@@ -430,6 +444,15 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
         if (!lineage.jobRef && parsedJob) lineage.jobRef = parsedJob.jobRef
         ctx.lineage = lineage
         void setRunLineage(agent.id, run.id, lineage).catch(() => {})
+        // The goal comes only from the caller of /chat: it is stored once, here, and nothing a run does can change it.
+        const goal = trigger.source === 'chat' ? trigger.goal : undefined
+        if (goal) {
+            await setRunGoal(agent.id, run.id, JSON.stringify(goal))
+            if (provider === 'claude') {
+                const record = (v: GoalVerdict): Promise<void> => recordGoalVerdict(agent.id, run.id, v)
+                goalOption = { goal, record, hook: goalStopHook(goal, record) }
+            }
+        }
 
         const callTargetsP = agent.config.tools.callAgent ? listAgentIndex().then(idx => callTargetsOf(idx, agent.id, callableAgentIds)) : Promise.resolve([])
         const toolsP = callTargetsP.then(callTargets => {
@@ -481,7 +504,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
         logger.debug({ agent: agent.id, provider, prepMs: Date.now() - t0 }, 'run prep done')
 
         spawnToken = claudeTokenOf(connection)
-        const resolvedModel = resolveModel(agent, override, tools, mcpServers, { system: systemText, screenshots: id => ctx.screenshots?.get(id), sessionId, labels: sessionLabels({ agentId: agent.id, agentName: agent.config.name, sessionId, runId: run.id, jobRef: ctx.lineage?.jobRef, branch: ctx.lineage?.branch }) })
+        const resolvedModel = resolveModel(agent, override, tools, mcpServers, { system: systemText, screenshots: id => ctx.screenshots?.get(id), sessionId, goal: goalOption, labels: sessionLabels({ agentId: agent.id, agentName: agent.config.name, sessionId, runId: run.id, jobRef: ctx.lineage?.jobRef, branch: ctx.lineage?.branch }) })
         closeModel = resolvedModel.close
         contextUsage = resolvedModel.contextUsage
         // Cut out of the text whoever wrote it; only a coworker that offers replies gets the buttons.

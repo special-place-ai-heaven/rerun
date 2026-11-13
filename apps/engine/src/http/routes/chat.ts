@@ -1,4 +1,4 @@
-import { chatRequestSchema, ENGINE_SESSION_NOT_FOUND, type SessionSource } from '@rerun/contracts'
+import { chatRequestSchema, runGoalSchema, ENGINE_SESSION_NOT_FOUND, type SessionSource } from '@rerun/contracts'
 import { Hono } from 'hono'
 import { resolveRunModel } from '../../agents/availability.js'
 import { getAgent } from '../../agents/registry.js'
@@ -26,7 +26,10 @@ chatRoutes.post('/chat', async c => {
     const agentId = c.req.param('id')!
     const agent = await getAgent(agentId)
     if (!agent.config.enabled) throw agentDisabled()
-    const body = chatRequestSchema.parse(await c.req.json())
+    const raw = await c.req.json()
+    // A goal that does not parse never starts a run, and the caller is told which part was wrong.
+    if (raw && typeof raw === 'object' && 'goal' in raw && !runGoalSchema.safeParse((raw as { goal: unknown }).goal).success) return c.json({ error: 'invalid_goal' }, 400)
+    const body = chatRequestSchema.parse(raw)
     const runAgentView = agent.config.kind === 'foreman' && body.foreman ? { ...agent, brief: body.foreman } : agent
     const source = body.source ?? 'dashboard'
     const claim = body.install && !body.sessionId ? await claimInstallSession(agentId, () => createSession(agentId, undefined, undefined, source)) : null
@@ -52,7 +55,7 @@ chatRoutes.post('/chat', async c => {
     })
     const response = toResumableStreamResponse(run.id, async writer => {
         try {
-            const agentRun = await runAgent(runAgentView, session.id, body.message, override, writer, run.id, { source: 'chat', author: body.author, userLanguage: claim ? body.userLanguage : undefined, callableAgentIds: body.callableAgentIds })
+            const agentRun = await runAgent(runAgentView, session.id, body.message, override, writer, run.id, { source: 'chat', author: body.author, userLanguage: claim ? body.userLanguage : undefined, callableAgentIds: body.callableAgentIds, goal: body.goal })
             mergeRunStream(writer, agentRun, meta)
         } catch (err) {
             // runAgent registers the run's abort controller itself, and unregistering it is what

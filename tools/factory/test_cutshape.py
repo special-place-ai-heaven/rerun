@@ -1,0 +1,83 @@
+import unittest
+
+import cutshape
+
+FORM = """PLAN READY
+
+**Worker**: coder
+**Test file**: `tools/factory/test_cutshape.py`
+
+**Files** (allowed paths; nothing else)
+- `tools/factory/cutshape.py`
+- `tools/factory/test_cutshape.py`
+
+**Change**
+text
+
+**Depends on**: none
+"""
+
+
+def issue(n, deps_line, extra=""):
+    body = FORM.replace("**Depends on**: none", deps_line) + extra
+    return {"number": n, "body": body}
+
+
+class CutShape(unittest.TestCase):
+    def test_number_on_the_next_line_is_unreadable(self):
+        p = cutshape.parse(issue(5, "**Depends on**:\n#3"))
+        self.assertEqual(p["deps"], [])
+        self.assertTrue(any("dependency line" in e for e in p["errors"]))
+
+    def test_this_issue_form_reads(self):
+        p = cutshape.parse({"number": 206, "body": FORM})
+        self.assertEqual(p["errors"], [])
+        self.assertEqual(p["worker"], "coder")
+        self.assertEqual(p["paths"], ["tools/factory/cutshape.py", "tools/factory/test_cutshape.py"])
+        self.assertEqual(p["test"], "tools/factory/test_cutshape.py")
+        self.assertEqual(p["deps"], [])
+
+    def test_cycle_is_named_on_both_issues(self):
+        res = cutshape.check([
+            issue(1, "**Depends on**: #2"),
+            issue(2, "**Depends on**: #1"),
+            issue(3, "**Depends on**: #99"),
+        ])
+        self.assertTrue(any(e.startswith("in a cycle: #1 -> #2 -> #1") for e in res[1]))
+        self.assertTrue(any(e.startswith("in a cycle: #") and "#2" in e for e in res[2]))
+        self.assertEqual(res[3], [])
+
+    def test_deps_sorted_without_self(self):
+        p = cutshape.parse(issue(4, "**Depends on**: #9, #4, #2"))
+        self.assertEqual(p["deps"], [2, 9])
+
+    def test_missing_or_double_dependency_line(self):
+        self.assertTrue(cutshape.parse({"number": 1, "body": "**Worker**: coder"})["errors"])
+        two = FORM + "**Depends on**: none\n"
+        self.assertTrue(cutshape.parse({"number": 1, "body": two})["errors"])
+
+    def test_bad_worker_and_paths(self):
+        bad = FORM.replace("**Worker**: coder", "**Worker**: wizard")
+        self.assertTrue(any("worker" in e.lower() for e in cutshape.parse({"number": 1, "body": bad})["errors"]))
+        for path in ("/etc/x", "C:/x", "a/../b", "\\x"):
+            b = FORM.replace("`tools/factory/cutshape.py`", "`%s`" % path)
+            self.assertTrue(cutshape.parse({"number": 1, "body": b})["errors"], path)
+
+    def test_test_file_must_be_listed(self):
+        b = FORM.replace("**Test file**: `tools/factory/test_cutshape.py`", "**Test file**: `other.py`")
+        self.assertTrue(cutshape.parse({"number": 1, "body": b})["errors"])
+
+    def test_comment(self):
+        c = cutshape.comment(["a", "b"])
+        self.assertEqual(c.splitlines()[0], "The factory delegator cannot read this issue, so it is not started:")
+        self.assertIn("- a\n- b", c)
+        self.assertTrue(c.rstrip().endswith("the next beat reads it again."))
+        self.assertNotIn("@", c)
+
+    def test_cycles_ignore_outside_edges(self):
+        a = cutshape.parse(issue(1, "**Depends on**: #99"))
+        self.assertEqual(cutshape.cycles([a]), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

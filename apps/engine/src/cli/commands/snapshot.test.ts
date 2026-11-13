@@ -10,6 +10,7 @@ const { afterEach, beforeEach, describe, expect, it } = await import('vitest')
 const { mkdir, readdir, readFile, rm, writeFile } = await import('node:fs/promises')
 const { createClient } = await import('@libsql/client')
 const { agentDir, agentDataDir, configPath, dataDir, systemDbPath } = await import('../../config/paths.js')
+const { migrateSystemDb } = await import('../../db/systemDb.js')
 const { snapshotCommand } = await import('./snapshot.js')
 
 const backups = () => resolve(dataDir(), 'backups')
@@ -20,8 +21,15 @@ async function coworker(id: string, withDb: boolean) {
     await writeFile(configPath(id), '{}')
     if (!withDb) return
     const client = createClient({ url: `file:${systemDbPath(id)}` })
-    await client.execute('CREATE TABLE t (a TEXT)')
-    await client.execute({ sql: 'INSERT INTO t VALUES (?)', args: [id] })
+    await migrateSystemDb(client, systemDbPath(id))
+    if (id === 'a1') {
+        const vec = `[${Array.from({ length: 1536 }, (_, i) => (i % 7) / 7).join(',')}]`
+        await client.execute({
+            sql: "INSERT INTO memories (id, agent_id, path, content, embedding, kind, created_at) VALUES ('m1', ?, 'p', 'hello', vector32(?), 'note', '2026-01-01')",
+            args: [id, vec],
+        })
+    }
+    await client.execute('PRAGMA wal_checkpoint(TRUNCATE)')
     client.close()
 }
 
@@ -54,7 +62,12 @@ describe('rerun snapshot', () => {
         expect(process.exitCode).toBeUndefined()
         const folders = await readdir(backups())
         expect(folders).toHaveLength(1)
-        expect((await readdir(resolve(backups(), folders[0]!))).sort()).toEqual(['a1.system.db', 'a2.system.db'])
+        expect((await readdir(resolve(backups(), folders[0]!))).filter(f => f.endsWith('.system.db')).sort()).toEqual(['a1.system.db', 'a2.system.db'])
+        const folder = resolve(backups(), folders[0]!)
+        const copy = createClient({ url: `file:${resolve(folder, 'a1.system.db')}` })
+        const rows = await copy.execute("SELECT content FROM memories WHERE id = 'm1'")
+        copy.close()
+        expect(rows.rows[0]?.content).toBe('hello')
         expect(await readFile(systemDbPath('a1'))).toEqual(before[0])
         expect(await readFile(systemDbPath('a2'))).toEqual(before[1])
     })

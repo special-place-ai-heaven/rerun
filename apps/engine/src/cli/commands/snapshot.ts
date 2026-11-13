@@ -23,10 +23,16 @@ function parseKeep(args: string[]): number {
 }
 
 async function copyOne(source: string, target: string): Promise<void> {
-    // The source is opened directly, never through getSystemDb, so nothing is migrated.
-    const src = createClient({ url: `file:${source}` })
+    // Page-level copy: VACUUM INTO rebuilds the vector index shadow tables and breaks their integrity.
+    // node:sqlite is loaded here, not at the top, so the engine's own start never loads it or warns.
+    const { DatabaseSync, backup } = process.getBuiltinModule('node:sqlite') as unknown as {
+        DatabaseSync: new (path: string, options: { readOnly: boolean }) => { close(): void }
+        backup: (source: { close(): void }, path: string) => Promise<number>
+    }
+    // The source is opened directly, read-only, never through getSystemDb, so nothing is migrated.
+    const src = new DatabaseSync(source, { readOnly: true })
     try {
-        await src.execute({ sql: 'VACUUM INTO ?', args: [target] })
+        await backup(src, target)
     } finally {
         src.close()
     }

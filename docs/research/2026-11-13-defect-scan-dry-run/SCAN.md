@@ -6,9 +6,10 @@ as_of 2026-11-13.
 
 The scan works, and it paid for itself on its first real use. Pointed at the code the delegator's next restart
 would bring (`tools/factory`, 59bc1c4 to 453a057), it reported three defects. All three were confirmed against
-the code and against the day's runs. One of them would have cancelled about one healthy build in four. They
+the code and against the day's runs. One of them would have cancelled a large share of healthy builds. They
 were fixed through the factory as #235 (pull request #236, built, reviewed and merged in about ten minutes)
-before any restart.
+before any restart. Checking that fix against the day's runs then showed a fourth fault of the same kind, in a
+limit the scan had not questioned (below, #238).
 
 Recommended use: run it before every restart or deploy of the delegator, over the difference between the
 running commit and `dev`. A weekly schedule over the rest of the repository is the owner's choice and is not
@@ -33,7 +34,9 @@ Worker: the debugging coworker. One run per scan, with the goal `SCANNED: ...` o
 The pass bar was written before any result was read. The code was the delegator between 44cd2bf and 6ed3bb6,
 where three faults were known (each found on live jobs that evening and fixed later). The run got two archives
 and no history, and was forbidden GitHub and memory; its nine tool calls were read afterwards and show only the
-two downloads and files in its own temp folder.
+two downloads and files in its own temp folder. The brief did tell it where to look: follow each changed line
+into the account tools, the contracts and the engine, and check that the two sides agree. That is the class
+all three known faults belong to, so the grade says less about a scan given no such direction.
 
 | Known fault | Impact | Found |
 |---|---|---|
@@ -48,7 +51,7 @@ and at least one other, at most two findings that do not survive). One run is on
 
 | Finding | Checked how | Outcome |
 |---|---|---|
-| The delegator's runs take the runner's limits by fallback: 400,000 tokens | `clocks.outcome` on a run at 450,000 tokens returns CANCEL; of the day's finished builder runs, 13 of 49 used more than 400,000 (largest 1,056,302), none ran over 45 minutes | real, and the worst: one healthy build in four cancelled. `dispatch.json` now has its own clocks, token cap 3,000,000 |
+| The delegator's runs take the runner's limits by fallback: 400,000 tokens | `clocks.outcome` on a run at 450,000 tokens returns CANCEL; of the 49 runs that two builder coworkers finished that day (every run of theirs, not only factory builds), 13 used more than 400,000 (largest 1,056,302), and none ran over 45 minutes | real, and the worst of the three. `dispatch.json` now has its own clocks, token cap 3,000,000 |
 | A delegator stopped while a send is in flight leaves a row without its intent; the job fails after 20 passes with a KeyError while its run goes on | read in `send()` and `lost_run()` | real. The intent is now on the row before its first save; an old row without one ends `blocked` at once with a plain reason |
 | At the first beat after the move to the ledger, a run in flight for more than 10 minutes is cancelled as stalled | `clocks.seen_after` with no earlier sighting dates the last step at the run's start | real, once only. Such a run's first sighting is now dated at that beat |
 
@@ -57,6 +60,20 @@ window but the fix issue). After the fix merged, `test_dispatch.py` was run on `
 
 The orchestrator had read the same diff an hour earlier and found none of the three as a defect. It had noticed
 the second one and judged it rare, and had assumed the opposite of the third without reading `clocks.py`.
+
+## The fourth, found by checking the fix against real runs
+
+The fix kept the stall clock: a run whose step count has not changed for 10 minutes is cancelled. Nobody had
+looked at how the step count behaves on the live engine. Of that day's builds by one builder, a run of 1,391
+seconds with 25 recorded tool calls ended with a step count of 1, and so did a run of 1,502 seconds; a third
+run with 10 tool calls ended with 10. The count is not a sign of life for every run, and one tool call can
+itself outlast 10 minutes. Both long builds would have been cancelled twice and ended `failed`.
+
+The delegator's stall clock is switched off until the count can be trusted (#238); the 45-minute limit and the
+token cap stay. Why the engine's count stays at 1 for some runs is not known yet.
+
+Both clock faults have one cause: a limit was written down from a number that looked reasonable and shipped
+without being held against real runs. A limit is now measured before it ships.
 
 ## What this does not show
 

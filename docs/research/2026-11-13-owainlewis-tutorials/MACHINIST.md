@@ -7,10 +7,19 @@ factory is **machinist**: <https://github.com/owainlewis/machinist> at commit `4
 licence, Go control plane with a React UI, about 20,000 lines of Go without tests. Nothing in it carries the
 labels `factory-ready` or `factory-blocked`, so it is a different and larger program than the one in the lesson.
 
-What was read: `ARCHITECTURE.md`, every operations page under `docs/`, the roadmap, the essay
-`docs/coding-workflows-in-code.md`, the triage, spec and review prompts, the risk-gated merge example and the
-names of its 80 scenario tests. The Go code itself was not read, so every statement about machinist below is
-what its own documents say. Every statement about our factory was checked in our code and carries its path.
+What was read in full: `ARCHITECTURE.md`; under `docs/` the pages `workflows.md`, `artifacts.md`,
+`task-artifact-model.md`, `agent-workflow.md`, `local-factory/spec.md`, `local-factory/automations.md` and
+`local-factory/github-followups.md`; the triage, spec and review prompts; the README and the classify prompt
+of the risk-gated merge example. Read in part: the capacity section of `configuration.md`, sections 3, 4, 5
+(milestones 3 to 6) and 7 of `workflow-roadmap.md`, the second half of the essay
+`coding-workflows-in-code.md`, the first 60 lines of the example's `gate.py`, and the names of the tests of the
+optional script `agent.py`. Not opened: `SECURITY.md`, `native-agents.md`, the setup, Kubernetes and deployment
+pages, and all Go code.
+
+So every statement about machinist below is what its documents say, and each point carries one of three marks:
+**shipped** (the architecture or an operations page describes it as working), **proposed** (the roadmap), or
+**example** (the essay or the optional script). Every statement about our factory was checked in our code and
+carries its path.
 
 ## What it is
 
@@ -35,39 +44,43 @@ credential.
 
 ## What ours lacks or does worse
 
-1. **A typed reason on every waiting job.** machinist gives each queued job `waiting_reasons`: no compatible
+1. **A typed reason on every waiting job** (shipped). machinist gives each queued job `waiting_reasons`: no compatible
    worker, worker busy, global limit, repository limit, hold, and so on. Ours prints a state and, for a
    dependency, `waits on #n` (`tools/factory/timeline.py`); a job held back by a ceiling or a back-off shows no
    reason. Phase B adds queues per worker type and ceilings, which is where this is needed: one field per waiting
    job, from a fixed list.
-2. **Measures of the factory, not of the queue.** Their list: accepted outcomes, human interventions per
-   delivery, repair passes that changed nothing, defects missed, time and cost, recoveries, duplicate
-   deliveries. Ours measures queue depth and waiting, occupancy, tokens per merged job and review time
-   (`tools/factory/measures.py`). Missing are the two that say whether the factory is hands-off and whether its
-   repairs are real: owner interventions per merged change, and fix rounds that pushed no new commit. Their token
-   record also carries a flag for "usage incomplete", so a missing number is never read as zero.
-3. **The check is run by code, not reported by the worker.** In their loop the program runs the test command,
-   reads its exit code, and hands the output to the agent as data ("Python will rerun the checks"). In ours the
-   builder runs the test and says so; the proof arrives later with GitHub's checks. This is the missing answer
-   in [GOAL.md](../2026-11-11-factory-map/GOAL.md): see the note added there.
-4. **The agent recommends, code applies.** Their upkeep agent gets a read-only checkout and suggests labels; the
+2. **Measures of the factory, not of the queue** (proposed; the two counters are in the example script). The
+   roadmap's list: accepted outcomes, human interventions per delivery, repair passes that changed nothing,
+   defects missed, time and cost, recoveries, duplicate deliveries. Ours measures queue depth and waiting,
+   occupancy, tokens per merged job and review time (`tools/factory/measures.py`). Missing are the two that say
+   whether the factory is hands-off and whether its repairs are real: owner interventions per merged change, and
+   fix rounds that pushed no new commit. The optional script `agent.py` already counts repairs with and without
+   a new commit, and marks a token record "usage incomplete" so a missing number is never read as zero.
+3. **The check is run by code, not reported by the worker** (example, and proposed). In the essay's sample loop
+   the program runs the test command, reads its exit code, and hands the output to the agent as data ("Python
+   will rerun the checks"); the roadmap proposes the same for the product. What is shipped is narrower: the
+   foreman checks Git and GitHub evidence against the claim, and the reviewer is given the exact diff and the
+   check results. In ours the builder runs the test and says so; the proof arrives later with GitHub's checks.
+   This bears on the open point of [GOAL.md](../2026-11-11-factory-map/GOAL.md): see the note added there.
+4. **The agent recommends, code applies** (shipped). Their upkeep agent gets a read-only checkout and suggests labels; the
    foreman adds them and "never removes human labels or changes routing labels". Our triage coworker posts its
    own labels with the shared token, and the same protection is a sentence in its instructions (added
    2026-11-13 when this repository joined its list). The pre-pass script that already runs before it is the
    place where the write could move behind code.
-5. **A hold.** A held job is not dispatched and nothing is published for it; the hold survives retries and is
+5. **A hold** (shipped). A held job is not dispatched and nothing is published for it; the hold survives retries and is
    lifted only by naming it. Ours stops a merge by setting the pull request to draft, which ends the job
    `factory-blocked` as a side effect.
-6. **What a schedule does when its last run is not finished.** Theirs: a scheduled job waits for its own earlier
+6. **What a schedule does when its last run is not finished** (shipped). Theirs: a scheduled job waits for its own earlier
    run, skips an occurrence while busy, and after downtime runs once, not once per missed time. Not checked for
    the Rerun engine: to be read before any new upkeep job gets a schedule.
-7. **A check before tokens are spent.** Theirs fails a job with a provisioning error before the agent starts
-   when a tool is missing. Ours learns "no room" from the builder itself, after the run has started
-   (`clocks.klass`, the `_ROOM` texts), and then retries.
-8. **One builder conversation across build and fix.** They keep one session for the build and its repairs. Ours
-   starts a fresh session for every step: `dispatch.py` never passes `sessionId`, though `send_message` takes
-   one. Whether a continued session is cheaper here has to be measured: it saves re-reading the code and adds
-   the whole earlier conversation to every step.
+7. **A check before tokens are spent** (example). The optional script fails a job with a provisioning error
+   before the agent starts when a tool is missing. Ours learns "no room" from the builder itself, after the run
+   has started (`clocks.klass`, the `_ROOM` texts), and then retries.
+8. **One builder conversation across build and fix** (proposed). The roadmap wants one session for the build
+   and its repairs "when the harness supports it"; the shipped product starts a fresh process for every stage,
+   as ours does (`dispatch.py` never passes `sessionId`, though `send_message` takes one). So neither has it.
+   Whether a continued session is cheaper here has to be measured: it saves re-reading the code and adds the
+   whole earlier conversation to every step.
 
 ## Where ours is ahead
 
@@ -81,14 +94,22 @@ credential.
 ## A risk their design points at
 
 machinist never runs two agents on one subscription at once, and says why: the credential is one stream. Ours
-does, and the engine handles the reason it is dangerous: Anthropic revokes the old access token when a new one
-is issued, so the engine refreshes "while no CLI is out on this connection", hours ahead, and forces a refresh
-under live runs only in the last minutes (`apps/engine/src/connections/claude-token.ts`, the comment above
-`IDLE_REFRESH_WINDOW_MS`). A factory that is busy around the clock has no idle moment. Then the forced refresh
-arrives under every running coworker at once, and their runs end on a rejected credential, which the delegator
-counts as a failed attempt, not as a passing failure (`clocks.klass`, `_ERR`). This is a prerequisite of phase
-B to check before the ceiling of parallel runs is raised: either that error becomes class `transient`, or the
-delegator leaves a gap for the refresh.
+does. What our engine does about it, read in `apps/engine/src/connections/claude-token.ts`:
+
+- A connection whose token has no refresh token or expiry is "static" and is never refreshed. Then none of
+  this applies. Which kind the live connection holds was not checked.
+- Otherwise the old access token is revoked when a new one is issued (the comment above
+  `IDLE_REFRESH_WINDOW_MS`), and a running program keeps the token it started with. So
+  `ensureFreshClaudeToken` refreshes from four hours before expiry, but only while no run is out on the
+  connection; with runs out it defers, and in the last five minutes it refreshes regardless.
+- A run whose token was swapped under it is told apart (`claudeTokenOutlived`). What the engine then does with
+  that run was not read.
+
+The question for phase B follows from the second point. A factory that is busy around the clock has no moment
+without a run, so the refresh arrives under every running coworker at once. If those runs then end in error,
+the delegator counts each as a failed attempt and not as a passing failure (`clocks.klass`, `_ERR` lists only
+overload and rate limits). To settle before the ceiling of parallel runs is raised: the kind of token, what
+happens to an outlived run, and whether that error belongs in class `transient`.
 
 ## Not taken
 

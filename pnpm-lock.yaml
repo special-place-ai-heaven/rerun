@@ -195,6 +195,9 @@ importers:
       pino:
         specifier: ^10.4.0
         version: 10.4.0
+      pxpipe-proxy:
+        specifier: ^0.16.0
+        version: 0.16.0
       sharp:
         specifier: ^0.35.5
         version: 0.35.5(@types/node@20.19.43)
@@ -14582,6 +14585,10 @@ packages:
       responselike: 2.0.1
     dev: true
 
+  /gpt-tokenizer@4.1.2:
+    resolution: {integrity: sha512-5GwcLcZd6IqCdrGTTPcoKqbJk8cCWHHsoTHR/uQGZKT29CFcnJEg69qisGbKesQpzxRq9yQO4lBgsaZ8SawcGQ==}
+    dev: false
+
   /graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
@@ -19305,6 +19312,14 @@ packages:
     resolution: {integrity: sha512-BbubeCEyTuQjVMakvJQ/Sxbc93F2pwmbsxONT/ZRrwU7Ua38d8unYTwXpTVLAKJ4BDuH9IGztCjQcd/N/39Dvg==}
     engines: {node: '>=16.0.0'}
     dev: true
+
+  /pxpipe-proxy@0.16.0:
+    resolution: {integrity: sha512-T4lSs6XFPDhWqEkC7LJxhSd6Cp1r2yC9aa/6cvWkZhvPF8XkB3FH4A7+P6atDMJbBDlimWJg477zHjnZDmEGRQ==}
+    engines: {node: '>=20.19'}
+    hasBin: true
+    dependencies:
+      gpt-tokenizer: 4.1.2
+    dev: false
 
   /qs@6.17.1:
     resolution: {integrity: sha512-jd3COkaKVgGUW+ZHyEHCG9bH7RoaaiWuMgzsIBjUMVjLAaWGWpoUAVwljVvBHxRu/2qEHnadLGZrkutYUBPQJA==}

@@ -59,6 +59,8 @@ def review_brief(j, pr, head):
         '',
         'Review it once, the way your instructions say, and post your verdict on the pull request with your review tool.',
         '',
+        'The checks of this commit may still be running. Do not wait for them and do not block on them: the dispatcher merges only when every check of this exact commit is green. Your verdict is on the diff alone, also where your own rules say a review needs green checks.',
+        '',
         'Sprint rule from Rob, 2026-11-13 ("skip any noncritical tests or validations, we can patch up after the fact"): reject only for wrong behaviour, for a hole that touches keys, sign-in or stored data, or for new logic that has no test at all. Everything else goes into your verdict as a follow-up note and does not block.',
         '',
         'End your answer with one last line, exactly `VERDICT: ACCEPT @<first 7 characters of the commit>` or `VERDICT: REJECT @<first 7 characters>: <one sentence>`. On GitHub write coworker names without the at-sign.',

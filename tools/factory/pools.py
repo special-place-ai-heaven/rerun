@@ -34,3 +34,21 @@ def pick(cfg, worker, busy):
 def max_jobs(cfg, worker):
     t = types(cfg).get(worker)
     return None if t is None else t["max_jobs"]
+
+
+def pick_copy(cfg, worker, running):
+    """(id, copy) for the first coworker of the type with a free run; None if none.
+
+    running is a list of (id, copy) of jobs whose run is out; copy None counts as 1.
+    """
+    t = types(cfg).get(worker)
+    if t is None:
+        return None
+    for c in t["coworkers"]:
+        taken = {1 if k is None else k for i, k in running if i == c["id"]}
+        if len([1 for i, _ in running if i == c["id"]]) >= c["runs"]:
+            continue
+        copy = next((n for n in range(1, c["runs"] + 1) if n not in taken), None)
+        if copy is not None:
+            return c["id"], copy
+    return None

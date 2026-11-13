@@ -1,9 +1,12 @@
 """Factory dispatcher (rerun#112): carries several labelled issues at once through build -> review -> one fix round ->
 checks -> merge on live coworkers. Server port of ~/.claude/scripts/rerun-factory.mjs.
-  dispatch.py run | once | status
+  dispatch.py run | once      (the status command is `timeline.py status`)
 One pass is single-threaded and never waits on a coworker: each unfinished job moves at most one step. Every change is
-saved to the state file at once, and a send is recorded before it goes out, so a restart never sends a step twice."""
+written to the ledger (store.py) at once as a transitions row, and a send is recorded as an intent row before it goes
+out, so a restart never sends a step twice."""
 import argparse, datetime, json, os, re, subprocess, sys, tempfile, time, urllib.error, urllib.request
+
+import store as ledger_store
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WAIT_S = 1  # smallest waitSeconds send_message takes: clamp() in apps/ui/lib/mcp/args.ts floors at 1
@@ -191,28 +194,6 @@ def depends_on(issue):
     return sorted({n for n in nums if n != issue["number"]})
 
 
-def load_state(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {"jobs": {}}
-
-
-def save_state(path, state):
-    d = os.path.dirname(os.path.abspath(path))
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=".dispatch-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=1, sort_keys=True)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        os.unlink(tmp)
-        raise
-
-
 def checks_verdict(runs):
     """Workflow runs of the head commit -> ("WAIT"|"FAIL"|"OK", reason)."""
     if not runs:
@@ -235,15 +216,19 @@ class Dispatcher:
     def __init__(self, cfg, account, gh, now=time.time):
         self.cfg, self.account, self.gh, self.now = cfg, account, gh, now
         self.repo, self.label = cfg["repo"], cfg.get("label", "factory")
-        self.path = cfg["state_file"]
-        self.state = load_state(self.path)
+        self.store = ledger_store.Store(cfg["ledger_file"])  # the delegator is the one writer
+        self.store.import_json(cfg["json_state_file"])  # once; a second run finds it done
         self.names = {c["id"]: c["name"] for c in cfg["builders"] + cfg["reviewers"]}
 
-    def save(self):
-        save_state(self.path, self.state)
+    def close(self):
+        self.store.close()
+
+    def save(self, j, reason=None):
+        """One transitions row: the job as it is now, with its time."""
+        self.store.put_job(str(j["issue"]), j["state"], j, reason, j.get("run"))
 
     def jobs(self):
-        return sorted(self.state["jobs"].values(), key=lambda j: j["issue"])
+        return sorted(self.store.jobs(), key=lambda j: j["issue"])
 
     def busy(self):
         return {j["agent"] for j in self.jobs() if j["state"] in RUNNING and j.get("agent")}
@@ -254,26 +239,25 @@ class Dispatcher:
 
     def to(self, j, state, msg, **kw):
         j.update(kw, state=state)
-        self.save()
+        self.save(j, msg)
         log(j["issue"], msg)
 
     # --- intake
 
     def intake(self):
-        open_jobs = [j for j in self.jobs() if j["state"] not in END]
+        open_jobs = [j for j in self.jobs() if j["state"] not in END + ("waiting",)]
         room = self.cfg.get("max_jobs", 8) - len(open_jobs)
         if room <= 0:
             return
         issues = json.loads(self.gh(["issue", "list", "-R", self.repo, "--label", self.label, "--state", "open",
                                      "--json", "number,title,body", "--limit", "100"]))
         open_numbers = None
-        waiting = self.state.setdefault("waiting", {})
         for i in sorted(issues, key=lambda i: i["number"]):
             if room <= 0:
                 break
-            old = self.state["jobs"].get(str(i["number"]))
+            old = self.store.get_job(str(i["number"]))
             # An ended job lost its label when it was reported: the label being back means "run it again".
-            if old and not (old["state"] in END and old.get("relabelled")):
+            if old and old["state"] != "waiting" and not (old["state"] in END and old.get("relabelled")):
                 continue
             deps = depends_on(i)
             if deps:
@@ -282,9 +266,9 @@ class Dispatcher:
                         ["issue", "list", "-R", self.repo, "--state", "open", "--json", "number", "--limit", "1000"]))}
                 unmet = [d for d in deps if d in open_numbers]
                 if unmet:
-                    if waiting.get(str(i["number"])) != unmet:
-                        waiting[str(i["number"])] = unmet
-                        self.save()
+                    if not old or old.get("waiting") != unmet:
+                        self.save({"issue": i["number"], "title": i["title"], "body": i.get("body") or "", "state": "waiting",
+                                   "round": 1, "waiting": unmet}, "waits on " + ", ".join("#%d" % d for d in unmet))
                         log(i["number"], "waits on " + ", ".join("#%d" % d for d in unmet))
                     continue
             if self.cfg.get("auto_plan_marker", True):
@@ -294,14 +278,12 @@ class Dispatcher:
                     self.gh(["issue", "comment", str(i["number"]), "-R", self.repo, "--body",
                              "SMALL FIX: taken by the factory dispatcher on the owner's label."])
                     log(i["number"], "plan line posted")
-            waiting.pop(str(i["number"]), None)
             job = {"issue": i["number"], "title": i["title"], "body": i.get("body") or "", "state": "queued", "round": 1}
             if old and old.get("pr") and json.loads(self.gh(["pr", "view", str(old["pr"]), "-R", self.repo, "--json", "state"])).get("state") == "OPEN":
                 # Put back in with its pull request still open: that one is reviewed, a second build would open a duplicate.
                 job.update(state="review_wait", pr=old["pr"], builder=old.get("builder"))
-            self.state["jobs"][str(i["number"])] = job
             room -= 1
-            self.save()
+            self.save(job, "queued")
             log(i["number"], ("back in at the review of #%s: " % job["pr"] if job.get("pr") else "queued: ") + i["title"][:120])
 
     # --- coworker runs
@@ -309,7 +291,8 @@ class Dispatcher:
     def send(self, j, agent, step, message, state):
         """Record the intent, send, record the run id. An intent left without a run id is never sent again."""
         j.update(agent=agent, run=None, sending=step, state=state)
-        self.save()
+        self.save(j, step)
+        j["fire_id"] = self.store.intent(str(j["issue"]), "", step, coworker=self.names.get(agent, agent))
         args = {"agentId": agent, "message": message, "waitSeconds": WAIT_S}
         if state in GOALS:
             # One object, as the account tool takes it (runGoalSchema in packages/contracts/src/run-goal.ts).
@@ -318,10 +301,12 @@ class Dispatcher:
             r = self.account("send_message", args)
         except Error as e:
             if "invalid_goal" in str(e):
+                self.store.abandon(j["fire_id"], str(e)[:200])
                 return self.end(j, "failed", str(e)[:200])
             raise
+        self.store.fired(j["fire_id"], r["runId"])
         j.update(run=r["runId"], sending=None)
-        self.save()
+        self.save(j, "sent " + step)
         log(j["issue"], "%s -> %s (run %s)" % (step, self.names.get(agent, agent[:8]), r["runId"]))
 
     def message(self, j):
@@ -483,12 +468,12 @@ class Dispatcher:
                 text = "The factory dispatcher stopped this job: %s. Pull request: %s. Reason: %s" % (j["state"], pr, j.get("reason") or "-")
             self.gh(["issue", "comment", n, "-R", self.repo, "--body", text])
             j["commented"] = True
-            self.save()
+            self.save(j, "commented")
         if not j.get("relabelled"):
             done = "factory-done" if j["state"] == "merged" else "factory-blocked"
             self.gh(["issue", "edit", n, "-R", self.repo, "--remove-label", self.label, "--add-label", done])
             j["relabelled"] = True
-            self.save()
+            self.save(j, "relabelled")
             log(n, "reported, labelled " + done)
 
     def once(self):
@@ -503,11 +488,14 @@ class Dispatcher:
                     self.step(j)
                 if j["state"] in END and not j.get("relabelled"):
                     self.report(j)
-                j["errors"] = 0
+                if j.get("errors"):
+                    j["errors"] = 0
+                    self.save(j, "pass ok")
             except (Error, ValueError, KeyError) as e:
                 log(j["issue"], "%s: %s" % (j["state"], e if isinstance(e, Error) else type(e).__name__))
                 # A read that fails on every pass would keep its coworker busy for good.
                 j["errors"] = j.get("errors", 0) + 1
+                self.save(j, "pass failed")
                 if j["errors"] >= 20 and j["state"] not in END:
                     self.end(j, "failed", "20 passes in a row failed in state %s" % j["state"])
 
@@ -524,13 +512,9 @@ def settings():
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="dispatch")
-    ap.add_argument("cmd", choices=("run", "once", "status"))
+    ap.add_argument("cmd", choices=("run", "once"))
     a = ap.parse_args(argv)
     cfg = settings()
-    if a.cmd == "status":
-        for j in sorted(load_state(cfg["state_file"])["jobs"].values(), key=lambda j: j["issue"]):
-            print("#%s %s pr=%s round=%s %s" % (j["issue"], j["state"], j.get("pr") or "-", j.get("round"), j.get("reason") or ""))
-        return 0
     url = os.environ.get("DISPATCH_ACCOUNT_URL")
     if not url:
         print("dispatch: DISPATCH_ACCOUNT_URL is not set", file=sys.stderr)
@@ -546,6 +530,7 @@ def main(argv=None):
         len(cfg["builders"]), len(cfg["reviewers"]), cfg.get("label", "factory"), cfg["repo"]))
     if a.cmd == "once":
         d.once()
+        d.close()
         return 0
     while True:
         d.once()

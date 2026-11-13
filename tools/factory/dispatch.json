@@ -5,7 +5,8 @@
   "max_jobs": 8,
   "checks_timeout_s": 1800,
   "auto_plan_marker": true,
-  "state_file": "/state/dispatch.json",
+  "ledger_file": "/state/ledger.db",
+  "json_state_file": "/state/dispatch.json",
   "account_key_file": "/run/secrets/account_key",
   "gh_token_file": "/run/secrets/gh_token",
   "builders": [

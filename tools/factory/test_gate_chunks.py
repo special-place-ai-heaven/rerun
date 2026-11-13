@@ -1,5 +1,5 @@
 """Gate: a multi-chunk PR body; LIMITS judged per chunk by its commit. GitHub calls are stand-ins."""
-import os, sys, unittest
+import contextlib, io, os, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate as G
 
@@ -31,6 +31,23 @@ class GateChunks(unittest.TestCase):
         self.assertEqual(G.receipts(body, "factory/job-71"), {"A": (True, True), "B": (True, False), "C": (False, True)})
         self.assertEqual(G.receipts(body, "chunk/71-A"), {})
         self.assertEqual(G.receipts(body, "factory/job-x"), {})
+
+    def test_job_pr_without_receipt_fails_both(self):
+        def run(body):
+            pr = {"head": {"sha": "a" * 40, "ref": "factory/job-71"}, "body": body}
+            fk = lambda path, **k: pr if path.endswith("/pulls/9") else {} if "/issues/71" in path else []
+            ok = [{"name": "ci", "status": "completed", "conclusion": "success", "id": 1, "url": ""}]
+            out, olds = io.StringIO(), (G.gh_json, G.head_checks, G.F.STATE)
+            G.gh_json, G.head_checks, G.F.STATE = fk, lambda *a: ok, tempfile.mkdtemp()
+            try:
+                with contextlib.redirect_stdout(out):
+                    G.gate("special-place-ai-heaven/rerun", "9")
+            finally:
+                G.gh_json, G.head_checks, G.F.STATE = olds
+            return {l.split()[0]: l.split()[1] for l in out.getvalue().splitlines()[1:] if l.split()[0] in ("CI_GREEN", "DONE_TEST", "FAIL_BEFORE")}
+        head = "Job: special-place-ai-heaven/rerun#71, chunk A, B\n"
+        self.assertEqual(run(head + "Receipt A: done-test ok (base exit 2, head exit 0)"), {"CI_GREEN": "PASS", "DONE_TEST": "FAIL", "FAIL_BEFORE": "FAIL"})
+        self.assertEqual(run(head + "Receipt A: done-test ok (base exit 2, head exit 0)\nReceipt B: done-test ok (base exit 1, head exit 0)")["DONE_TEST"], "PASS")
 
 
 if __name__ == "__main__":

@@ -33,7 +33,12 @@ type AgentPanelSettingsProps = {
     agent: IsoAgent
 }
 
-type ConfigValues = { soul: string; verbosity: EngineVerbosity }
+type ThinkingChoice = 'none' | 'low' | 'medium' | 'high'
+type ConfigValues = { soul: string; verbosity: EngineVerbosity; thinking: ThinkingChoice }
+
+const THINKING_CHOICES: ThinkingChoice[] = ['none', 'low', 'medium', 'high']
+// Providers the engine has no thinking option for (see thinkingSettingsFor): the level is stored, never applied.
+const THINKING_UNSUPPORTED = new Set<string>(['codex', 'opencode', 'custom'])
 
 // Le bouton de sauvegarde vit dans le footer sticky, hors du <form> : il le vise par son id.
 const SETTINGS_FORM_ID = 'agent-settings-form'
@@ -43,6 +48,9 @@ export function AgentPanelSettings({ agent }: AgentPanelSettingsProps) {
     const t = useTranslations('agent.agentPanelSettings')
     const errorText = useErrorText()
     const verbosityOptions = useMemo(() => VERBOSITY_LEVELS.map((value: EngineVerbosity) => ({ value, label: t(`verbosity.${value}`) })), [t])
+    const thinkingOptions = useMemo(() => THINKING_CHOICES.map(value => ({ value, label: t(`thinking.${value}`) })), [t])
+    const [provider, setProvider] = useState<string | null>(null)
+    const thinkingUnsupported = provider !== null && THINKING_UNSUPPORTED.has(provider)
     const renameAgent = useBoardStore(s => s.renameAgent)
     const openNotifications = useNotificationsStore(s => s.openNotifications)
     const soulLocked = useTemplateContentLock(agent.id)
@@ -53,7 +61,7 @@ export function AgentPanelSettings({ agent }: AgentPanelSettingsProps) {
     const [saved, setSaved] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
-    const form = useForm<ConfigValues>({ defaultValues: { soul: '', verbosity: 'normal' } })
+    const form = useForm<ConfigValues>({ defaultValues: { soul: '', verbosity: 'normal', thinking: 'none' } })
     const {
         formState: { isSubmitting },
     } = form
@@ -83,19 +91,21 @@ export function AgentPanelSettings({ agent }: AgentPanelSettingsProps) {
                 form.reset({
                     soul: detail.soul,
                     verbosity: c.verbosity,
+                    thinking: c.thinkingLevel ?? 'none',
                 })
+                setProvider(c.provider)
             })
             .catch(() => setError(t('unreachable')))
             .finally(() => setLoading(false))
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [agent.id])
 
-    const handleSave = form.handleSubmit(async ({ soul, verbosity }) => {
+    const handleSave = form.handleSubmit(async ({ soul, verbosity, thinking }) => {
         setError(null)
         // Note: provider/model are intentionally omitted here — they are owned by the
         // in-chat ModelSelector. Including them would overwrite the user's selection.
         // A sealed soul is dropped server-side, so the rest of this form still saves.
-        const result = await updateAgentConfigAction(agent.id, { soul, verbosity })
+        const result = await updateAgentConfigAction(agent.id, { soul, verbosity, thinkingLevel: thinking === 'none' ? null : thinking })
         if (result.success) {
             setSaved(true)
             setTimeout(() => setSaved(false), 2000)
@@ -167,6 +177,24 @@ export function AgentPanelSettings({ agent }: AgentPanelSettingsProps) {
                                         <TooltipDisabledReason reason={manageReason} className="flex w-full flex-col">
                                             <FormControl>
                                                 <Segmented options={verbosityOptions} value={field.value} onChange={field.onChange} className={canManage ? undefined : 'pointer-events-none opacity-60'} />
+                                            </FormControl>
+                                        </TooltipDisabledReason>
+                                    </Field>
+                                </FormItem>
+                            )}
+                        />
+
+                        <FormField
+                            control={form.control}
+                            name="thinking"
+                            render={({ field }) => (
+                                <FormItem className="space-y-1">
+                                    <Field label={t('thinking.label')} helperText={thinkingUnsupported ? t('thinking.unsupported') : t('thinking.helper')}>
+                                        <TooltipDisabledReason reason={manageReason} className="flex w-full flex-col">
+                                            <FormControl>
+                                                <div data-testid="thinking-level" aria-disabled={thinkingUnsupported || !canManage} inert={thinkingUnsupported || !canManage}>
+                                                    <Segmented options={thinkingOptions} value={field.value} onChange={field.onChange} className={thinkingUnsupported || !canManage ? 'opacity-60' : undefined} />
+                                                </div>
                                             </FormControl>
                                         </TooltipDisabledReason>
                                     </Field>

@@ -853,6 +853,15 @@
             "normal": "Normale",
             "detailed": "Détaillée"
         },
+        "thinking": {
+            "label": "Niveau de réflexion",
+            "helper": "Combien il réfléchit avant de répondre. Plus haut, c'est plus lent et plus coûteux.",
+            "unsupported": "Non appliqué sur ce fournisseur.",
+            "none": "Non défini",
+            "low": "Faible",
+            "medium": "Moyen",
+            "high": "Élevé"
+        },
         "notifications": {
             "label": "Notifications",
             "choose": "Choisir ce qui vous parvient"

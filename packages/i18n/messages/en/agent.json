@@ -932,6 +932,15 @@
             "normal": "Normal",
             "detailed": "Detailed"
         },
+        "thinking": {
+            "label": "Thinking level",
+            "helper": "How hard it reasons before answering. Higher is slower and costs more.",
+            "unsupported": "Not applied on this provider.",
+            "none": "Not set",
+            "low": "Low",
+            "medium": "Medium",
+            "high": "High"
+        },
         "notifications": {
             "label": "Notifications",
             "choose": "Choose what reaches you"

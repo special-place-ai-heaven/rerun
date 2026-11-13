@@ -7,6 +7,8 @@ import { abortRun } from '../../runtime/run-control.js'
 import { abortSubRun } from '../../tools/builtin/sub-run-watch.js'
 import { emitRunTerminal, triggerFromRun } from '../../runtime/run-events.js'
 
+const JOB_REF_RE = /^[A-Za-z0-9._-]+#[0-9]+$/
+
 const USAGE_RANGE_MS: Record<string, number> = {
     '24h': 24 * 60 * 60 * 1000,
     '7d': 7 * 24 * 60 * 60 * 1000,
@@ -74,7 +76,11 @@ runRoutes.get('/', async c => {
     const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 50
     const sessionId = c.req.query('session') || undefined
     const status = c.req.query('status') || undefined
-    return c.json({ runs: await listRunsByAgent(agentId, { limit, sessionId, status }) })
+    const job = c.req.query('job') || undefined
+    if (job !== undefined && !JOB_REF_RE.test(job)) return c.json({ error: 'job must be repo#<number>' }, 400)
+    const branch = c.req.query('branch') || undefined
+    if (branch !== undefined && branch.length > 200) return c.json({ error: 'branch must be at most 200 characters' }, 400)
+    return c.json({ runs: await listRunsByAgent(agentId, { limit, sessionId, status, job, branch }) })
 })
 
 runRoutes.get('/:rid/steps', async c => {

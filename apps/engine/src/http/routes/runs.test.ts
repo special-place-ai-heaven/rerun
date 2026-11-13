@@ -164,6 +164,66 @@ describe('GET /agents/:id/runs', () => {
         expect(await listed('?session=buried-session&status=done')).toEqual([])
         expect(await listed('?status=running')).toEqual(['buried'])
     })
+
+    describe('job and branch filters', () => {
+        const jobAgent = 'jobagent'
+
+        beforeAll(async () => {
+            const { client } = await getSystemDb(jobAgent)
+            const rows: [string, string, string | null, string | null, string][] = [
+                ['j1', 'done', 'rerun#42', 'job/42', '2026-02-01T00:00:01.000Z'],
+                ['j2', 'running', 'rerun#42', 'job/42', '2026-02-01T00:00:02.000Z'],
+                ['j3', 'done', 'rerun#42', 'job/43', '2026-02-01T00:00:03.000Z'],
+                ['j4', 'done', 'rerun#7', 'job/42', '2026-02-01T00:00:04.000Z'],
+                ['j5', 'done', null, null, '2026-02-01T00:00:05.000Z'],
+            ]
+            await client.batch(
+                rows.map(([rid, status, job, branch, at]) => ({
+                    sql: 'INSERT INTO runs (id, agent_id, session_id, status, started_at, job_ref, branch) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    args: [rid, jobAgent, 's', status, at, job, branch],
+                })),
+            )
+        })
+
+        async function jobListed(query: string): Promise<string[]> {
+            const res = await app.request(`/agents/${jobAgent}/runs${query}`)
+            expect(res.status).toBe(200)
+            return ((await res.json()) as { runs: { id: string }[] }).runs.map(r => r.id)
+        }
+
+        it('filters by job', async () => {
+            expect(await jobListed('?job=rerun%2342')).toEqual(['j3', 'j2', 'j1'])
+        })
+
+        it('rejects a job that is not repo#number', async () => {
+            for (const bad of ['owner%2Frepo%231', 'rerun', 'rerun%23', 'rerun%23x']) {
+                const res = await app.request(`/agents/${jobAgent}/runs?job=${bad}`)
+                expect(res.status).toBe(400)
+                expect(await res.json()).toEqual({ error: 'job must be repo#<number>' })
+            }
+        })
+
+        it('rejects a branch longer than 200 characters', async () => {
+            expect((await app.request(`/agents/${jobAgent}/runs?branch=${'a'.repeat(201)}`)).status).toBe(400)
+        })
+
+        it('combines job, branch and status with AND', async () => {
+            expect(await jobListed('?job=rerun%2342&branch=job%2F42&status=done')).toEqual(['j1'])
+            expect(await jobListed('?branch=job%2F42')).toEqual(['j4', 'j2', 'j1'])
+        })
+
+        it('treats an empty job or branch as no filter', async () => {
+            expect(await jobListed('?job=')).toHaveLength(5)
+            expect(await jobListed('?branch=&job=')).toHaveLength(5)
+        })
+
+        it('keeps a run without the new fields valid', async () => {
+            const { runSchema } = await import('@rerun/contracts')
+            const { initiatorAgentId, initiatorRunId, initiatorSessionId, initiatorUserId, jobRef, branch, copyIndex, ...legacy } = (await getRun(jobAgent, 'j5'))!
+            void [initiatorAgentId, initiatorRunId, initiatorSessionId, initiatorUserId, jobRef, branch, copyIndex]
+            expect(runSchema.safeParse(legacy).success).toBe(true)
+        })
+    })
 })
 
 describe('GET /agents/:id/runs/:rid', () => {

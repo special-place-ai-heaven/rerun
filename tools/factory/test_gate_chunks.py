@@ -37,13 +37,13 @@ class GateChunks(unittest.TestCase):
             pr = {"head": {"sha": "a" * 40, "ref": "factory/job-71"}, "body": body}
             fk = lambda path, **k: pr if path.endswith("/pulls/9") else {} if "/issues/71" in path else []
             ok = [{"name": "ci", "status": "completed", "conclusion": "success", "id": 1, "url": ""}]
-            out, olds = io.StringIO(), (G.gh_json, G.head_checks, G.F.STATE)
-            G.gh_json, G.head_checks, G.F.STATE = fk, lambda *a: ok, tempfile.mkdtemp()
+            out, olds = io.StringIO(), (G.gh_json, G.head_checks, G.F.STATE, G.F.base_roster)
+            G.gh_json, G.head_checks, G.F.STATE, G.F.base_roster = fk, lambda *a: ok, tempfile.mkdtemp(), lambda full: None
             try:
                 with contextlib.redirect_stdout(out):
                     G.gate("special-place-ai-heaven/rerun", "9")
             finally:
-                G.gh_json, G.head_checks, G.F.STATE = olds
+                G.gh_json, G.head_checks, G.F.STATE, G.F.base_roster = olds
             return {l.split()[0]: l.split()[1] for l in out.getvalue().splitlines()[1:] if l.split()[0] in ("CI_GREEN", "DONE_TEST", "FAIL_BEFORE")}
         head = "Job: special-place-ai-heaven/rerun#71, chunk A, B\n"
         self.assertEqual(run(head + "Receipt A: done-test ok (base exit 2, head exit 0)"), {"CI_GREEN": "PASS", "DONE_TEST": "FAIL", "FAIL_BEFORE": "FAIL"})

@@ -26,7 +26,7 @@ describe('decidePermission', () => {
     })
 
     it('refuses every other origin, an embedded page included', () => {
-        expect(decidePermission({ permission: 'notifications', requestingOrigin: 'https://js.stripe.com' }, SERVER)).toBe(false)
+        expect(decidePermission({ permission: 'notifications', requestingOrigin: 'https://js.example.com' }, SERVER)).toBe(false)
         expect(decidePermission({ permission: 'clipboard-read', requestingOrigin: '' }, SERVER)).toBe(false)
         expect(decidePermission({ permission: 'notifications', requestingOrigin: SERVER }, null)).toBe(false)
     })

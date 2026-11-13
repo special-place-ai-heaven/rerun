@@ -7,7 +7,7 @@ import { localPageUrl } from './local-pages'
 import { t } from './messages'
 import { partitionFor } from './server'
 import { prepareSession } from './session'
-import { decideNavigation, decideWindowOpen, isExternalUrl, isPaymentPage, isSameOrigin, parseUrl } from './url-policy'
+import { decideNavigation, decideWindowOpen, isExternalUrl, isSameOrigin, parseUrl } from './url-policy'
 import { restoredBounds, trackBounds } from './window-state'
 import { attachContextMenu, desktopSettings, explainBackgroundOnce, hasTray } from './native'
 
@@ -89,43 +89,13 @@ function guardChildWindow(contents: WebContents, origin: string): void {
     contents.on('will-redirect', leave)
 }
 
-// Stripe's page in a window of its own, the app's session included (Checkout reads the customer's
-// cookie-less session from its URL, the return lands on the app). When Stripe sends the person back
-// to the server, the window closes and the app opens the return page.
-function openPaymentWindow(url: string, origin: string): void {
-    const parent = getMainWindow()
-    const payment = new BrowserWindow({
-        width: 560,
-        height: 780,
-        parent: parent ?? undefined,
-        autoHideMenuBar: true,
-        backgroundColor: themeColors().background,
-        webPreferences: { partition: partitionFor(origin), sandbox: true, contextIsolation: true, nodeIntegration: false },
-    })
-    const contents = payment.webContents
-    const back = (event: Electron.Event, target: string) => {
-        if (!isSameOrigin(target, origin)) return
-        event.preventDefault()
-        payment.close()
-        void parent?.loadURL(target)
-    }
-    contents.on('will-navigate', back)
-    contents.on('will-redirect', back)
-    contents.setWindowOpenHandler(({ url: opened }) => {
-        if (isExternalUrl(opened)) void openExternal(opened)
-        return { action: 'deny' }
-    })
-    void payment.loadURL(url)
-}
-
 function guardNavigation(window: BrowserWindow, origin: string): void {
     const contents = window.webContents
     const away = (event: Electron.Event, url: string) => {
         const decision = decideNavigation(url, origin)
         if (decision === 'stay') return
         event.preventDefault()
-        if (isPaymentPage(url)) openPaymentWindow(url, origin)
-        else if (decision === 'external') void openExternal(url)
+        if (decision === 'external') void openExternal(url)
     }
     contents.on('will-navigate', away)
     contents.on('will-redirect', away)

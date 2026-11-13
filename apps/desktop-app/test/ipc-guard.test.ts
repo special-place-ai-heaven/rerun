@@ -12,7 +12,7 @@ describe('senderAudience', () => {
 
     it('refuses an iframe, even one of the server', () => {
         expect(senderAudience({ url: 'https://app.rerun.build/embed', isMainFrame: false }, SERVER, LOCAL)).toBeNull()
-        expect(senderAudience({ url: 'https://js.stripe.com/v3', isMainFrame: false }, SERVER, LOCAL)).toBeNull()
+        expect(senderAudience({ url: 'https://js.example.com/v3', isMainFrame: false }, SERVER, LOCAL)).toBeNull()
     })
 
     it('refuses any other origin, a destroyed frame and a page with no server configured', () => {

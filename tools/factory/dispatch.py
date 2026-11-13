@@ -41,7 +41,7 @@ def build_brief(j):
         '',
         '1. Open your worktree for rerun #%s from dev, the way your instructions say.' % j["issue"],
         '2. Where the issue names a done-test, write it first and see it fail. Then make the change, in the files the issue names and nowhere else.',
-        '3. Run only the test files you touched, with the worker pool capped at 2. No full suite.',
+        '3. Run only the test files you touched, with the worker pool capped at 2. No full suite. Then run the lint and the type check of every package the change touched (`pnpm --filter <package> lint`, `pnpm --filter <package> ts-check`), and for Python files under `tools/factory` run `ruff check` on them where ruff is installed; fix what they report before opening the pull request. Lint warnings do not block; lint errors do.',
         '4. Commit, push, and open one pull request into dev. Title: the issue title plus "(#%s)". Body: what changed, which test failed before and passes now, and the line "Closes #%s".' % (j["issue"], j["issue"]),
         '5. Leave the worktree open. It is closed after the merge by a sweep.',
         '6. End your answer with one last line, exactly `PR: <url>` or `BLOCKED: <one sentence>`.',

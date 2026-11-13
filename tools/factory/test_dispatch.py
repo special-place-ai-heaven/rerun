@@ -191,6 +191,15 @@ class Depends(Base):
         self.assertEqual(self.w.sends, [])
 
 
+class BuildBrief(unittest.TestCase):
+    def test_build_message_asks_for_lint_and_type_check(self):
+        b = D.build_brief({"issue": 7, "title": "Fix x"})
+        self.assertIn("lint", b)
+        self.assertIn("ts-check", b)
+        self.assertIn("capped at 2", b)
+        self.assertIn("No full suite", b)
+
+
 class OneBuilder(Base):
     builders = ["b1"]
 

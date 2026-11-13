@@ -1,4 +1,4 @@
-import contextlib, gc, io, json, os, sys, tempfile, unittest, unittest.mock, urllib.error
+import contextlib, gc, io, json, os, sqlite3, sys, tempfile, unittest, unittest.mock, urllib.error
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dispatch as D
 
@@ -18,6 +18,8 @@ class World:
         self.mergeable, self.unlabelled = "MERGEABLE", set()
         self.open_numbers = {7, 129}
         self.open_prs = []
+        self.ledger = None  # path of the ledger, set by Base; send_message checks the intent row there
+        self.intent_seen = []
 
     @staticmethod
     def goal_ok(goal):
@@ -37,6 +39,8 @@ class World:
             if getattr(self, "invalid_goal", False) and args.get("goal"):
                 self.sends.append((args["agentId"], args["message"], args["waitSeconds"]))
                 raise D.Error("account send_message failed: error invalid_goal")
+            if self.ledger:
+                self.intent_seen.append(self.rows("SELECT status, run_id FROM fires ORDER BY id DESC LIMIT 1"))
             rid = "run%d" % (len(self.sends) + 1)
             self.sends.append((args["agentId"], args["message"], args["waitSeconds"]))
             self.runs[rid] = {"status": "running"}
@@ -46,6 +50,14 @@ class World:
                 raise D.Error("account send_message failed: TimeoutError")
             return {"runId": rid, "status": "running"}
         return dict(self.runs[args["runId"]], runId=args["runId"])
+
+    def rows(self, sql, *args):
+        """A read of the ledger over its own connection (the Dispatcher holds the writer lock)."""
+        db = sqlite3.connect("file:%s?mode=ro" % self.ledger, uri=True)
+        try:
+            return db.execute(sql, args).fetchall()
+        finally:
+            db.close()
 
     def finish(self, agent, output, status="done", goal=None):
         rid = [r for r, a in self.order if a == agent][-1]
@@ -102,10 +114,18 @@ class Base(unittest.TestCase):
         self.addCleanup(self.dir.cleanup)
         self.w = World()
         self.cfg = {"repo": "o/r", "label": "factory", "max_jobs": 8, "checks_timeout_s": 1800, "auto_plan_marker": True,
-                    "state_file": os.path.join(self.dir.name, "state.json"),
+                    "ledger_file": os.path.join(self.dir.name, "ledger.db"),
+                    "json_state_file": os.path.join(self.dir.name, "dispatch.json"),
                     "builders": [{"id": b, "name": b.upper()} for b in self.builders],
                     "reviewers": [{"id": r, "name": r.upper()} for r in ("r1", "r2")]}
+        self.w.ledger = self.cfg["ledger_file"]
         self.out = io.StringIO()
+        self.addCleanup(self.close)
+
+    def close(self):
+        if getattr(self, "d", None):
+            self.d.close()
+            self.d = None
 
     def new(self):
         return D.Dispatcher(self.cfg, self.w.account, self.w.gh, now=lambda: self.w.clock)
@@ -115,13 +135,16 @@ class Base(unittest.TestCase):
         d = getattr(self, "d", None)
         for _ in range(n):
             if fresh or d is None:
+                self.close()
                 d = self.d = self.new()
             with contextlib.redirect_stdout(self.out):
                 d.once()
 
     def state(self, n=5):
-        with open(self.cfg["state_file"]) as f:
-            return json.load(f)["jobs"][str(n)]["state"]
+        return self.w.rows("SELECT state FROM jobs WHERE job=?", str(n))[0][0]
+
+    def job_ids(self):
+        return sorted(r[0] for r in self.w.rows("SELECT job FROM jobs"))
 
     def to_review(self):
         self.tick()
@@ -154,8 +177,7 @@ class Intake(Base):
         self.w.issues = [{"number": n, "title": "t%d" % n, "body": "SMALL FIX", "comments": []} for n in (1, 2, 3)]
         self.cfg["max_jobs"] = 2
         self.tick()
-        with open(self.cfg["state_file"]) as f:
-            self.assertEqual(sorted(json.load(f)["jobs"]), ["1", "2"])
+        self.assertEqual(self.job_ids(), ["1", "2"])
 
 
 class Depends(Base):
@@ -170,14 +192,13 @@ class Depends(Base):
         self.tick(3)
         self.assertEqual(self.w.issue(5)["comments"], [])
         self.assertEqual(self.out.getvalue().count("waits on #7"), 1)
-        with open(self.cfg["state_file"]) as f:
-            self.assertEqual(json.load(f)["jobs"], {})
+        self.assertEqual(self.state(), "waiting")
+        self.assertEqual(json.loads(self.w.rows("SELECT data FROM jobs")[0][0])["waiting"], [7])
         self.w.open_numbers.discard(7)
         self.tick()
         self.assertEqual(self.state(), "building")
         self.assertEqual(len(self.w.sends), 1)
-        with open(self.cfg["state_file"]) as f:
-            self.assertNotIn("5", json.load(f).get("waiting", {}))
+        self.assertNotIn("waiting", json.loads(self.w.rows("SELECT data FROM jobs")[0][0]))
 
     def test_waiting_line_not_repeated_after_a_restart(self):
         self.w.issues = [self.job(5, "Depends on: #7")]
@@ -196,8 +217,8 @@ class Depends(Base):
         self.cfg["max_jobs"] = 1
         self.tick()
         self.assertEqual(self.state(6), "building")
-        with open(self.cfg["state_file"]) as f:
-            self.assertEqual(sorted(json.load(f)["jobs"]), ["6"])
+        self.assertEqual(self.job_ids(), ["5", "6"])
+        self.assertEqual(self.state(5), "waiting")
 
     def test_open_issues_read_once_per_pass(self):
         self.w.issues = [self.job(5, "**Depends on**: #7"), self.job(6, "**Depends on**: #129")]
@@ -472,20 +493,9 @@ class Secrets(Base):
         self.assertNotIn(self.TOKEN, printed)
         self.assertTrue(seen and all(h["Authorization"] == "Bearer " + self.KEY for h in seen))
         self.assertTrue(ran and all(e["GH_TOKEN"] == self.TOKEN and self.TOKEN not in " ".join(a) for a, e in ran))
-        with open(self.cfg["state_file"]) as f:
-            self.assertNotIn(self.TOKEN, f.read())
+        self.assertNotIn(self.TOKEN, str(d.store.jobs()))
 
-    def test_status_needs_no_key_files(self):
-        self.tick()
-        saved = D.settings
-        D.settings = lambda: dict(self.cfg, account_key_file="/nonexistent/a", gh_token_file="/nonexistent/b")
-        self.addCleanup(setattr, D, "settings", saved)
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            self.assertEqual(D.main(["status"]), 0)
-        self.assertRegex(out.getvalue(), r"^#5 building ")
-
-    def test_start_line_for_once_but_not_status(self):
+    def test_start_line_for_once(self):
         for name, fake in (("settings", lambda: self.cfg), ("make_account", lambda url, key: self.w.account),
                            ("make_gh", lambda tok: self.w.gh), ("read_secret", lambda path: "fake-key")):
             self.addCleanup(setattr, D, name, getattr(D, name))
@@ -498,10 +508,6 @@ class Secrets(Base):
             lines = [l for l in out.getvalue().splitlines() if "dispatcher started:" in l]
             self.assertEqual(len(lines), 1)
             self.assertIn("%d builders, 2 reviewers, label factory, repo o/r" % len(self.cfg["builders"]), lines[0])
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                self.assertEqual(D.main(["status"]), 0)
-            self.assertNotIn("dispatcher started", out.getvalue())
 
 
 class Hardening(Base):
@@ -642,6 +648,37 @@ class Goals(Base):
         self.assertEqual(self.state(), "failed")
         self.assertEqual(len(self.w.sends), 1)
         self.assertIn("invalid_goal", self.w.issue(5)["comments"][-1])
+
+
+
+class Ledger(Base):
+    def test_every_state_change_is_a_transition_row(self):
+        self.to_checks()
+        self.w.workflows[HEAD] = [wf("ci", "success")]
+        self.tick()
+        rows = self.w.rows("SELECT to_state, at FROM transitions WHERE job='5' ORDER BY id")
+        self.assertTrue(all(at for _, at in rows))
+        seq = [st for k, (st, _) in enumerate(rows) if k == 0 or rows[k - 1][0] != st]
+        self.assertEqual(seq, ["queued", "building", "review_wait", "reviewing", "checks", "merged"])
+
+    def test_intent_row_is_written_before_the_send(self):
+        self.tick()
+        self.assertEqual(self.w.intent_seen, [[("intent", None)]])
+        self.assertEqual(self.w.rows("SELECT status, run_id FROM fires"), [("running", "run1")])
+
+    def test_open_json_jobs_are_imported_once(self):
+        job = {"issue": 5, "title": "Fix x", "body": "", "state": "review_wait", "round": 1, "pr": 42, "builder": "b1"}
+        with open(self.cfg["json_state_file"], "w") as f:
+            json.dump({"jobs": {"5": job}}, f)
+        self.tick()
+        self.assertEqual(self.state(), "reviewing")
+        self.assertEqual([s[0] for s in self.w.sends], ["r1"])
+        n = len(self.w.rows("SELECT id FROM transitions"))
+        self.tick(fresh=True)
+        self.assertEqual(len(self.w.rows("SELECT job FROM jobs")), 1)
+        self.assertEqual(len(self.w.rows("SELECT id FROM transitions WHERE reason='imported'")), 1)
+        self.assertFalse(os.path.exists(self.cfg["json_state_file"]))
+        self.assertGreaterEqual(len(self.w.rows("SELECT id FROM transitions")), n)
 
 
 if __name__ == "__main__":

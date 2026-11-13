@@ -441,7 +441,19 @@ class Dispatcher:
         if clocks.klass(kind, row) == "transient":
             self.store.close_run(j["run"], "error", error=why[:200])
             return self.transient(j, why)
+        if clocks.klass(kind, row) == "plan_limit":
+            return self.plan_limit(j, why, str(r.get("error") or "-"))
         return self.failed_attempt(j, why, "ended")
+
+    def plan_limit(self, j, why, error):
+        """Class plan_limit: back to the state it was sent from, no failed attempt, no retry count; all sending held."""
+        self.store.close_run(j["run"], "error", error=why[:200])
+        now = self.now()
+        holds.arm(self.store, "plan limit", now + holds.PLAN_LIMIT_HOLD_S)
+        j.update(state=BACK[j["state"]], retry_attempt=j.get("attempt", 1), sending=None)
+        self.save(j, "plan limit: %s" % error[:160])
+        log(j["issue"], "plan limit, back to %s; all sending held for %d s: %s" % (j["state"], holds.PLAN_LIMIT_HOLD_S, error[:160]))
+        return None
 
     def failed_attempt(self, j, why, how):
         """A failed attempt (class work or cancel): the step is sent once more; the second one ends the job."""
@@ -529,6 +541,8 @@ class Dispatcher:
         st = j["state"]
         if j.get("sending"):
             return self.lost_run(j)
+        if st in ("queued", "review_wait", "fix_wait") and holds.active(self.store, self.now()) is not None:
+            return
         if st in ("queued", "review_wait", "fix_wait") and j.get("not_before") and self.now() < j["not_before"]:
             return
         if st == "queued":

@@ -555,7 +555,10 @@ class Hardening(Base):
         self.assertEqual(self.state(), "failed")
 
 
-NOT_MET = {"state": "not_met", "turns": 3, "reason": 'last line "Tools: shell 4 calls" matches none of PR:, BLOCKED:'}
+# The shape the engine's run read returns (runGoalRecordSchema in packages/contracts/src/run-goal.ts).
+_MISS = 'last line "Tools: shell 4 calls" matches none of PR:, BLOCKED:'
+NOT_MET = {"lastLineForms": [{"prefix": "PR: ", "rest": "pull-url"}, {"prefix": "BLOCKED: ", "rest": "sentence"}], "turnLimit": 3,
+           "state": "not_met", "verdicts": [{"turn": n, "met": False, "reason": _MISS} for n in (1, 2, 3)]}
 
 
 class Goals(Base):

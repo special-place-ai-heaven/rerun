@@ -548,8 +548,8 @@ class Dispatcher:
                                   "A test that pins shipped behaviour is not edited to fit: where the failure says the change itself is wrong, end with BLOCKED."
                                   % (j["head"][:7], why, j["head"]))
         if verdict == "WAIT":
-            if self.now() - j["checks_since"] > self.cfg.get("checks_timeout_s", 1800):
-                self.end(j, "failed", "checks not passed after %d s: %s" % (self.cfg.get("checks_timeout_s", 1800), why))
+            if self.now() - j["checks_since"] > self.cfg.get("checks_timeout_s", 3600):
+                self.end(j, "failed", "checks not passed after %d s: %s" % (self.cfg.get("checks_timeout_s", 3600), why))
             return
         try:
             self.gh(["pr", "merge", str(j["pr"]), "-R", self.repo, "--merge", "--match-head-commit", j["head"], "--delete-branch"])

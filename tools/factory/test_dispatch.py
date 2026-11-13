@@ -141,7 +141,7 @@ class Base(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         self.w = World()
-        self.cfg = {"repo": "o/r", "label": "factory", "max_jobs": 8, "checks_timeout_s": 1800, "auto_plan_marker": True,
+        self.cfg = {"repo": "o/r", "label": "factory", "max_jobs": 8, "checks_timeout_s": 3600, "auto_plan_marker": True,
                     "ledger_file": os.path.join(self.dir.name, "ledger.db"),
                     "json_state_file": os.path.join(self.dir.name, "dispatch.json"),
                     "builders": [{"id": b, "name": b.upper()} for b in self.builders],
@@ -183,6 +183,40 @@ class Base(unittest.TestCase):
         self.to_review()
         self.w.finish("r1", "ok\nVERDICT: ACCEPT @abcdef1")
         self.tick()
+
+
+class Checks(Base):
+    def setUp(self):
+        super().setUp()
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dispatch.json")) as f:
+            self.cfg["checks_timeout_s"] = json.load(f)["checks_timeout_s"]  # the shipped limit, not a test value
+
+    def test_a_check_running_at_45_minutes_keeps_waiting(self):
+        self.to_checks()
+        self.w.workflows[HEAD] = [wf("ci", "success", wid=1), wf("image", None, status="in_progress", wid=2)]
+        self.w.clock += 45 * 60
+        self.tick()
+        self.assertEqual(self.state(), "checks")
+        self.assertEqual(self.w.merges, [])
+
+    def test_red_while_another_still_runs_waits_then_fails_when_it_ends(self):
+        self.to_checks()
+        self.w.workflows[HEAD] = [wf("ci", "failure", wid=1), wf("image", None, status="in_progress", wid=2)]
+        self.w.clock += 45 * 60
+        self.tick()
+        self.assertEqual(self.state(), "checks")
+        self.w.workflows[HEAD] = [wf("ci", "failure", wid=1), wf("image", "success", wid=2)]
+        self.tick()
+        self.assertEqual(self.state(), "fixing")
+
+    def test_nothing_passed_after_60_minutes_fails_with_what_was_running(self):
+        self.to_checks()
+        self.w.workflows[HEAD] = [wf("image", None, status="in_progress", wid=2)]
+        self.w.clock += 60 * 60 + 1
+        self.tick()
+        self.assertEqual(self.state(), "failed")
+        self.assertIn("running: image", self.w.issue(5)["comments"][-1])
+        self.assertEqual(self.w.merges, [])
 
 
 class Intake(Base):
@@ -408,7 +442,7 @@ class Flow(Base):
         self.w.workflows[HEAD] = [wf("ci", "success", wid=1), wf("e2e", "cancelled", wid=2)]
         self.tick()
         self.assertEqual(self.w.merges, [])
-        self.w.clock += 1801
+        self.w.clock += 3601
         self.tick()
         self.assertEqual(self.state(), "failed")
         self.assertIn("e2e cancelled", self.w.issue(5)["comments"][-1])

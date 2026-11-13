@@ -166,6 +166,8 @@ export const agentConfigSchema = z.object({
     verbosity: verbositySchema.default('normal'),
     // How hard the model thinks: unset keeps the provider's own default. No default here, so a config saved without it stays byte-identical.
     thinkingLevel: z.enum(['low', 'medium', 'high']).nullable().optional(),
+    // Skills the agent keeps on its shelf but does not offer or run, by slug. No default, so a config saved without it stays byte-identical; the key is absent when nothing is off.
+    disabledSkills: z.array(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)).optional(),
     // The language of the agent's workspace, a short BCP 47 tag ("fr"): what it writes in when a run
     // was not started by a person and nobody has written in the session yet. The hub writes it from
     // `workspaces.locale`; null keeps the language of the run's instruction.

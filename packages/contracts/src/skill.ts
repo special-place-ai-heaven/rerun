@@ -10,6 +10,8 @@ export const skillSchema = z.object({
     description: z.string().default(''),
     body: z.string().default(''),
     files: z.array(z.string()).default([]),
+    // Read-only: set by the engine from the agent's config, never accepted in a request body.
+    enabled: z.boolean().default(true),
 })
 export type Skill = z.infer<typeof skillSchema>
 
@@ -22,7 +24,7 @@ export type SkillFilePayload = z.infer<typeof skillFilePayloadSchema>
 export const skillsListSchema = z.object({ skills: z.array(skillSchema) })
 
 // The shelf the composer's `/` menu offers: no body, no file list.
-export const skillSummarySchema = skillSchema.pick({ slug: true, name: true, description: true })
+export const skillSummarySchema = skillSchema.pick({ slug: true, name: true, description: true, enabled: true })
 export type SkillSummary = z.infer<typeof skillSummarySchema>
 export const skillSummariesViewSchema = z.object({ skills: z.array(skillSummarySchema) })
 export type SkillSummariesView = z.infer<typeof skillSummariesViewSchema>

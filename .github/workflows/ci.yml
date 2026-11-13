@@ -31,7 +31,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @rerun/contracts build
       - run: pnpm -r --if-present ts-check
-      - run: pnpm --filter rerun lint
+      # Every package that has a lint script: the app, the engine and the contracts package.
+      - run: pnpm -r --if-present lint
       # Capped: the self-hosted host is shared, and one worker per core starves the other jobs on it.
       - run: pnpm --filter rerun run test --maxWorkers=8
       - run: pnpm --filter rerun-engine run test --maxWorkers=8

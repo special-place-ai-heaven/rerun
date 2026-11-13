@@ -92,7 +92,6 @@ vi.mock('./headless-run.js', async () => {
 
 const { afterEach, beforeEach, describe, expect, it } = await import('vitest')
 const { fireSchedule, startScheduler } = await import('./scheduler.js')
-const { armBudgetLatch, clearBudgetLatch } = await import('./budget-latch.js')
 const { armPlanLimitLatch, clearPlanLimitLatch } = await import('../connections/plan-limits.js')
 const { registerRunAbort, unregisterRunAbort } = await import('./run-control.js')
 const { HttpError } = await import('../lib/errors.js')
@@ -126,7 +125,6 @@ afterEach(async () => {
     state.sent = []
     state.markFired.mockClear()
     state.sweep.mockClear()
-    clearBudgetLatch()
     clearPlanLimitLatch('claude-sub')
     unregisterRunAbort('live-call')
     for (const runId of state.liveRunIds.splice(0)) unregisterRunAbort(runId)
@@ -138,36 +136,6 @@ describe('fireSchedule', () => {
     it('refuses a switched-off agent with a 403', async () => {
         await expect(fireSchedule('off', schedule('s'))).rejects.toMatchObject({ status: 403 })
         expect(state.runs).toHaveLength(0)
-    })
-
-    it('skips a managed-model run while the budget latch is armed, leaving the schedule due', async () => {
-        armBudgetLatch()
-
-        const err = await fireSchedule('on', schedule('latched')).catch(e => e)
-
-        expect(err).toBeInstanceOf(HttpError)
-        expect(err.status).toBe(402)
-        expect(state.markFired).not.toHaveBeenCalled()
-        expect(state.sent).toHaveLength(0)
-        expect(state.runs).toHaveLength(0)
-    })
-
-    it('fires through the latch when asked to ignore it', async () => {
-        armBudgetLatch()
-
-        await fireSchedule('on', schedule('forced'), { manual: true })
-
-        expect(state.runs).toHaveLength(1)
-    })
-
-    it('still fires an agent on its own key while the latch is armed', async () => {
-        armBudgetLatch()
-        state.provider = 'openai'
-
-        await fireSchedule('on', schedule('own-key'))
-
-        expect(state.runs).toHaveLength(1)
-        expect(state.runs[0].override).toEqual({ provider: 'openai', model: 'm' })
     })
 
     // A coworker called by another one at 15:28 had not touched its screen yet when its 15:30
@@ -221,7 +189,6 @@ describe('fireSchedule', () => {
     })
 
     it('fires a manual run through every latch', async () => {
-        armBudgetLatch()
         registerRunAbort('live-call', 'on')
         state.connectionId = 'claude-sub'
         armPlanLimitLatch('claude-sub')
@@ -345,22 +312,15 @@ describe('startScheduler', () => {
         expect(state.sweep).toHaveBeenCalledWith(['on'])
     })
 
-    it('treats a budget skip as routine and a launch failure as an error', async () => {
+    it('treats a launch failure as an error', async () => {
         vi.useFakeTimers()
         const errors = vi.spyOn(logger, 'error').mockImplementation(() => undefined as never)
-        const debug = vi.spyOn(logger, 'debug').mockImplementation(() => undefined as never)
         state.agentIds = ['on']
         state.schedules = { on: [schedule('skipped')] }
         state.due = new Set(['skipped'])
-        armBudgetLatch()
+        state.markFired.mockRejectedValueOnce(new Error('read-only fs'))
 
         const stop = startScheduler()
-        await vi.advanceTimersByTimeAsync(0)
-        expect(debug).toHaveBeenCalledWith({ agent: 'on', schedule: 'skipped' }, 'scheduled run skipped: rerun budget latched')
-        expect(errors).not.toHaveBeenCalled()
-
-        clearBudgetLatch()
-        state.markFired.mockRejectedValueOnce(new Error('read-only fs'))
         await vi.advanceTimersByTimeAsync(30_000)
         stop()
         expect(errors).toHaveBeenCalledWith({ agent: 'on', schedule: 'skipped', err: 'Error: read-only fs' }, 'scheduled run failed')

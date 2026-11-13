@@ -49,7 +49,6 @@ vi.mock('./headless-run.js', () => ({
 
 const { afterEach, beforeEach, describe, expect, it } = await import('vitest')
 const { fireTrigger } = await import('./trigger-runner.js')
-const { armBudgetLatch, clearBudgetLatch } = await import('./budget-latch.js')
 const { logger } = await import('../lib/logger.js')
 type Trigger = import('../triggers/loader.js').Trigger
 
@@ -69,7 +68,6 @@ afterEach(() => {
     state.sent = []
     state.sessions = []
     state.markFired.mockReset()
-    clearBudgetLatch()
     vi.restoreAllMocks()
 })
 
@@ -77,23 +75,6 @@ describe('fireTrigger', () => {
     it('refuses a switched-off agent with a 403', async () => {
         await expect(fireTrigger('off', hook, 'hi')).rejects.toMatchObject({ status: 403 })
         expect(state.runs).toHaveLength(0)
-    })
-
-    it('refuses a managed-model run while the budget latch is armed', async () => {
-        armBudgetLatch()
-
-        await expect(fireTrigger('on', hook, 'hi')).rejects.toMatchObject({ status: 402 })
-        expect(state.sessions).toHaveLength(0)
-        expect(state.markFired).not.toHaveBeenCalled()
-    })
-
-    it('still fires an agent on its own key while the latch is armed', async () => {
-        armBudgetLatch()
-        state.provider = 'anthropic'
-
-        await fireTrigger('on', hook, 'hi')
-
-        expect(state.runs).toHaveLength(1)
     })
 
     it('opens a trigger session, announces it and runs the given message', async () => {

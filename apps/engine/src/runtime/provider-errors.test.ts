@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { APICallError, LoadAPIKeyError, RetryError } from 'ai'
 import { classifyFinishReason, classifyProviderError, errorMessageOf, isFailedFinish, ProviderRefusedError, refusalReason, RUN_ERROR_CODES, STREAM_CUT_RAW_REASON, unreachableEndpointError, upstreamReason } from './provider-errors.js'
-import { RERUN_BUDGET_ERROR_CODE } from './budget-latch.js'
 
 const apiError = (init: { statusCode?: number; message?: string; data?: unknown; isRetryable?: boolean; responseBody?: string }) =>
     new APICallError({
@@ -107,10 +106,8 @@ describe('classifyProviderError', () => {
         expect(classifyProviderError('codex', new Error('exceeded retry limit, last status: 429 Too Many Requests'))).toBe(RUN_ERROR_CODES.overloaded)
     })
 
-    it('delegates the managed budget to the budget latch', () => {
-        expect(classifyProviderError('rerun', new Error(`AI_APICallError: ${RERUN_BUDGET_ERROR_CODE}`))).toBe(RERUN_BUDGET_ERROR_CODE)
-        // Only the managed provider bills the workspace budget.
-        expect(classifyProviderError('openai', new Error(`AI_APICallError: ${RERUN_BUDGET_ERROR_CODE}`))).toBeNull()
+    it('no longer has a managed-budget code', () => {
+        expect(classifyProviderError('rerun', new Error('AI_APICallError: rerun_budget_exhausted'))).toBeNull()
     })
 
     it('reads an overloaded provider through the retries the AI SDK gave up on', () => {

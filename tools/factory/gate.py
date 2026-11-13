@@ -247,6 +247,16 @@ def chunk_limits(full, n, jobrepo, jobn, ids):
     return why
 
 
+RECEIPT_RE = re.compile(r"^\s*Receipt (\w+): done-test (\w+) \(base exit (-?\d+), head exit (-?\d+)\)\s*$", re.M)
+
+
+def receipts(body, ref):
+    """{chunk: (done_test_ok, fail_before_ok)} from the 'Receipt' lines of a PR whose head ref is factory/job-<n>; any other PR gets {}."""
+    if not re.fullmatch(r"factory/job-\d+", ref or ""):
+        return {}
+    return {c: (v == "ok" and int(h) == 0, int(b) != 0) for c, v, b, h in RECEIPT_RE.findall(body or "")}
+
+
 def _list(x):
     return x if isinstance(x, list) else []
 

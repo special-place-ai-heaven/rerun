@@ -26,6 +26,12 @@ class GateChunks(unittest.TestCase):
         finally:
             G.gh_json = old
 
+    def test_receipt_gives_done_test_and_fail_before(self):
+        body = "Job: o/r#71, chunk A, B\nReceipt A: done-test ok (base exit 2, head exit 0)\nReceipt B: done-test ok (base exit 0, head exit 0)\nReceipt C: done-test FAIL (base exit 1, head exit 1)\n"
+        self.assertEqual(G.receipts(body, "factory/job-71"), {"A": (True, True), "B": (True, False), "C": (False, True)})
+        self.assertEqual(G.receipts(body, "chunk/71-A"), {})
+        self.assertEqual(G.receipts(body, "factory/job-x"), {})
+
 
 if __name__ == "__main__":
     unittest.main()

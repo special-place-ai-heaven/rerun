@@ -14,9 +14,9 @@ const MAX_EXACT = 100
 const SKIPPED_DIRS = new Set(['node_modules', '.git'])
 export const SKIM_NOTE = 'A page is good for an overview and can be wrong about one random value in four without saying so. Read the file for any exact value.'
 
-// Offered to nobody in this chunk: the registry adds the tool only when this is true.
-export function skimPagesEnabled(_agent: LoadedAgent): boolean {
-    return false
+// Off unless the coworker's page switch says so; nothing sets it yet. The registry adds the tool only when this is true.
+export function skimPagesEnabled(agent: LoadedAgent): boolean {
+    return agent.config.pages?.skim === true
 }
 
 const KEY_FILE = /^(\.env.*|.*\.pem|.*\.key|id_rsa.*|id_ed25519.*)$/i

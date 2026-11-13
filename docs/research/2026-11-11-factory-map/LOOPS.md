@@ -6,9 +6,10 @@ rerun already uses, and all the missing mechanisms like loops, gates, consensus 
 making by main LLM to rule over disputes and consensus options, and many other mechanisms needed to make automated
 software factory described in north star"
 
-Part 1 (what exists, with file and line) comes from a code read of `dev` and is added when that read is finished.
-Part 2 below is the design: every loop the factory needs, each with the same six fields, so that none is left to a
-prompt. A loop without an exit a script can check, a bound and an escalation is not a loop; it is a hope.
+Part 1 (what exists in the code) is at the end of this page, read on 2026-11-13. Part 2 below is the design: every
+loop the factory needs, each with the same six fields, so that none is left to a prompt. A loop without an exit a
+script can check, a bound and an escalation is not a loop; it is a hope. How the loops fit into one machine, with
+diagrams and the order of building, is in [MACHINE.md](MACHINE.md).
 
 ## The shape every loop has
 
@@ -125,3 +126,73 @@ factory. He does not decide what happens next inside a job; the ledger does.
   is the next thing to fix; one that is never hit can be tightened.
 - Nothing here is built ahead of need: the order of building follows the measured failures, and each loop is added as
   the smallest check at a place work already passes through.
+
+## Part 1: what exists in the code (2026-11-13, `dev` at `a4358ed`)
+
+Two bodies of code hold these loops, and the first imports nothing from the second:
+
+- **Live:** `tools/factory/dispatch.py` (the dispatcher on the server), `tools/factory/factory.py` (the builders' tool:
+  `wt`, `pr-open`, `merge-dev`, `risk`, `job-open`), and the GitHub workflows.
+- **Idle:** the earlier runner's modules (`store.py`, `readyq.py`, `limits.py`, `evidence.py`, `gate.py` checks,
+  `roster.py`, `measures.py` and others). They are tested, and nothing in the live path calls them, except that
+  `factory.py` uses `limits.capacity`, `roster` and, through `merge-dev`, `gate.py`.
+
+State: **live** runs today; **part** runs in part; **idle** is code that exists and is tested but not called by the
+live path; **none** has no code. This table was read by a helper and four rows were checked again by hand (7, 21, the
+plan-marker gate and the ledger). Check a row before building on it.
+
+| # | Loop | State | Where |
+|---|---|---|---|
+| 1 | Intake | part | `job-open` checks four headings; the dispatcher takes labelled issues. Idle: `intake.parse_plan`. The side bot and its question limit: none |
+| 2 | Facts | none | |
+| 3 | Plan | part | marker only (`plan_check` in `wt new`), and the dispatcher posts `SMALL FIX` itself. Idle: `evidence.plan`, `limits.replan` |
+| 4 | Plan review | idle | `evidence.challenge`, `limits.challenge`; only two stub stages are configured |
+| 5 | User approval | none | |
+| 6 | Breakdown | idle, part | `ledger.shape`: fields, paths, test file. No check for cycles, shared paths or coverage |
+| 7 | Schedule | part | dispatcher: first free builder, `depends_on`, `max_jobs`. Idle: `readyq.eligible` (slots, cap per job, path leases, attempts) |
+| 8 | Build chunk | part | `build_brief`; room checks in `wt new`; `pr-open` refuses workflow files. No path or size check live; idle: `publish._outside`, `evidence.build` |
+| 9 | Red before green | part | `gate.py` FAIL_BEFORE, reached only through `merge-dev`; the dispatcher merges without it |
+| 10 | Chunk test | part | the builder runs the named tests; CI runs everything; no single-file run in CI |
+| 11 | Escalation ladder | idle | `limits.model_for`; nothing moves a failed task up a tier |
+| 12 | Integrate | part | one "merge dev in" round on a conflict; no resolver session; no job branch in the dispatcher |
+| 13 | Job CI | live | `dispatch.checks` reads the workflow runs of the head commit |
+| 14 | Failure triage | part | one failed check goes back to the builder once; no table of known failures |
+| 15 | Review | part | two rounds, first free reviewer; `risk` and `roster.required` are not called |
+| 16 | Consensus | part | `gate.py` REVIEWS through `merge-dev` only; the dispatcher uses one reviewer |
+| 17 | Dispute | idle | `limits.after_reject`; no arbiter stage is configured |
+| 18 | Acceptance | part | `gate.py` DONE_TEST through `merge-dev` only; no rendered check |
+| 19 | Merge | live | head must match, checks green, one accept |
+| 20 | Deliver | none | by hand with `deploy/vps/update.sh`; the snapshot step is merged (#169) |
+| 21 | Watchdog | part | 20 failing passes end a job; a limit on checks. No limit on a run. Idle: `limits.run_outcome` |
+| 22 | Budget | idle | `limits.run_limits`, `runner_loop.over_total` |
+| 23 | Cleanup | live | `wt done`, `wt sweep`, and the sweep `wt new` runs at the limit |
+| 24 | Runner self-check | part | the state file is saved atomically; no heartbeat |
+| 25 | After the merge | none | |
+| 26 | Close and measure | part | `jobcost.py` by hand. Idle: `measures.py`, `status_report.py` |
+| 27 | Learn | none | planned in #115 |
+| 28 | Knowledge delivery | part | `packet` prints the issue. Idle: `packet.retry_packet`, `reviewpacket`. Nothing selects by label |
+
+| Gate | State | Where |
+|---|---|---|
+| Work order shape | live | `job-open`, headings only |
+| Plan marker | live | `plan_check`; never refuses a dispatched job, because the dispatcher posts the marker |
+| Builder capacity and memory | live | `wt new`: `cap_check`, lock, memory and disk floors |
+| Nothing unsaved is deleted | live | `wt_save`; saving uncommitted changes is still missing |
+| Verdict bound to the head | part | the dispatcher records the head at review and merges only that head; it does not read the commit named in the verdict |
+| Facts exist | none | |
+| Plan reviewed by someone else | none | |
+| User approval | none | |
+| Breakdown shape, cycles, overlaps, coverage | idle, part | shape only (`ledger.shape`) |
+| Chunk diff inside its paths and size | idle | `evidence.build`, `publish._outside`, `gate.py` LIMITS |
+| Forbidden files and secrets | part | workflow files are refused in four places; secrets and generated folders are not |
+| Red before green | part | `gate.py`, through `merge-dev` only |
+| Required reviewers present | part | `gate.py` REVIEWS, through `merge-dev` only |
+| Merge conditions | part | dispatcher: green, accepted, head match, no conflict. `merge-dev` adds `gate.py` |
+| Token ceiling per run and per job | idle | `limits.run_outcome`, `runner_loop.over_total` |
+| Deploy preconditions and rollback | none | |
+
+What the live dispatcher does more weakly than the idle code beside it: its state has no history (a JSON file against
+the ledger of `store.py`); it takes a run's last line as the end of a stage (against `evidence.py`); it has no limit
+on a run, so a run that hangs holds its worker (against `limits.run_outcome`); it sends a failed run again once and
+passes nothing of the failure along (against `packet.retry_packet` and the attempt counters); it picks the first free
+reviewer (against `roster.required`). [MACHINE.md](MACHINE.md) section 9 says which absorbs which.

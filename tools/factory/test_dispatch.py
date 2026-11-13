@@ -17,6 +17,7 @@ class World:
         self.cut_off_next_send = False
         self.mergeable, self.unlabelled = "MERGEABLE", set()
         self.open_numbers = {7, 129}
+        self.open_prs = []
 
     def account(self, tool, args):
         if tool == "send_message":
@@ -56,6 +57,8 @@ class World:
             return ""
         if a[:2] == ["pr", "view"]:
             return json.dumps({"headRefOid": HEAD, "state": self.pr_state, "mergeable": self.mergeable})
+        if a[:2] == ["pr", "list"]:
+            return json.dumps(self.open_prs)
         if a[0] == "api":
             sha = a[1].split("head_sha=")[1].split("&")[0]
             return json.dumps({"workflow_runs": self.workflows.get(sha, [])})
@@ -549,3 +552,67 @@ class Hardening(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Final(Base):
+    def build_out(self, out):
+        self.tick()
+        self.w.finish("b1", out)
+        self.tick()
+
+    def test_blocked_reason_is_the_blocked_line_not_the_tools_footer(self):
+        self.build_out("...\nBLOCKED: dev has no snapshot table\nTools: shell 4 calls")
+        self.assertEqual(self.state(), "blocked")
+        self.assertIn("Reason: BLOCKED: dev has no snapshot table", self.w.issue(5)["comments"][-1])
+
+    def test_pr_url_in_text_is_kept_when_the_last_line_is_blocked(self):
+        self.cfg["repo"] = "special-place-ai-heaven/rerun"
+        self.build_out("opened https://github.com/special-place-ai-heaven/rerun/pull/171 ok\nBLOCKED: ci red\nTools: shell 1 calls")
+        self.assertEqual(self.state(), "blocked")
+        self.assertIn("Pull request: #171", self.w.issue(5)["comments"][-1])
+
+    def test_open_pr_found_by_title_and_other_issue_ignored(self):
+        self.w.open_prs = [{"number": 9, "title": "Y (#6)"}, {"number": 8, "title": "X (#5)"}]
+        self.build_out("BLOCKED: stuck")
+        self.assertIn("Pull request: #8", self.w.issue(5)["comments"][-1])
+
+    def test_other_issue_title_alone_is_ignored(self):
+        self.w.open_prs = [{"number": 9, "title": "Y (#6)"}]
+        self.build_out("BLOCKED: stuck")
+        self.assertIn("Pull request: none", self.w.issue(5)["comments"][-1])
+
+    def test_last_final_line_decides_the_build(self):
+        self.build_out("PR: https://github.com/o/r/pull/42\nBLOCKED: later")
+        self.assertEqual(self.state(), "blocked")
+
+    def test_pr_as_last_final_line_goes_to_review(self):
+        self.build_out("BLOCKED: x\nPR: https://github.com/o/r/pull/42\nTools: shell 2 calls")
+        self.tick()
+        self.assertEqual(self.state(), "reviewing")
+
+    def test_fix_pushed_then_tools_line_goes_to_review(self):
+        self.to_review()
+        self.w.finish("r1", "VERDICT: REJECT @abcdef1: no")
+        self.tick(2)
+        self.w.finish("b1", "PUSHED: abc1234\nTools: shell 2 calls")
+        self.tick(2)
+        self.assertEqual(self.state(), "reviewing")
+
+    def test_fix_with_only_a_tools_line_blocks_with_no_final_line(self):
+        self.to_review()
+        self.w.finish("r1", "VERDICT: REJECT @abcdef1: no")
+        self.tick(2)
+        self.w.finish("b1", "Tools: shell 2 calls")
+        self.tick()
+        self.assertEqual(self.state(), "blocked")
+        self.assertIn("Reason: no final line", self.w.issue(5)["comments"][-1])
+
+    def test_each_brief_has_one_final_state_block_with_forms_and_run(self):
+        body = "**Files**\n- `a/b.py`\n\n**Run**\n```\npython3 -m unittest x\n```\n"
+        j = {"issue": 7, "title": "Fix x", "body": body}
+        for b, form in ((D.build_brief(j), "PR: <url>"), (D.review_brief(j, 3, HEAD), "VERDICT: ACCEPT"), (D.fix_brief(j, 3, "r"), "PUSHED: <first 7")):
+            self.assertEqual(b.count("Final state"), 1)
+            self.assertIn(form, b)
+            self.assertIn("python3 -m unittest x", b)
+            self.assertIn("a/b.py", b)
+            self.assertNotIn("End your answer", b)

@@ -504,6 +504,25 @@ class Clocks(Base):
         self.tick()
         self.assertEqual(self.w.cancels, [("b1", "run1")])
 
+    def test_a_long_build_whose_step_count_never_moves_is_not_cancelled_with_the_shipped_settings(self):
+        self.cfg["clocks"] = D.settings()["clocks"]
+        self.w.clock = T0
+        self.tick()
+        self.w.runs["run1"] = run_shape("run1", 1, T0)
+        self.tick()
+        self.w.clock = T0 + 1500
+        self.tick()
+        self.assertEqual(self.w.cancels, [])
+        self.w.clock = T0 + 2701
+        self.tick()
+        self.assertEqual(self.w.cancels, [("b1", "run1")])
+        self.w.runs["run2"] = run_shape("run2", 1, T0 + 2701)
+        self.tick()
+        self.w.clock = T0 + 2701 + 2701
+        self.tick()
+        self.assertEqual(self.state(), "failed")
+        self.assertIn("2700", self.job_data()["reason"])
+
     def test_stalled_run_is_cancelled_and_sent_once_more(self):
         self.w.clock = T0
         self.tick()

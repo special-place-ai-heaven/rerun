@@ -191,6 +191,15 @@ const MESSAGE_AUTHOR_COLUMNS = ['author_id TEXT', 'author_name TEXT']
 
 // What a step wrote into the prompt cache and what it cost: the two numbers that tell whether a
 // turn reused the one before it, which the run row cannot say.
+const RUN_LINEAGE_COLUMNS = [
+    'initiator_agent_id TEXT',
+    'initiator_run_id TEXT',
+    'initiator_session_id TEXT',
+    'initiator_user_id TEXT',
+    'job_ref TEXT',
+    'branch TEXT',
+    'copy_index INTEGER',
+]
 const RUN_STEP_CACHE_COST_COLUMNS = ['cache_write_tokens INTEGER', 'cost_micros INTEGER']
 
 // Every paid data call indexed by the values it returned, so a table cell can be traced back to the
@@ -255,6 +264,14 @@ export const SYSTEM_DB_MIGRATIONS: SqliteMigration[] = [
         id: 'paid-sources',
         up: async client => {
             await client.executeMultiple(PAID_SOURCES_DDL)
+        },
+    },
+    {
+        version: 5,
+        id: 'run-lineage',
+        up: async client => {
+            await ensureColumns(client, 'runs', RUN_LINEAGE_COLUMNS)
+            await client.execute('CREATE INDEX IF NOT EXISTS runs_agent_job_started_idx ON runs(agent_id, job_ref, started_at)')
         },
     },
 ]

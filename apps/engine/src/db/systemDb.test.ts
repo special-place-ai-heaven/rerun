@@ -73,6 +73,21 @@ describe('getSystemDb on a legacy file', () => {
     })
 })
 
+describe('run lineage migration', () => {
+    const LINEAGE = ['initiator_agent_id', 'initiator_run_id', 'initiator_session_id', 'initiator_user_id', 'job_ref', 'branch', 'copy_index']
+
+    it('adds the lineage columns and the job index to an existing db, once', async () => {
+        await seedLegacy('lineage')
+        const first = await getSystemDb('lineage')
+        expect(await columnsOf('lineage', 'runs')).toEqual(expect.arrayContaining(LINEAGE))
+        closeSystemDb('lineage')
+        const second = await getSystemDb('lineage')
+        const indexes = await second.client.execute("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'runs' AND name = 'runs_agent_job_started_idx'")
+        expect(indexes.rows).toHaveLength(1)
+        expect(first).not.toBe(second)
+    })
+})
+
 describe('getSystemDb pooling', () => {
     it('shares one open between concurrent callers', async () => {
         const [a, b, c] = await Promise.all([getSystemDb('pooled'), getSystemDb('pooled'), getSystemDb('pooled')])

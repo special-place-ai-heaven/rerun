@@ -1,9 +1,28 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { tool, dynamicTool, jsonSchema, type ToolSet } from 'ai'
 import { z } from 'zod'
 import type { McpServer } from '@rerun/contracts'
-import { CLAUDE_HARNESS_ENV, CODEX_DISABLED_FEATURES, CODEX_HARNESS_OVERRIDES, CODEX_SKILL_OVERRIDES, claudeAuthEnv, claudeBridgeHandler, claudeMcpConfig, codexMcpConfig } from './providers.js'
+import { CLAUDE_HARNESS_ENV, CODEX_DISABLED_FEATURES, CODEX_HARNESS_OVERRIDES, CODEX_SKILL_OVERRIDES, claudeAuthEnv, claudeBridgeHandler, claudeMcpConfig, codexMcpConfig, modelFor, resolveModel } from './providers.js'
 import { askUserTool, canonicalBridgeName, canonicalHitlName, isHitlToolName, requestApprovalTool } from '../tools/builtin/hitl.js'
+
+const captured = vi.hoisted(() => {
+    process.env.RERUN_DATA_DIR = `${process.env.TMPDIR ?? '/tmp'}/rerun-providers-labels-${process.pid}`
+    return { claude: [] as any[], codex: [] as any[] }
+})
+
+vi.mock('ai-sdk-provider-claude-code', async importOriginal => {
+    const actual = await importOriginal<typeof import('ai-sdk-provider-claude-code')>()
+    return { ...actual, createClaudeCode: (options: any) => (captured.claude.push(options?.defaultSettings), actual.createClaudeCode(options)) }
+})
+
+vi.mock('ai-sdk-provider-codex-cli', async importOriginal => {
+    const actual = await importOriginal<typeof import('ai-sdk-provider-codex-cli')>()
+    return {
+        ...actual,
+        createCodexExec: (options: any) => (captured.codex.push(options?.defaultSettings), actual.createCodexExec(options)),
+        createCodexAppServer: (options: any) => (captured.codex.push(options?.defaultSettings), actual.createCodexAppServer(options)),
+    }
+})
 
 const HITL_CTX = { agent: { config: { tools: { cards: true } } } } as any
 
@@ -359,5 +378,42 @@ describe('claudeBridgeHandler', () => {
             throw 'plain'
         })
         expect(await claudeBridgeHandler(odd)({}, {})).toEqual({ isError: true, content: [{ type: 'text', text: 'plain' }] })
+    })
+})
+
+describe('labels reach the CLI processes', () => {
+    const labelled = { RERUN_RUN_ID: 'run-1', RERUN_COWORKER: 'Code' }
+    const agentFor = (provider: 'claude' | 'codex') =>
+        ({
+            id: 'labels-agent',
+            env: {},
+            config: { name: 'Labels', tools: { sharedDb: false } },
+            resolved: { provider, model: 'some-model', connection: undefined },
+        }) as any
+
+    it('puts them in the Claude CLI env, and leaves them out when omitted', async () => {
+        captured.claude.length = 0
+        const { close } = resolveModel(agentFor('claude'), undefined, undefined, undefined, { labels: labelled })
+        await close()
+        resolveModel(agentFor('claude'))
+        expect(captured.claude[0].env.RERUN_RUN_ID).toBe('run-1')
+        expect(captured.claude[0].env.RERUN_COWORKER).toBe('Code')
+        expect(captured.claude[1].env.RERUN_RUN_ID).toBeUndefined()
+    })
+
+    it('puts them in the Codex app-server env overlay, and leaves them out when omitted', async () => {
+        captured.codex.length = 0
+        const withLabels = resolveModel(agentFor('codex'), undefined, undefined, undefined, { labels: labelled })
+        const without = resolveModel(agentFor('codex'))
+        await withLabels.close()
+        await without.close()
+        expect(captured.codex[0].env.RERUN_RUN_ID).toBe('run-1')
+        expect(captured.codex[1].env.RERUN_RUN_ID).toBeUndefined()
+    })
+
+    it('puts them in the Codex exec env overlay of a one-shot call', () => {
+        captured.codex.length = 0
+        modelFor({ ...agentFor('codex') }, undefined, undefined, undefined, { labels: labelled })
+        expect(captured.codex.some(settings => settings.env.RERUN_RUN_ID === 'run-1')).toBe(true)
     })
 })

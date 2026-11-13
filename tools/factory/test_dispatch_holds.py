@@ -82,6 +82,30 @@ class Holds(unittest.TestCase):
         self.assertEqual(self.state(5), "queued")
         self.assertEqual(self.hold_until(), ("plan limit", self.w.clock + 1800))
 
+    def test_a_failed_step_waits_out_the_hold_and_is_then_sent_as_its_second_attempt(self):
+        self.make([issue(5), issue(6)])
+        self.d.once()
+        self.assertEqual((self.state(5), self.state(6)), ("building", "building"))
+        t0 = self.w.clock
+        self.spend("b1")
+        self.w.finish("b2", None, status="error")
+        self.w.runs[[r for r, a in self.w.order if a == "b2"][-1]]["error"] = "Error: tool crashed"
+        self.d.once()
+        self.assertEqual(len(self.w.sends), 2)
+        j = self.d.store.get_job("6")
+        self.assertEqual(j["state"], "queued")
+        self.assertEqual(j.get("retry_attempt"), 2)
+        self.assertTrue(any(str(t["reason"]).startswith("failed attempt, held:") for t in self.d.store.transitions_of("6")))
+        self.w.clock = t0 + 1800
+        self.d.once()
+        self.assertGreater(len(self.w.sends), 2)
+        self.assertEqual(self.state(6), "building")
+        self.assertEqual(self.d.store.get_job("6").get("attempt"), 2)
+        rid = [r for r, a in self.w.order if a == self.d.store.get_job("6")["agent"]][-1]
+        self.w.runs[rid] = {"status": "error", "output": None, "error": "Error: tool crashed"}
+        self.d.once()
+        self.assertEqual(self.state(6), "failed")
+
 
 if __name__ == "__main__":
     unittest.main()

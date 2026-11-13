@@ -460,6 +460,12 @@ class Dispatcher:
         if j.get("attempt", 1) >= 2:
             self.end(j, "failed", why + (" (second time)" if how == "ended" else ""))
             return None
+        if holds.active(self.store, self.now()) is not None:
+            # All sending is held: wait out the hold, then step sends it as its second attempt.
+            j.update(state=BACK[j["state"]], retry_attempt=2, sending=None)
+            self.save(j, "failed attempt, held: %s" % why[:160])
+            log(j["issue"], "failed attempt, back to %s; sending held: %s" % (j["state"], why[:160]))
+            return None
         log(j["issue"], why + "; sending again")
         j["attempt"] = 2
         self.send(j, j["agent"], j["sending_step"] + " again", self.message(j), j["state"], j.get("copy", 1))

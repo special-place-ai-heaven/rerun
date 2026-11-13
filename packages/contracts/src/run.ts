@@ -7,6 +7,7 @@ export const runSchema = z.object({
     agentId: z.string(),
     sessionId: z.string(),
     status: runStatusSchema,
+    // Model steps; for the CLI providers (claude, codex) a turn is one step, so it counts tool calls.
     stepCount: z.number(),
     usageJson: z.string().nullable(),
     provider: z.string().nullable(),

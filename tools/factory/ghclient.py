@@ -27,6 +27,7 @@ class Client:
                 data = r.read()
                 return (data.decode("utf-8", "replace") if raw else json.loads(data or b"null")), r.headers.get("Link")
         except urllib.error.HTTPError as e:
+            e.close()  # left open, Python's clean-up warning repeats the server's status text
             raise GhError("%s %s failed: HTTP %d" % (method, url.split("?")[0], e.code), e.code) from None
         except urllib.error.URLError as e:
             raise GhError("%s %s failed: %s" % (method, url.split("?")[0], type(e.reason).__name__)) from None

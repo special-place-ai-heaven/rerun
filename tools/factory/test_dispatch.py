@@ -1,4 +1,4 @@
-import contextlib, io, json, os, sys, tempfile, unittest, urllib.error
+import contextlib, gc, io, json, os, sys, tempfile, unittest, urllib.error
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dispatch as D
 
@@ -365,6 +365,7 @@ class Secrets(Base):
         with contextlib.redirect_stdout(self.out), contextlib.redirect_stderr(err):
             for _ in range(3):
                 d.once()
+            gc.collect()  # Python's warning about an unclosed HTTP error repeats its text, whenever it is collected
         printed = self.out.getvalue() + err.getvalue()
         self.assertIn("ValueError", printed)
         self.assertIn("HTTP 500", printed)

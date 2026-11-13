@@ -46,6 +46,7 @@ class Engine:
             with self._urlopen(req, timeout=self._timeout) as r:
                 code, raw = r.status, r.read()
         except urllib.error.HTTPError as e:
+            e.close()  # left open, Python's clean-up warning repeats the server's status text
             raise EngineError("engine answered HTTP %d for %s %s" % (e.code, method, _scrub(path))) from None
         except Exception as e:
             raise EngineError("engine call failed (%s) for %s %s" % (type(e).__name__, method, _scrub(path))) from None

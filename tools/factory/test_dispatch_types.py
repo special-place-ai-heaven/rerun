@@ -1,7 +1,7 @@
 import os, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dispatch as D
-from test_dispatch import World, ready, PR_LINE
+from test_dispatch import World, PR_LINE
 
 
 def run(extra):

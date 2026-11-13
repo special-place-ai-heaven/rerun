@@ -19,8 +19,21 @@ class World:
         self.open_numbers = {7, 129}
         self.open_prs = []
 
+    @staticmethod
+    def goal_ok(goal):
+        """The check the real account tool makes (runGoalSchema, strict): one object, forms 1 to 4, turn limit 1 to 10."""
+        if not isinstance(goal, dict) or set(goal) != {"lastLineForms", "turnLimit"}:
+            return False
+        forms, limit = goal["lastLineForms"], goal["turnLimit"]
+        return (isinstance(limit, int) and 1 <= limit <= 10 and isinstance(forms, list) and 1 <= len(forms) <= 4
+                and all(isinstance(f, dict) and set(f) == {"prefix", "rest"} and isinstance(f["prefix"], str) and 1 <= len(f["prefix"]) <= 40
+                        and f["rest"] in ("pull-url", "sha", "sentence") for f in forms))
+
     def account(self, tool, args):
         if tool == "send_message":
+            if "goal" in args and not self.goal_ok(args["goal"]):
+                self.sends.append((args["agentId"], args["message"], args["waitSeconds"]))
+                raise D.Error("account send_message failed: the tool reported an error invalid_goal")
             if getattr(self, "invalid_goal", False) and args.get("goal"):
                 self.sends.append((args["agentId"], args["message"], args["waitSeconds"]))
                 raise D.Error("account send_message failed: error invalid_goal")
@@ -567,16 +580,17 @@ class Goals(Base):
         orig = self.w.account
         def spy(tool, args):
             if tool == "send_message":
-                goals.append((args.get("goal"), args.get("turnLimit")))
+                goals.append(args.get("goal"))
+                self.assertNotIn("turnLimit", args)
             return orig(tool, args)
         self.w.account = spy
         self.to_review()
         self.w.finish("r1", "VERDICT: REJECT @abcdef1: no")
         self.tick(2)
         self.assertEqual(goals, [
-            ([{"prefix": "PR: ", "rest": "pull-url"}, {"prefix": "BLOCKED: ", "rest": "sentence"}], 3),
-            ([{"prefix": "VERDICT: ", "rest": "sentence"}], 3),
-            ([{"prefix": "PUSHED: ", "rest": "sha"}, {"prefix": "BLOCKED: ", "rest": "sentence"}], 3)])
+            {"lastLineForms": [{"prefix": "PR: ", "rest": "pull-url"}, {"prefix": "BLOCKED: ", "rest": "sentence"}], "turnLimit": 3},
+            {"lastLineForms": [{"prefix": "VERDICT: ", "rest": "sentence"}], "turnLimit": 3},
+            {"lastLineForms": [{"prefix": "PUSHED: ", "rest": "sha"}, {"prefix": "BLOCKED: ", "rest": "sentence"}], "turnLimit": 3}])
 
     def test_building_not_met_blocks_with_the_goal_reason_and_no_resend(self):
         self.tick()

@@ -10,6 +10,8 @@ import { createFilesRouter } from './files.js'
 import { agentExists } from '../../agents/loader.js'
 import { badRequest, notFound } from '../../lib/errors.js'
 import { slugify } from '../../lib/ids.js'
+import { disabledSkillSet, forgetSkill, setSkillEnabled } from '../../skills/switch.js'
+import { readAgentConfig } from '../../agents/loader.js'
 
 export const skillRoutes = new Hono()
 
@@ -52,8 +54,10 @@ skillRoutes.get('/', async c => {
     const agentId = requireAgent(c)
     // The summary leaves out each body and file list: a listing that only shows names reads one
     // frontmatter per skill instead of walking every skill folder.
-    if (c.req.query('summary') === '1') return c.json({ skills: await listSkillSummaries(agentId) })
-    return c.json({ skills: await listSkills(agentId) })
+    const off = disabledSkillSet(await readAgentConfig(agentId))
+    const flag = <T extends { slug: string }>(skill: T) => ({ ...skill, enabled: !off.has(skill.slug) })
+    if (c.req.query('summary') === '1') return c.json({ skills: (await listSkillSummaries(agentId)).map(flag) })
+    return c.json({ skills: (await listSkills(agentId)).map(flag) })
 })
 
 skillRoutes.post('/', async c => {
@@ -132,10 +136,20 @@ skillRoutes.patch('/:slug', async c => {
     return c.json(skill)
 })
 
+skillRoutes.put('/:slug/enabled', async c => {
+    const agentId = requireAgent(c)
+    const slug = c.req.param('slug')
+    if (!skillExists(agentId, slug)) return c.json({ error: 'skill not found' }, 404)
+    const body = z.object({ enabled: z.boolean() }).strict().parse(await c.req.json())
+    await setSkillEnabled(agentId, slug, body.enabled)
+    return c.json({ slug, enabled: body.enabled })
+})
+
 skillRoutes.delete('/:slug', async c => {
     const agentId = requireAgent(c)
     const slug = c.req.param('slug')
     if (!skillExists(agentId, slug)) return c.json({ error: 'skill not found' }, 404)
     await deleteSkill(agentId, slug)
+    await forgetSkill(agentId, slug)
     return c.body(null, 204)
 })

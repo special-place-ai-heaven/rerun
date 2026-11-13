@@ -64,7 +64,7 @@ describe('skill routes', () => {
 
     it('lists only names and descriptions when asked for a summary', async () => {
         const res = await send('GET', '?summary=1')
-        expect(await res.json()).toEqual({ skills: [{ slug: 'weekly-report', name: 'Weekly Report', description: 'v2' }] })
+        expect(await res.json()).toEqual({ skills: [{ slug: 'weekly-report', name: 'Weekly Report', description: 'v2', enabled: true }] })
     })
 
     it('patches the description and keeps the body', async () => {

@@ -603,6 +603,12 @@ class WtSweep(FactoryCase):
         self.assertEqual(self.remote_refs(), "")
 
 
+class PrLookupNoGh(unittest.TestCase):
+    def test_missing_gh_gives_none(self):
+        with mock.patch.object(F, "GH", "/nonexistent/gh"):
+            self.assertIsNone(F.pr_lookup("o/r", "chunk/1-a"))
+
+
 class WorkOverride(unittest.TestCase):
     def paths(self, env):
         code = "import sys; sys.path.insert(0, %r); import factory as F; print(F.WORK, F.REPOS, F.WT, F.STATE)" % HERE

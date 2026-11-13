@@ -487,10 +487,10 @@ def install_deps(path):
 
 def pr_lookup(full, branch):
     """PRs with head `branch` as [{number, state OPEN|CLOSED|MERGED, headRefOid}], or None when GitHub cannot be asked."""
-    r = run([GH, "pr", "list", "-R", full, "--head", branch, "--state", "all", "--limit", "20", "--json", "number,state,headRefOid"], check=False)
     try:
+        r = run([GH, "pr", "list", "-R", full, "--head", branch, "--state", "all", "--limit", "20", "--json", "number,state,headRefOid"], check=False)
         return None if r.returncode else json.loads(r.stdout or "[]")
-    except ValueError:
+    except (ValueError, OSError):  # OSError: gh missing or not startable
         return None
 
 

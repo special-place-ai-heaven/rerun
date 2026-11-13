@@ -12,6 +12,7 @@ import { badRequest, notFound } from '../../lib/errors.js'
 import { slugify } from '../../lib/ids.js'
 import { disabledSkillSet, forgetSkill, setSkillEnabled } from '../../skills/switch.js'
 import { readAgentConfig } from '../../agents/loader.js'
+import { reloadAgent } from '../../agents/registry.js'
 
 export const skillRoutes = new Hono()
 
@@ -142,6 +143,7 @@ skillRoutes.put('/:slug/enabled', async c => {
     if (!skillExists(agentId, slug)) return c.json({ error: 'skill not found' }, 404)
     const body = z.object({ enabled: z.boolean() }).strict().parse(await c.req.json())
     await setSkillEnabled(agentId, slug, body.enabled)
+    await reloadAgent(agentId)
     return c.json({ slug, enabled: body.enabled })
 })
 

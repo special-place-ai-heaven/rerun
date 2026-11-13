@@ -42,6 +42,7 @@ class RunGate(unittest.TestCase):
         self.assertEqual(seen["cmd"][-2:], ["o/r", "7"])
         self.assertTrue(seen["cmd"][-3].endswith("gate.py"))
         self.assertEqual((seen["env"]["GATE_POST_STATUS"], seen["env"]["FACTORY_GH"]), ("1", "gh"))
+        self.assertTrue(seen["env"]["FACTORY_WORK"].startswith(os.environ.get("FACTORY_DATA_DIR", "/state") + "/"))
         self.assertEqual(kv["published:A"], "1")
 
     def test_gate_crash_keeps_chunk_published(self):

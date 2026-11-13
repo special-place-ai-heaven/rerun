@@ -327,7 +327,8 @@ class Runner:
             pr = self.pr_by_head and self.pr_by_head("factory/job-%s" % job)
             if not pr:
                 return log("gate skipped for job %s: no PR found" % job)
-            env = dict(os.environ, GATE_POST_STATUS="1", FACTORY_GH="gh")
+            env = dict(os.environ, GATE_POST_STATUS="1", FACTORY_GH="gh",
+                       FACTORY_WORK=os.path.join(os.environ.get("FACTORY_DATA_DIR", "/state"), "work"))  # /data/work is read-only here
             p = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "gate.py"), repo, str(pr["number"])],
                                env=env, capture_output=True, text=True, timeout=600)
             log("gate %s#%s exit %s" % (repo, pr["number"], p.returncode))

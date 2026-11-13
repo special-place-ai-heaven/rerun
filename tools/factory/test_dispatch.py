@@ -1,4 +1,4 @@
-import contextlib, gc, io, json, os, sys, tempfile, unittest, urllib.error
+import contextlib, gc, io, json, os, sys, tempfile, unittest, unittest.mock, urllib.error
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dispatch as D
 
@@ -386,6 +386,24 @@ class Secrets(Base):
         with contextlib.redirect_stdout(out):
             self.assertEqual(D.main(["status"]), 0)
         self.assertRegex(out.getvalue(), r"^#5 building ")
+
+    def test_start_line_for_once_but_not_status(self):
+        for name, fake in (("settings", lambda: self.cfg), ("make_account", lambda url, key: self.w.account),
+                           ("make_gh", lambda tok: self.w.gh), ("read_secret", lambda path: "fake-key")):
+            self.addCleanup(setattr, D, name, getattr(D, name))
+            setattr(D, name, fake)
+        env = dict(os.environ, DISPATCH_ACCOUNT_URL="http://account.invalid")
+        with unittest.mock.patch.dict(os.environ, env):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(D.main(["once"]), 0)
+            lines = [l for l in out.getvalue().splitlines() if "dispatcher started:" in l]
+            self.assertEqual(len(lines), 1)
+            self.assertIn("%d builders, 2 reviewers, label factory, repo o/r" % len(self.cfg["builders"]), lines[0])
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(D.main(["status"]), 0)
+            self.assertNotIn("dispatcher started", out.getvalue())
 
 
 class Hardening(Base):

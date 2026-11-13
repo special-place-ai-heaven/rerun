@@ -5,6 +5,10 @@
 # Needs RERUN_DEV_ENGINE_KEY in deploy/vps/.env (see dev-engine.yml). It gets that one variable and
 # nothing of the live setup. Its ledger and trigger tokens live in its own volume.
 #
+# The GitHub token is not in the environment: the host key file named by FACTORY_GH_TOKEN_FILE in
+# deploy/vps/.env is mounted read-only as the secret gh_token at /run/secrets/gh_token. On the host that
+# file is owned by the container's runner uid, mode 0400, in a directory only that uid enters.
+#
 # Deliberately absent: published ports, the docker socket, privileged mode, added capabilities,
 # host paths other than the read-only tools/factory mount, the live engine key.
 name: rerun-dev
@@ -38,6 +42,12 @@ services:
         max-size: 10m
         max-file: "3"
     restart: unless-stopped
+    secrets:
+      - gh_token
+
+secrets:
+  gh_token:
+    file: ${FACTORY_GH_TOKEN_FILE:?set FACTORY_GH_TOKEN_FILE in deploy/vps/.env}
 
 volumes:
   factory-runner-data:

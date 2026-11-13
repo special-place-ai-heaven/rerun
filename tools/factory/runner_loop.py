@@ -170,8 +170,8 @@ class ChainFailed(Exception):
 
 
 class Runner:
-    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None, issues=None, pr_by_head=None):
-        self.open_pr, self.evidence, self.issues, self.pr_by_head = open_pr, evidence, issues, pr_by_head
+    def __init__(self, eng, st, cfg, tokens, clock=time.time, open_pr=lambda *a: None, evidence=None, issues=None, pr_by_head=None, compare_diff=None):
+        self.open_pr, self.evidence, self.issues, self.pr_by_head, self.compare_diff = open_pr, evidence, issues, pr_by_head, compare_diff
         self.eng, self.st, self.cfg, self.tokens, self.clock = eng, st, cfg, tokens, clock
         self.by_slug = {e["slug"]: e for e in cfg["triggers"]}
         self.by_stage = {e["stage"]: e for e in cfg["triggers"]}
@@ -304,6 +304,9 @@ class Runner:
         d = self.cfg.get("work_dir") or os.path.join(os.path.dirname(store_path(self.cfg)), "work")
         try:
             base, head = (CO.Checkout(os.path.join(d, job, n), kv["repo_url"], kv["base"]).ensure() for n in ("base", "head"))
+            if "patch:" + chunk not in kv and self.compare_diff:  # no patch given: the pushed chunk branch against the job base
+                kv["patch:" + chunk] = self.compare_diff(kv["base"], "chunk/%s-%s" % (job, chunk))
+                self.st.set(job, "patch:" + chunk, kv["patch:" + chunk])
             if (r := AP.apply(head, kv["patch:" + chunk], paths)) != "applied":
                 raise ChainFailed("patch %s" % r)
             res = TR.run(base, head, kv["test:" + chunk].split())
@@ -314,7 +317,7 @@ class Runner:
             text = pr_body("%s#%s" % (repo, job), unmerged_receipts(self.st, job))
             PB.publish(head, job, kv["title"], kv["base_branch"], lambda t, h, b, _="": self.open_pr(t, h, b, text), paths)
             self.st.set(job, "published:" + chunk, "1")
-        except (KeyError, ValueError, OSError, subprocess.CalledProcessError) as e:
+        except (KeyError, ValueError, OSError, subprocess.CalledProcessError, GH.GhError) as e:
             raise ChainFailed("publish chain stopped: %s" % type(e).__name__) from e
 
     def see_merges(self):
@@ -505,7 +508,7 @@ def build(cfg=None, eng=None, clock=time.time, gh=None):
     eng = eng or E.Engine()
     tokens = T.ensure_triggers(eng, cfg)
     st = S.Store(store_path(cfg))
-    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr, issues=gh, pr_by_head=lambda b: gh.pr_by_head(b), evidence=lambda f: stage_evidence(gh, st, f))
+    return Runner(eng, st, cfg, tokens, clock, open_pr=gh.open_pr, issues=gh, pr_by_head=lambda b: gh.pr_by_head(b), compare_diff=getattr(gh, "compare_diff", None), evidence=lambda f: stage_evidence(gh, st, f))
 
 def unmerged_receipts(st, job):
     """Receipts of the job's chunks not yet merged: the body of this PR lists only those."""

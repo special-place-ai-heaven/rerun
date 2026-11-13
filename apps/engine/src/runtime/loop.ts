@@ -26,7 +26,7 @@ import { listAgentIndex, setAgentStatus } from '../db/repos/agents.js'
 import { appendMessage, lastMessageId, listSessionAuthorIds, setMessageToolCalls } from '../db/repos/messages.js'
 import type { MessageRow } from '../db/schema.js'
 import { isSharedConversation, signText } from './message-authors.js'
-import { bumpRunStep, cancelRun, failRun, finishRun, setRunContext, startRun, updateRunLive } from '../db/repos/runs.js'
+import { bumpRunStep, cancelRun, failRun, finishRun, setRunContext, setRunLineage, startRun, updateRunLive } from '../db/repos/runs.js'
 import { insertRunStep, insertToolCall } from '../db/repos/telemetry.js'
 import { touchSession } from '../db/repos/sessions.js'
 import { logger } from '../lib/logger.js'
@@ -37,7 +37,8 @@ import { toolPayloadChars } from '../tools/payload.js'
 import { prepareMcpServer } from '../tools/mcp.js'
 import { withPooledRelays } from '../tools/mcp-relay.js'
 import { HostBreaker } from '../tools/host-breaker.js'
-import type { PartialResult, RunContext, RunTrigger, SkillProposalNotice } from './context.js'
+import type { PartialResult, RunContext, RunLineage, RunTrigger, SkillProposalNotice } from './context.js'
+import { parseJobRef } from './job-ref.js'
 import { partialResultsNote } from './partial-results.js'
 import { registerRunAbort, setRunCancel, unregisterRunAbort } from './run-control.js'
 import { runCurator } from './curator.js'
@@ -422,6 +423,12 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
         ctx.runId = run.id
         const triggerSlug = 'slug' in trigger ? trigger.slug : null
         void setRunContext(agent.id, run.id, { provider, model, triggerSource: trigger.source, triggerSlug }).catch(() => {})
+        const lineage: RunLineage = { ...(trigger.source === 'chat' ? trigger.lineage : undefined) }
+        if (author?.id) lineage.initiatorUserId = author.id
+        const parsedJob = parseJobRef(userText)
+        if (!lineage.jobRef && parsedJob) lineage.jobRef = parsedJob.jobRef
+        ctx.lineage = lineage
+        void setRunLineage(agent.id, run.id, lineage).catch(() => {})
 
         const callTargetsP = agent.config.tools.callAgent ? listAgentIndex().then(idx => callTargetsOf(idx, agent.id, callableAgentIds)) : Promise.resolve([])
         const toolsP = callTargetsP.then(callTargets => {

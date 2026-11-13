@@ -9,8 +9,10 @@ import argparse, datetime, hashlib, json, os, re, subprocess, sys, tempfile, tim
 import briefs
 import clocks
 import cutshape
+import holds
 import pools
 import store as ledger_store
+import waits
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WAIT_S = 1  # smallest waitSeconds send_message takes: clamp() in apps/ui/lib/mcp/args.ts floors at 1
@@ -235,6 +237,9 @@ def checks_verdict(runs):
     return "OK", None
 
 
+WAIT_STATES = ("waiting", "queued", "review_wait", "fix_wait")
+
+
 class Dispatcher:
     def __init__(self, cfg, account, gh, now=time.time):
         self.cfg, self.account, self.gh, self.now = cfg, account, gh, now
@@ -264,7 +269,19 @@ class Dispatcher:
 
     def save(self, j, reason=None, reset=False):
         """One transitions row: the job as it is now, with its time. reset: a successful transition clears the retry counts."""
+        if j["state"] not in WAIT_STATES:
+            j.pop("wait_reason", None)
         self.store.put_job(str(j["issue"]), j["state"], j, reason, j.get("run"), reset_retries=reset)
+
+    def note_wait(self, j):
+        """A waiting job carries the reason it waits; one transitions row when the reason changes."""
+        if j["state"] not in WAIT_STATES:
+            return
+        now = self.now()
+        why = waits.reason(j, now, holds.active(self.store, now))
+        if why and why != j.get("wait_reason"):
+            j["wait_reason"] = why
+            self.save(j, "waits: " + why)
 
     def jobs(self):
         return sorted(self.store.jobs(), key=lambda j: j["issue"])
@@ -682,6 +699,7 @@ class Dispatcher:
             try:
                 if j["state"] not in END:
                     self.step(j)
+                    self.note_wait(j)
                 if j["state"] in END and not j.get("relabelled"):
                     self.report(j)
                 if j.get("errors"):

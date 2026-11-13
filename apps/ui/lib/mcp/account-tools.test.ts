@@ -1,7 +1,19 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { chat as engineChat } from '@/lib/engine/client'
+import { dispatchAccountTool } from '@/app/api/_services/mcp-account.service'
+import { resolveAgentTarget } from '@/app/api/_services/chat.service'
 import { ACCOUNT_TOOL_DEFS, ACCOUNT_TOOL_NAMES } from './account-tools'
+
+vi.mock('@/supabase/serviceRole', () => ({ createServiceRoleClient: vi.fn() }))
+vi.mock('@/lib/engine/client')
+vi.mock('@/app/api/_services/workspace-engine.service', () => ({ findWorkspaceEngine: vi.fn(), getConnectionForAgent: vi.fn(), getWorkspaceConnection: vi.fn() }))
+vi.mock('@/app/api/_services/agent.service', () => ({ changeAgentHandle: vi.fn(), createAgent: vi.fn(), deleteAgent: vi.fn(), duplicateAgent: vi.fn(), moveAgentToBox: vi.fn(), renameAgent: vi.fn() }))
+vi.mock('@/app/api/_services/agent-setup.service', () => ({ declareService: vi.fn(), installServiceSlugs: vi.fn() }))
+vi.mock('@/app/api/_services/chat.service', () => ({ ensureSessionRow: vi.fn(), resolveAgentTarget: vi.fn() }))
+vi.mock('@/app/api/_services/services.service', () => ({ allocateServiceInstance: vi.fn(), listCatalogServices: vi.fn(), listInstalledServices: vi.fn(), loadManifest: vi.fn(), searchCatalogServices: vi.fn(), toAuthMethodSummaries: vi.fn(() => []), uninstallService: vi.fn() }))
+vi.mock('@/app/api/_services/mcp-shares.service', () => ({ dispatchShareTool: vi.fn() }))
 
 // The server advertises one static list and dispatches through three chained switches. Nothing
 // else ties them together, so a tool declared with no case answers "Unknown tool" to a model that
@@ -66,5 +78,40 @@ describe('account tool defs', () => {
         }
         expect(duplicate.inputSchema.properties.count).toMatchObject({ type: 'integer', minimum: 1, maximum: 10 })
         expect(duplicate.inputSchema.required).toEqual(['agentId'])
+    })
+})
+
+describe('send_message goal', () => {
+    const actor = { kind: 'workspace', workspaceId: 7 } as never
+    const goal = { lastLineForms: [{ prefix: 'PR: ', rest: 'pull-url' }], turnLimit: 3 }
+
+    beforeEach(() => {
+        vi.clearAllMocks()
+        vi.mocked(resolveAgentTarget).mockResolvedValue({ conn: { baseUrl: 'https://engine.test', apiKey: null }, engineAgentId: 'engine-own', contentLocked: false } as never)
+        vi.mocked(engineChat).mockResolvedValue(new Response('down', { status: 503 }))
+    })
+
+    it('hands a valid goal to chat()', async () => {
+        await expect(dispatchAccountTool(actor, 'send_message', { agentId: 'a', message: 'hi', goal })).rejects.toThrow(/could not be reached/)
+        expect(vi.mocked(engineChat).mock.calls[0][2]).toMatchObject({ goal })
+    })
+
+    it('refuses turnLimit 11 as invalid_goal without starting a run', async () => {
+        await expect(dispatchAccountTool(actor, 'send_message', { agentId: 'a', message: 'hi', goal: { ...goal, turnLimit: 11 } })).rejects.toThrow(/invalid_goal/)
+        expect(engineChat).not.toHaveBeenCalled()
+    })
+
+    it('names invalid_goal when the engine answers 400', async () => {
+        vi.mocked(engineChat).mockResolvedValue(new Response('{"error":"invalid_goal"}', { status: 400 }))
+        await expect(dispatchAccountTool(actor, 'send_message', { agentId: 'a', message: 'hi', goal })).rejects.toThrow(/invalid_goal/)
+    })
+
+    it('sends no goal key without a goal', async () => {
+        await expect(dispatchAccountTool(actor, 'send_message', { agentId: 'a', message: 'hi' })).rejects.toThrow(/could not be reached/)
+        expect(vi.mocked(engineChat).mock.calls[0][2]).not.toHaveProperty('goal')
+    })
+
+    it('advertises goal on send_message', () => {
+        expect(ACCOUNT_TOOL_DEFS.find(tool => tool.name === 'send_message')?.inputSchema.properties).toHaveProperty('goal')
     })
 })

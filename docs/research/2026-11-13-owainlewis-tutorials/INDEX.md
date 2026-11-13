@@ -16,7 +16,7 @@ something the factory already does, or do not apply to it.
 | A goal is a condition that a second model judges, not only the form of a last line | `agent-goals-and-loops`, and the two primary pages it cites | [GOAL.md](../2026-11-11-factory-map/GOAL.md) |
 | One card per loop (job, inputs, allowed, forbidden, output, evaluation, escalation), and a dry run graded against known cases before a loop may write | `loop-engineering` | LOOPS.md has every field except "may change / may not change": add that column at its next edit. Dry run first is the rule for every new upkeep loop |
 | The brief for the model half of failure triage (loop 14): it gets the failing names and output only, returns root cause, confidence and the theories it ruled out, fixes nothing, and allows one retry of a suspected unstable test, which it reports | `nested-subagents-claude-code` | when loop 14 is cut |
-| Two upkeep jobs the factory has no schedule for: documentation drift, and a weekly scan for confirmed defects that searches open issues first and files nothing to fill a report | `agent-goals-and-loops`, `codex-automations` | the owner's choice: each costs one run per firing |
+| Two upkeep jobs the factory has no schedule for: documentation drift, and a weekly scan for confirmed defects that searches open issues first and files nothing to fill a report | `agent-goals-and-loops`, `codex-automations` | the scan was tried as a dry run the same day and found three real defects ([SCAN.md](../2026-11-13-defect-scan-dry-run/SCAN.md)); a schedule for either job stays the owner's choice |
 
 ## How it was read
 
@@ -35,7 +35,7 @@ something the factory already does, or do not apply to it.
 | Card | It proposed | Checked against | Outcome |
 |---|---|---|---|
 | `software-factory` | tie the merge to the assessed commit, read checks from Actions and not from a same-named status, an empty check list is not a pass, text on a pull request is evidence and not instruction | `tools/factory/dispatch.py`: `--match-head-commit`, `actions/runs?head_sha=`, `checks_verdict` waits on no runs, the build brief's line on whose text is an instruction | have all of it |
-| `autonomous-ai-coding-workflow` | a backlog manager on a schedule | the triage coworker's two scheduled jobs, read in full: a daily pass that labels new issues and mails a digest for eleven watched repositories, and a monthly check of stale calls | have the job; only "dry run first" is carried. This repository is not among the eleven: adding it is the owner's choice |
+| `autonomous-ai-coding-workflow` | a backlog manager on a schedule | the triage coworker's two scheduled jobs, read in full: a daily pass that labels new issues and mails a digest for eleven watched repositories, and a monthly check of stale calls | have the job; only "dry run first" is carried. This repository was not among the eleven; it was added the same day at the owner's word, with a rule that leaves the `factory` labels alone |
 | `spec-driven-development` | task fields (do, files, verify) and sizing rules | the factory issue (worker, allowed paths, change, done-test seen failing, run command, depends on) and `tools/factory/cutshape.py` | have, and stricter. Its scale (1 to 3 files small, 4 to 10 medium, over 10 split) is a usable default for the size cap of loop 8 |
 | `nested-subagents-claude-code` | a failure analyst | LOOPS.md loop 14, state "part" | already in the design, not built: the brief is carried |
 | `codex-automations` | a scheduled scan for defects | the schedules that exist: triage, server health, usage, tidiness | not there: carried as an option |
@@ -83,13 +83,16 @@ issue triage was already scheduled. The brief was wrong, not the cards.
 | `intent-based-classification` | routing a question by intent | SKIP | skip |
 | `postgresql-only-database-ai` | retrieval on PostgreSQL | SKIP | skip |
 
-## Leads outside this repository (not read)
+## Outside this repository
 
-The tutorials are prose about tools whose code lives elsewhere. If more is wanted, these are where to look:
+The tutorials are prose about tools whose code lives elsewhere.
 
-- `owainlewis/factory`: the author's own factory, in Go, with the labels `factory-ready` and `factory-blocked`.
-- `owainlewis/agent-worker`: the polling worker of `background-agents` (claim, hooks before and after the agent).
-- `owainlewis/agent-skills`: the `backlog-manager` and `codex-run-loop` skills.
+- `owainlewis/factory`, the Go factory with the labels `factory-ready` and `factory-blocked` that the lessons
+  link to, is not public. The author's public factory is `owainlewis/machinist`, studied in
+  [MACHINIST.md](./MACHINIST.md).
+- The weekly scan for defects was tried as a dry run: [SCAN.md](../2026-11-13-defect-scan-dry-run/SCAN.md).
+- Not read: `owainlewis/agent-worker` (the polling worker of `background-agents`), `owainlewis/agent-skills`
+  (the `backlog-manager` and `codex-run-loop` skills), `owainlewis/blueprint` (planning skills).
 
 ## What the run showed about ghosts
 

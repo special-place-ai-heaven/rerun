@@ -105,6 +105,7 @@ def build_brief(j):
         '3. Run only the test files you touched, with the worker pool capped at 2. No full suite. Then run the lint and the type check of every package the change touched (`pnpm --filter <package> lint`, `pnpm --filter <package> ts-check`), and for Python files under `tools/factory` run `ruff check` on them where ruff is installed; fix what they report before opening the pull request. Lint warnings do not block; lint errors do.',
         '4. Commit, push, and open one pull request into dev. Title: the issue title plus "(#%s)". Body: what changed, which test failed before and passes now, and the line "Closes #%s".' % (j["issue"], j["issue"]),
         '5. Leave the worktree open. It is closed after the merge by a sweep.',
+        'A file you write that is not part of the change (the pull request body before pr-open, a note) carries the issue number in its name.',
         '',
         'If the plan itself is wrong (a file outside its paths, a test it cannot write), end with BLOCKED: plan: <why>.',
         '',
@@ -150,6 +151,7 @@ def fix_brief(j, pr, review):
         str(review)[-1500:],
         '',
         'Fix exactly what blocks, in your open worktree for this job. Add or adjust the test, run only the test files you touched, commit and push to the same branch. No second pull request.',
+        'A file you write that is not part of the change (the pull request body before pr-open, a note) carries the issue number in its name.',
         '',
         'If the plan itself is wrong (a file outside its paths, a test it cannot write), end with BLOCKED: plan: <why>.',
         '',
@@ -270,8 +272,21 @@ class Dispatcher:
     def busy(self):
         return {j["agent"] for j in self.jobs() if j["state"] in RUNNING and j.get("agent")}
 
+    def running(self):
+        """(coworker id, copy) of every job whose run is out."""
+        return [(j["agent"], j.get("copy")) for j in self.jobs() if j["state"] in RUNNING and j.get("agent")]
+
     def free(self, worker):
-        return pools.pick(self.cfg, worker, self.busy())
+        """(id, copy) of the first coworker of the type with a free run, or None."""
+        return pools.pick_copy(self.cfg, worker, self.running())
+
+    def free_copy_of(self, agent):
+        """A free copy number of this one coworker, or None when all its runs are out."""
+        mine = [c for t in pools.types(self.cfg).values() for c in t["coworkers"] if c["id"] == agent]
+        if not mine:
+            return None
+        got = pools.pick_copy({"types": {"x": {"coworkers": mine}}}, "x", self.running())
+        return got[1] if got else None
 
     def to(self, j, state, msg, **kw):
         j.update(kw, state=state)
@@ -353,9 +368,9 @@ class Dispatcher:
 
     # --- coworker runs
 
-    def send(self, j, agent, step, message, state):
+    def send(self, j, agent, step, message, state, copy=1):
         """Record the intent, send, record the run id. An intent left without a run id is never sent again."""
-        j.update(agent=agent, run=None, sending=step, state=state, not_before=None, lost_beats=0)
+        j.update(agent=agent, copy=copy, run=None, sending=step, state=state, not_before=None, lost_beats=0)
         # The intent is on the row before the first save: a delegator stopped while send_message is in flight leaves
         # a row that lost_run can use.
         j["intent_at"] = iso(self.now())
@@ -418,7 +433,7 @@ class Dispatcher:
             return None
         log(j["issue"], why + "; sending again")
         j["attempt"] = 2
-        self.send(j, j["agent"], j["sending_step"] + " again", self.message(j), j["state"])
+        self.send(j, j["agent"], j["sending_step"] + " again", self.message(j), j["state"], j.get("copy", 1))
         return None
 
     def clock_check(self, j, r):
@@ -487,9 +502,9 @@ class Dispatcher:
             return j["not_met"][:200]
         return blocked_reason(out)
 
-    def start(self, j, agent, step, state, **kw):
+    def start(self, j, agent, step, state, copy=1, **kw):
         j.update(kw, sending_step=step, attempt=j.pop("retry_attempt", 1))
-        self.send(j, agent, step, self.message(dict(j, state=state)), state)
+        self.send(j, agent, step, self.message(dict(j, state=state)), state, copy)
 
     # --- one step per job
 
@@ -500,9 +515,9 @@ class Dispatcher:
         if st in ("queued", "review_wait", "fix_wait") and j.get("not_before") and self.now() < j["not_before"]:
             return
         if st == "queued":
-            b = self.free(j.get("worker", "coder"))
-            if b:
-                self.start(j, b, "build", "building", builder=b)
+            got = self.free(j.get("worker", "coder"))
+            if got:
+                self.start(j, got[0], "build", "building", copy=got[1], builder=got[0])
         elif st == "building":
             out = self.finished_run(j)
             if out is None:
@@ -518,11 +533,12 @@ class Dispatcher:
         elif st == "review_wait":
             if self.conflicts(j):
                 return
-            r = self.free("reviewer")
-            if not r:
+            got = self.free("reviewer")
+            if not got:
                 return
+            r = got[0]
             head = json.loads(self.gh(["pr", "view", str(j["pr"]), "-R", self.repo, "--json", "headRefOid"]))["headRefOid"]
-            self.start(j, r, "review %d of #%s at %s" % (j["round"], j["pr"], head[:7]), "reviewing", reviewer=r, head=head)
+            self.start(j, r, "review %d of #%s at %s" % (j["round"], j["pr"], head[:7]), "reviewing", copy=got[1], reviewer=r, head=head)
         elif st == "reviewing":
             out = self.finished_run(j)
             if out is None:
@@ -537,8 +553,9 @@ class Dispatcher:
             else:
                 self.end(j, "rejected", verdict[:200] or last_line(out))
         elif st == "fix_wait":
-            if j["builder"] not in self.busy():
-                self.start(j, j["builder"], "fix of #%s" % j["pr"], "fixing")
+            copy = self.free_copy_of(j["builder"])
+            if copy is not None:
+                self.start(j, j["builder"], "fix of #%s" % j["pr"], "fixing", copy=copy)
         elif st == "fixing":
             out = self.finished_run(j)
             if out is None:

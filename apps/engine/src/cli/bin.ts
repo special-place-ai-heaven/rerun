@@ -11,6 +11,7 @@ import { doctorCommand } from './commands/doctor.js'
 import { installBrowserCommand, installDesktop, installLayoutCommand, rollbackCommand, updateCliTools, updateCommand } from './commands/update.js'
 import { serviceCommand } from './commands/service.js'
 import { restoreFinalizeCommand } from './commands/restore-finalize.js'
+import { snapshotCommand } from './commands/snapshot.js'
 
 const HELP = `rerun-engine
 
@@ -18,6 +19,7 @@ Usage:
   rerun run                       Start the API server
   rerun migrate                   Create or update the database
   rerun restore-finalize          Migrate a restored data-dir, skip the runs it slept through
+  rerun snapshot [--keep N]       Copy every coworker database to backups/ and check the copies
   rerun agent create --name <n>   Create an agent
   rerun agent list                List agents
   rerun agent delete <id>         Delete an agent
@@ -49,6 +51,8 @@ async function main() {
             return migrateCommand()
         case 'restore-finalize':
             return restoreFinalizeCommand()
+        case 'snapshot':
+            return snapshotCommand(rest)
         case 'agent':
             return agentCommand(rest)
         case 'skill':

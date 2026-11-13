@@ -17,6 +17,17 @@ echo "== 1/4 code"
 # The clone belongs to the login user, not root: pull as that user so git keeps working for them.
 su "$(stat -c '%U' "$REPO")" -s /bin/sh -c "git -C '$REPO' pull --ff-only"
 
+echo "== snapshot of the coworker databases"
+# A copy before anything changes. No running engine, or one older than the snapshot command, is skipped
+# with one line; any other failure stops the script here.
+if ! docker compose ps --status running --services 2>/dev/null | grep -qx engine; then
+    echo "Engine is not running: no snapshot."
+elif ! docker compose exec -T engine node dist/cli/bin.js help 2>/dev/null | grep -q 'rerun snapshot'; then
+    echo "Running engine has no snapshot command yet: no snapshot."
+else
+    docker compose exec -T engine node dist/cli/bin.js snapshot
+fi
+
 echo "== 2/4 images"
 docker compose pull
 

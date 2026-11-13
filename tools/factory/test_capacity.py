@@ -3,9 +3,9 @@ import limits
 
 
 class Capacity(unittest.TestCase):
-    def test_defaults_3_and_2(self):
+    def test_shipped_settings_8_and_2(self):
         self.assertEqual((limits.capacity({}), limits.per_job_cap({})), (3, 2))
-        self.assertEqual((limits.capacity(), limits.per_job_cap()), (3, 2))
+        self.assertEqual((limits.capacity(), limits.per_job_cap()), (8, 2))
         self.assertEqual(limits.capacity({"builder_capacity": 5}), 5)
         self.assertEqual(limits.per_job_cap({"per_job_cap": 1}), 1)
 

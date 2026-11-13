@@ -8,7 +8,7 @@ class Settings(unittest.TestCase):
         with open(os.path.join(HERE, "runner.json")) as f:
             cfg = json.load(f)
         self.assertEqual(cfg["token_cap"], 400000)
-        self.assertEqual(cfg["builder_capacity"], 3)
+        self.assertEqual(cfg["builder_capacity"], 8)
         self.assertEqual(cfg["per_job_cap"], 2)
         self.assertEqual(cfg["retries"], 1)
         self.assertEqual(sorted(cfg["model_tiers"]), ["large", "mid", "small"])

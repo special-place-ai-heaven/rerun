@@ -4,6 +4,7 @@
   "poll_s": 30,
   "max_jobs": 8,
   "checks_timeout_s": 3600,
+  "clocks": {"run_limit_s": 2700, "stall_s": 600, "token_cap": 3000000},
   "auto_plan_marker": true,
   "ledger_file": "/state/ledger.db",
   "json_state_file": "/state/dispatch.json",

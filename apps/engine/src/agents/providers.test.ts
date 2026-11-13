@@ -417,3 +417,18 @@ describe('labels reach the CLI processes', () => {
         expect(captured.codex.some(settings => settings.env.RERUN_RUN_ID === 'run-1')).toBe(true)
     })
 })
+
+describe('thinking level reaches the Claude CLI', () => {
+    const agentWith = (thinkingLevel?: string) =>
+        ({ id: 'think-agent', env: {}, config: { name: 'T', tools: { sharedDb: false }, ...(thinkingLevel ? { thinkingLevel } : {}) }, resolved: { provider: 'claude', model: 'm', connection: undefined } }) as any
+
+    it('keeps the adaptive default when unset and adds the effort when set', () => {
+        captured.claude.length = 0
+        resolveModel(agentWith())
+        resolveModel(agentWith('high'))
+        expect(captured.claude[0].thinking).toEqual({ type: 'adaptive', display: 'summarized' })
+        expect(captured.claude[1].thinking).toEqual({ type: 'adaptive', display: 'summarized' })
+        expect(captured.claude[0].effort).toBeUndefined()
+        expect(captured.claude[1].effort).toBe('high')
+    })
+})

@@ -33,7 +33,8 @@ import { createQuickRepliesCapture, type QuickRepliesCapture } from './quick-rep
 import { createFakeToolCallGuard } from './fake-tool-call-stream.js'
 import { createCardTagGuard } from './card-tag-stream.js'
 import { cardTagStopHook } from './claude-card-nudge.js'
-import { openrouterReasoningMiddleware, reasoningFetch } from './openrouter-reasoning.js'
+import { CLAUDE_DEFAULT_THINKING, thinkingSettingsFor } from './thinking.js'
+import { openrouterReasoningMiddleware, reasoningFetchFor } from './openrouter-reasoning.js'
 import { cacheBreakpointsFetch } from './openrouter-cache.js'
 import { openrouterStreamRetryMiddleware } from './openrouter-stream-retry.js'
 import { opencodeLanguageModel } from './opencode.js'
@@ -301,6 +302,7 @@ export function withCardTagNudge(hooks: ClaudeHooks | undefined): ClaudeHooks {
 function claudeProvider(agent: LoadedAgent, tools?: ToolSet, mcpServers: RunMcpServer[] = [], capture?: ClaudeContextCapture, options: CliModelOptions = {}) {
     const { mcpServers: servers, allowedTools } = claudeMcpConfig(tools, mcpServers, options.screenshots)
     const { cwd, env: agentEnv } = agentProcessEnv(agent, options.labels)
+    const thinking: NonNullable<ReturnType<typeof thinkingSettingsFor>['claudeThinking']> = thinkingSettingsFor('claude', '', agent.config.thinkingLevel).claudeThinking ?? CLAUDE_DEFAULT_THINKING
     return createClaudeCode({
         defaultSettings: {
             persistSession: false,
@@ -312,7 +314,8 @@ function claudeProvider(agent: LoadedAgent, tools?: ToolSet, mcpServers: RunMcpS
             cwd,
             // Without this the CLI emits no thinking block at all, so the chat never shows what the
             // agent is working through. `adaptive` leaves the model to decide when it is worth it.
-            thinking: { type: 'adaptive', display: 'summarized' },
+            thinking: { type: thinking.type, display: thinking.display },
+            ...(thinking.effort ? { effort: thinking.effort } : {}),
             env: {
                 ...agentEnv,
                 ...CLAUDE_HARNESS_ENV,
@@ -505,7 +508,7 @@ export function resolveModel(agent: LoadedAgent, override?: ModelOverride, tools
     // wired here rather than in the registry: the one-shot calls that go through `modelFor`
     // (compaction, curator, vision, memory reconcile) have no one to show a thought to.
     if (provider === 'rerun' || provider === 'openrouter') {
-        const openrouter = openaiChat({ ...openrouterCompatibleOptions(agent, provider), fetch: provider === 'openrouter' ? cacheBreakpointsFetch(reasoningFetch) : reasoningFetch })
+        const openrouter = openaiChat({ ...openrouterCompatibleOptions(agent, provider), fetch: provider === 'openrouter' ? cacheBreakpointsFetch(reasoningFetchFor(agent.config.thinkingLevel)) : reasoningFetchFor(agent.config.thinkingLevel) })
         return { model: wrapLanguageModel({ model: openrouter.languageModel(model), middleware: [openrouterStreamRetryMiddleware, openrouterReasoningMiddleware, replies.middleware, cardTags, guard] }), close: noClose, quickReplies: replies.read }
     }
     // The reasoning a DeepSeek or a vLLM server streams back comes as `reasoning_content`, read the

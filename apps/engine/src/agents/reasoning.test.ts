@@ -50,3 +50,17 @@ describe('reasoning provider options', () => {
         expect(cached.messages.at(-1)?.role).toBe('user')
     })
 })
+
+describe('reasoning provider options with a thinking level', () => {
+    it('carries the level for the providers that take one', () => {
+        expect(reasoningProviderOptions('anthropic', '', 'high')).toEqual({ anthropic: { thinking: { type: 'adaptive', display: 'summarized' }, effort: 'high' } })
+        expect(reasoningProviderOptions('openai', '', 'high')).toEqual({ openai: { reasoningSummary: 'auto', reasoningEffort: 'high' } })
+        expect(reasoningProviderOptions('google', '', 'high')).toEqual({ google: { thinkingConfig: { includeThoughts: true, thinkingLevel: 'high' } } })
+    })
+
+    it('ignores the level where the provider cannot take it', () => {
+        expect(reasoningProviderOptions('codex', '', 'high')).toBeUndefined()
+        expect(reasoningProviderOptions('opencode', 'go/deepseek-v4-pro', 'high')).toBeUndefined()
+        expect(reasoningProviderOptions('opencode', 'go/claude-haiku-5-5', 'high')).toEqual(reasoningProviderOptions('anthropic', '', 'high'))
+    })
+})

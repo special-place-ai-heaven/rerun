@@ -495,7 +495,7 @@ async function runTurn(baseAgent: LoadedAgent, sessionId: string, userText: stri
             model: languageModel,
             system: cached.system,
             messages: cached.messages,
-            providerOptions: mergeProviderOptions(mergeProviderOptions(cached.providerOptions, reasoningProviderOptions(provider, model)), resumeThreadId ? { 'codex-app-server': { threadId: resumeThreadId } } : undefined),
+            providerOptions: mergeProviderOptions(mergeProviderOptions(cached.providerOptions, reasoningProviderOptions(provider, model, agent.config.thinkingLevel)), resumeThreadId ? { 'codex-app-server': { threadId: resumeThreadId } } : undefined),
             tools,
             abortSignal: controller.signal,
             experimental_repairToolCall: repairToolCall,

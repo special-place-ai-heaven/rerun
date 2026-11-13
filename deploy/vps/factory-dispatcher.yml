@@ -45,6 +45,12 @@ services:
         max-size: 10m
         max-file: "3"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os,sys,time; sys.exit(0 if time.time() - os.path.getmtime('/state/heartbeat') < 120 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 2
+      start_period: 60s
     secrets:
       - gh_token
       - account_key

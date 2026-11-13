@@ -228,6 +228,7 @@ class Dispatcher:
         self.repo, self.label = cfg["repo"], cfg.get("label", "factory")
         self.store = ledger_store.Store(cfg["ledger_file"])  # the delegator is the one writer
         self.store.import_json(cfg["json_state_file"])  # once; a second run finds it done
+        self.beats = 0
         self.names = {c["id"]: c["name"] for c in cfg["builders"] + cfg["reviewers"]}
 
     def close(self):
@@ -593,7 +594,33 @@ class Dispatcher:
             self.save(j, "relabelled")
             log(n, "reported, labelled " + done)
 
+    def heartbeat(self):
+        """The start of a beat: one line to /state/heartbeat (temp file in the same folder, renamed) and to the log."""
+        self.beats += 1
+        count = {}
+        for j in self.jobs():
+            count[j["state"]] = count.get(j["state"], 0) + 1
+        today = ledger_store.now()[:10]
+        ended = {s: 0 for s in ("merged", "blocked", "failed", "returned")}
+        for j in self.jobs():
+            if j["state"] in ended and str(j.get("updated_at") or "").startswith(today):
+                ended[j["state"]] += 1
+        stages = ("waiting", "queued", "building", "review_wait", "reviewing", "fix_wait", "fixing", "checks")
+        line = "%s beat %d | %s | ended today: %s" % (
+            iso(self.now()), self.beats, ", ".join("%s %d" % (s, count.get(s, 0)) for s in stages),
+            ", ".join("%s %d" % (s, n) for s, n in ended.items()))
+        print(line, flush=True)
+        path = self.cfg.get("heartbeat_file", "/state/heartbeat")
+        tmp = "%s.%d.tmp" % (path, os.getpid())
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(line + "\n")
+            os.replace(tmp, path)
+        except OSError as e:
+            log("-", "heartbeat: %s" % type(e).__name__)
+
     def once(self):
+        self.heartbeat()
         # Only our own Error text is printed: a library's message can quote what it was handed, a header value too.
         try:
             self.intake()

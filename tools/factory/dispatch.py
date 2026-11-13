@@ -24,6 +24,42 @@ def last_line(text):
     return ((str(text or "").strip().split("\n") or [""])[-1])[:200]
 
 
+def final_line(out, prefixes):
+    """The last line of the output that starts with one of the prefixes, or None."""
+    found = [l.strip() for l in str(out or "").split("\n") if l.strip().startswith(tuple(prefixes))]
+    return found[-1] if found else None
+
+
+def blocked_reason(out):
+    """The last BLOCKED: line; else the last line that is not the tools footer; else 'no final line'."""
+    line = final_line(out, ("BLOCKED:",))
+    if line:
+        return line[:200]
+    rest = [l.strip() for l in str(out or "").split("\n") if l.strip() and not l.strip().startswith("Tools:")]
+    return rest[-1][:200] if rest else "no final line"
+
+
+def issue_files(body):
+    m = re.search(r"(?ms)^\*\*Files\*\*.*?\n(.*?)(?:\n\s*\n\*\*|\Z)", str(body or ""))
+    paths = re.findall(r"`([^`\s]+)`", m.group(1)) if m else []
+    return ", ".join(paths) or "the files the issue names"
+
+
+def issue_run(body):
+    m = re.search(r"(?ms)^\*\*Run\*\*.*?```[a-z]*\n(.*?)```", str(body or ""))
+    return " ; ".join(l.strip() for l in m.group(1).strip().split("\n") if l.strip()) if m else "the Run command of the issue"
+
+
+def final_state(j, forms):
+    return "\n".join([
+        'Final state',
+        '- Objective: rerun #%s, "%s", as the issue text states it.' % (j["issue"], j["title"]),
+        '- Allowed files: %s.' % issue_files(j.get("body")),
+        '- Verification: %s' % issue_run(j.get("body")),
+        '- Your last line is exactly %s. Nothing may follow that line, not even a tools line.' % forms,
+    ])
+
+
 TAIL = "\n".join([
     '',
     'orchestrate this frugally between various models and their thinking efforts by giving them the correct tasks, use symforge for codebase inteligence and terminal commander for work with terminal',
@@ -44,11 +80,12 @@ def build_brief(j):
         '3. Run only the test files you touched, with the worker pool capped at 2. No full suite. Then run the lint and the type check of every package the change touched (`pnpm --filter <package> lint`, `pnpm --filter <package> ts-check`), and for Python files under `tools/factory` run `ruff check` on them where ruff is installed; fix what they report before opening the pull request. Lint warnings do not block; lint errors do.',
         '4. Commit, push, and open one pull request into dev. Title: the issue title plus "(#%s)". Body: what changed, which test failed before and passes now, and the line "Closes #%s".' % (j["issue"], j["issue"]),
         '5. Leave the worktree open. It is closed after the merge by a sweep.',
-        '6. End your answer with one last line, exactly `PR: <url>` or `BLOCKED: <one sentence>`.',
         '',
         'If the issue text is wrong or cannot be done as written, do not improvise: end with BLOCKED and the reason. Never merge, never deploy, never touch the live server, and print nothing from a key file. On GitHub write coworker names without the at-sign.',
         '',
         'Other jobs run beside yours right now, in other folders and other files. Stay inside your own worktree.',
+        '',
+        final_state(j, '`PR: <url>` or `BLOCKED: <one sentence>`'),
         TAIL,
     ])
 
@@ -63,7 +100,9 @@ def review_brief(j, pr, head):
         '',
         'Sprint rule from Rob, 2026-11-13 ("skip any noncritical tests or validations, we can patch up after the fact"): reject only for wrong behaviour, for a hole that touches keys, sign-in or stored data, or for new logic that has no test at all. Everything else goes into your verdict as a follow-up note and does not block.',
         '',
-        'End your answer with one last line, exactly `VERDICT: ACCEPT @<first 7 characters of the commit>` or `VERDICT: REJECT @<first 7 characters>: <one sentence>`. On GitHub write coworker names without the at-sign.',
+        'On GitHub write coworker names without the at-sign.',
+        '',
+        final_state(j, '`VERDICT: ACCEPT @<first 7 characters of the commit>` or `VERDICT: REJECT @<first 7 characters>: <one sentence>`'),
         TAIL,
     ])
 
@@ -75,7 +114,8 @@ def fix_brief(j, pr, review):
         str(review)[-1500:],
         '',
         'Fix exactly what blocks, in your open worktree for this job. Add or adjust the test, run only the test files you touched, commit and push to the same branch. No second pull request.',
-        'End your answer with one last line, exactly `PUSHED: <first 7 characters of the new commit>` or `BLOCKED: <one sentence>`.',
+        '',
+        final_state(j, '`PUSHED: <first 7 characters of the new commit>` or `BLOCKED: <one sentence>`'),
         TAIL,
     ])
 
@@ -242,7 +282,7 @@ class Dispatcher:
                              "SMALL FIX: taken by the factory dispatcher on the owner's label."])
                     log(i["number"], "plan line posted")
             waiting.pop(str(i["number"]), None)
-            job = {"issue": i["number"], "title": i["title"], "state": "queued", "round": 1}
+            job = {"issue": i["number"], "title": i["title"], "body": i.get("body") or "", "state": "queued", "round": 1}
             if old and old.get("pr") and json.loads(self.gh(["pr", "view", str(old["pr"]), "-R", self.repo, "--json", "state"])).get("state") == "OPEN":
                 # Put back in with its pull request still open: that one is reviewed, a second build would open a duplicate.
                 job.update(state="review_wait", pr=old["pr"], builder=old.get("builder"))
@@ -304,10 +344,14 @@ class Dispatcher:
             out = self.finished_run(j)
             if out is None:
                 return
-            m = re.findall(r"(?m)^PR:\s*\S*/pull/(\d+)\s*$", out)
+            last = final_line(out, ("PR:", "BLOCKED:"))
+            m = re.match(r"PR:\s*\S*/pull/(\d+)\s*$", last) if last else None
             if not m:
-                return self.end(j, "blocked", last_line(out))
-            self.to(j, "review_wait", "pull request #%s" % m[-1], pr=int(m[-1]))
+                found = self.find_pr(j, out)
+                if found:
+                    j["pr"] = found
+                return self.end(j, "blocked", blocked_reason(out))
+            self.to(j, "review_wait", "pull request #%s" % m.group(1), pr=int(m.group(1)))
         elif st == "review_wait":
             if self.conflicts(j):
                 return
@@ -334,8 +378,9 @@ class Dispatcher:
             out = self.finished_run(j)
             if out is None:
                 return
-            if not re.search(r"(?m)^PUSHED:", out):
-                return self.end(j, "blocked", last_line(out))
+            last = final_line(out, ("PUSHED:", "BLOCKED:"))
+            if not (last and last.startswith("PUSHED:")):
+                return self.end(j, "blocked", blocked_reason(out))
             self.to(j, "review_wait", "fix pushed: " + last_line(out)[:80], round=2)
         elif st == "checks":
             self.checks(j)
@@ -378,6 +423,15 @@ class Dispatcher:
         self.end(j, "merged", "#%s at %s" % (j["pr"], j["head"][:7]))
 
     # --- end states
+
+    def find_pr(self, j, out):
+        urls = re.findall(r"https://github\.com/%s/pull/(\d+)" % re.escape(self.repo), str(out or ""))
+        if urls:
+            return int(urls[-1])
+        listed = json.loads(self.gh(["pr", "list", "-R", self.repo, "--state", "open", "--search",
+                                     "in:title (#%s)" % j["issue"], "--json", "number,title"]) or "[]")
+        hits = [p["number"] for p in listed if str(p.get("title", "")).rstrip().endswith("(#%s)" % j["issue"])]
+        return hits[-1] if hits else None
 
     def end(self, j, state, reason):
         self.to(j, state, "%s: %s" % (state, reason), reason=reason, sending=None)

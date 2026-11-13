@@ -161,7 +161,7 @@ class TestProbeMerge(Cli):
 
     def test_ok_and_only_the_scratch_ref_is_written(self):
         fake = Fake(self.answer())
-        self.assertEqual(self.main(["probe-merge", "--repo", "testpilot"], fake), (0, "MERGE OK\n"))
+        self.assertEqual(self.main(["probe-merge", "--repo", "testpilot", "--issue", "209"], fake), (0, "MERGE OK\n"))
         w = self.writes(fake)
         self.assertEqual([(c[c.index("-X") + 1], c[c.index("-X") + 2].split(FULL + "/")[1].split("/")[0]) for c in w],
                          [("POST", "git"), ("POST", "merges"), ("POST", "issues"), ("DELETE", "issues"), ("POST", "issues"), ("PATCH", "issues"), ("DELETE", "git")])
@@ -175,9 +175,16 @@ class TestProbeMerge(Cli):
         for c in w:
             self.assertFalse(any(x in ("base=dev", "base=main") or x.endswith("/refs/heads/dev") or x.endswith("/refs/heads/main") for x in c), c)
 
+    def test_no_issue_refuses_before_any_call(self):
+        fake = Fake(self.answer())
+        code, out = self.main(["probe-merge", "--repo", "rerun"], fake)
+        self.assertEqual(code, 2)
+        self.assertIn("--issue", out)
+        self.assertEqual(fake.calls, [])
+
     def test_failed_step_still_deletes_the_ref(self):
         fake = Fake(self.answer(fail="/merges"))
-        code, out = self.main(["probe-merge", "--repo", "testpilot"], fake)
+        code, out = self.main(["probe-merge", "--repo", "testpilot", "--issue", "209"], fake)
         self.assertEqual(code, 1)
         self.assertTrue(out.startswith("MERGE FAIL merge dev into the scratch ref: HTTP 403"), out)
         w = self.writes(fake)

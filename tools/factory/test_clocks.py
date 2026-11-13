@@ -56,6 +56,15 @@ class Clocks(unittest.TestCase):
         self.assertEqual(C.klass("BLOCKED", blocked="BLOCKED: Plan: x"), "plan")
         self.assertEqual(C.klass("BLOCKED", blocked="BLOCKED: tests fail"), "work")
 
+    def test_a_run_cut_by_a_sign_in_renewal_or_refused_at_the_providers_edge_is_transient(self):
+        for text in ("ClaudeSignInRenewedError: interrupted: Claude sign-in renewed during the run",
+                     "AI_LoadAPIKeyError: Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"):
+            r = run(status="error", error=text)
+            kind, _ = C.outcome(r, {"steps": 7, "at": r["startedAt"]}, L.ts("2026-11-13T18:01:00Z"), CFG)
+            self.assertEqual(C.klass(kind, r), "transient", text)
+        r = run(status="error", error="OAuth access token has expired")
+        self.assertEqual(C.klass("REFIRE_ONCE", r), "work")
+
     def test_backoff_is_one_two_four_minutes_then_none(self):
         self.assertEqual(C.RETRY_BACKOFF_S, (60, 120, 240))
         self.assertEqual([C.backoff(n) for n in (1, 2, 3, 4, 5)], [60, 120, 240, None, None])

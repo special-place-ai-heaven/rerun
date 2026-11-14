@@ -481,6 +481,64 @@
     .iso-cable-comet { display: block; }
 }
 
+/* ===== Links « trace » and « belt » (TileLinks) ===== */
+
+/* The lit line behind the head: a dash whose end moves from the start of the path to its end. */
+@keyframes iso-trace-run {
+    from { stroke-dashoffset: var(--iso-trace-from); }
+    to { stroke-dashoffset: var(--iso-trace-to); }
+}
+
+.iso-trace-trail {
+    stroke-dashoffset: var(--iso-trace-from);
+    animation-name: iso-trace-run, iso-cable-comet-rest;
+    animation-iteration-count: infinite;
+    animation-fill-mode: both;
+}
+
+/* A belt's slats run one slat period at a time, so the loop is seamless. */
+@keyframes iso-belt-run {
+    from { stroke-dashoffset: 7.4; }
+    to { stroke-dashoffset: 0; }
+}
+
+.iso-belt-slats {
+    animation: iso-belt-run 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .iso-belt-slats { animation: none; }
+}
+
+/* The head: a small bright point with a soft halo painted once (no per-frame filter), riding the
+   path through offset-distance like the cable comet. */
+.iso-trace-head {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 5px;
+    height: 5px;
+    border-radius: 9999px;
+    background: radial-gradient(circle, #fff 0 30%, var(--iso-trace-color) 55%);
+    box-shadow: 0 0 6px 2px color-mix(in srgb, var(--iso-trace-color) 70%, transparent), 0 0 18px 7px color-mix(in srgb, var(--iso-trace-color) 25%, transparent);
+    offset-rotate: 0deg;
+    offset-anchor: 50% 50%;
+    will-change: transform;
+    animation-name: iso-cable-comet, iso-cable-comet-rest;
+    animation-iteration-count: infinite;
+    animation-fill-mode: both;
+}
+
+@supports (offset-path: path('M0 0')) {
+    .iso-trace-head { display: block; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .iso-trace-trail { animation: none; opacity: 0 !important; }
+    .iso-trace-head { display: none; }
+}
+
 /* ===== Onboarding : bloc « fantôme » incitatif (SpacePlaceholderBlock) ===== */
 
 /* Contour pointillés : défilement continu de la ligne pointillée */

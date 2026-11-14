@@ -243,7 +243,10 @@ export type Container = {
 // le relie visuellement à la région d'où part l'appel ; une scène dont les containers sont tous
 // blancs (le board du produit les rend ainsi) obtient alors un lien blanc sur fond blanc, et n'a
 // aucun autre moyen de le rattraper.
-export type TileLink = { source: string; target: string; variant?: 'beam' | 'cable'; appearDelay?: number; color?: string }
+// 'trace' = the cable's quiet line with a slow neon trace on top: a glowing head travels end to end, the
+// line behind it lit and fading, the line ahead dark. 'belt' = a conveyor on the floor: a dark band with
+// running slats and a neon edge in the link's colour, with the same trace along its middle.
+export type TileLink = { source: string; target: string; variant?: 'beam' | 'cable' | 'trace' | 'belt'; appearDelay?: number; color?: string }
 
 // Bulle affichée au-dessus d'une tile, comme un message entre deux collègues : le nom de celui qui
 // parle, puis le message, et une pointe vers sa tuile. Le rendu et l'expiration vivent dans le package.

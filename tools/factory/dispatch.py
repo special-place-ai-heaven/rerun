@@ -11,6 +11,7 @@ import clocks
 import cutshape
 import holds
 import pools
+import renewal
 import store as ledger_store
 import waits
 
@@ -248,6 +249,7 @@ class Dispatcher:
         self.store = ledger_store.Store(cfg["ledger_file"])  # the delegator is the one writer
         self.store.import_json(cfg["json_state_file"])  # once; a second run finds it done
         self.beats = 0
+        self.renewal_unreadable = False
         self.names = pools.names(cfg)
 
     def fill_ids(self):
@@ -708,8 +710,33 @@ class Dispatcher:
         except OSError as e:
             log("-", "heartbeat: %s" % type(e).__name__)
 
+    def renewal_hold(self):
+        """Hold new sends while the sign-in has at most the run limit plus five minutes left; a failed read leaves the hold as it is."""
+        try:
+            answer = self.account("list_ai_connections", {})
+            limit = int((self.cfg.get("clocks") or {}).get("run_limit_s", 2700)) // 60 + 5
+            is_due = renewal.due(answer, limit)
+        except (Error, ValueError, KeyError, TypeError):
+            if not self.renewal_unreadable:
+                self.renewal_unreadable = True
+                log("-", "sign-in time not readable: no hold before a renewal")
+            return
+        self.renewal_unreadable = False
+        now = self.now()
+        if is_due:
+            try:
+                was = json.loads(self.store.get_all("-").get("hold:sign-in renewal") or "{}").get("until", 0) > now
+            except (ValueError, AttributeError, TypeError):
+                was = False
+            if not was:
+                log("-", "sign-in has %s min left: holding new sends until it is renewed" % renewal.left(answer))
+            holds.arm(self.store, "sign-in renewal", now + 2 * self.cfg.get("poll_s", 30))
+        else:
+            holds.clear(self.store, "sign-in renewal")
+
     def once(self):
         self.heartbeat()
+        self.renewal_hold()
         # Only our own Error text is printed: a library's message can quote what it was handed, a header value too.
         try:
             self.intake()

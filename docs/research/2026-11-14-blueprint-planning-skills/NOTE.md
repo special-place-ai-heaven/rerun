@@ -76,3 +76,14 @@ read by `tools/factory/cutshape.py` and shown in issue #246 (text read via the p
 - The commit history of their repository and any issue or PR there. Licence read from the issue text, not from `LICENSE`.
 - Ours: MACHINE.md sections 1 to 6, 8 and 10; any job text other than #246; `readyq.py`, `evidence.py`, `gate.py` (named from MACHINE.md only, not opened).
 - The issue text lists three files under `examples/consulting-crm/`; the tree at that commit has `ARCHITECTURE.md`, `REQUIREMENTS.md` and `docs/capture-lead/spec.md`, all read. Their examples are teaching examples with no code (their own text: "This is a teaching example").
+
+## After check (the orchestrator, 2026-11-14)
+
+Each take was held against our code and against what the factory did on 2026-11-13 and 14. A take is a lead, not a decision. Nothing here becomes a job yet.
+
+| Take | Checked against | Outcome |
+|---|---|---|
+| T1, split by result and not by layer | The cut of phase B (#246 to #262) was by layer on purpose: new modules side by side, then a chain of wiring jobs, which is what let seven jobs start at once. The cost showed the same night: the four jobs of the skill switch (#191 to #194) were each merged, reviewed and green, and the switch did nothing on the server until #244 | Not adopted as a cut rule: it would give up the width. Carried into phase D as its first rule: a feature's cut ends with one job whose done-test runs the whole, and a parent closes on that, not on its children |
+| T2, a size rule on a job | `tools/factory/cutshape.py` has none. Measured on the 67 of 70 merged factory jobs whose file list the parser reads: 1 to 7 paths a job (34 of them 2), 150 to 895 words, median 394 | Not built: no job of 70 failed for its size. The numbers are here for when one does: more than 8 paths would have refused none |
+| T3, a readiness test before a job is cut | Done by hand on the cut of phase B: of 17 jobs, 3 corrected before the start, 2 held back, 1 more plan fault found only by its builder (MACHINE.md, section 9) | Confirms phase E's plan review, with a number: about one job in four. The part code can do (shape, dependencies, shared paths, a Run block) is a script on the orchestrator's machine today and belongs in `cutshape.check` |
+| T4, out of scope and a source link per job | "Files (allowed paths; nothing else)" does the first for files; the link to the parent is prose | Not taken now. A stable id of the parent's criterion a job proves becomes useful with phase D's spec review |

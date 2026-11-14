@@ -42,7 +42,7 @@ type Link = {
     key: string
     source: Tile
     target: Tile
-    variant: 'beam' | 'cable'
+    variant: 'beam' | 'cable' | 'trace' | 'belt'
     appearDelay: number
     color?: string
 }
@@ -134,6 +134,26 @@ function cableTiming(id: string) {
     return { period, travelRatio: travel / period, phase: hashUnit(id, 3) * period }
 }
 
+// A trace runs slower than a cable's comet and rests between runs, each line on its own rhythm.
+function traceTiming(id: string) {
+    const travel = 3.2 + hashUnit(id, 4) * 2.6
+    const rest = 0.9 + hashUnit(id, 5) * 2.2
+    const period = travel + rest
+    return { period, travelRatio: travel / period, phase: hashUnit(id, 6) * period }
+}
+
+// A belt's band and its slats, in world px: wide enough to carry the factory's spheres.
+const BELT_WIDTH = 13
+const BELT_SLATS = '1.4 6'
+
+// The lit line behind a trace's head, as stacked strokes that grow fainter the further back they
+// reach: a fade along a bent path, which a gradient cannot follow.
+const TRACE_TRAIL = [
+    { share: 0.12, opacity: 0.85, width: 1.5 },
+    { share: 0.3, opacity: 0.32, width: 1.2 },
+    { share: 0.55, opacity: 0.1, width: 1 },
+]
+
 function dedupe(points: AxisPoint[]) {
     return points.filter((point, index) => index === 0 || point.u !== points[index - 1].u || point.v !== points[index - 1].v)
 }
@@ -183,7 +203,7 @@ export const TileLinks = memo(function TileLinks({ tiles, liveLinks, containers,
     const links = useMemo<Link[]>(() => {
         const tileById = new Map(tiles.map(t => [t.id, t]))
         const byKey = new Map<string, Link>()
-        const add = (sourceId: string | null, targetId: string, variant: 'beam' | 'cable', appearDelay: number, color?: string) => {
+        const add = (sourceId: string | null, targetId: string, variant: 'beam' | 'cable' | 'trace' | 'belt', appearDelay: number, color?: string) => {
             if (!sourceId || sourceId === targetId) return
             const source = tileById.get(sourceId)
             const target = tileById.get(targetId)
@@ -223,6 +243,7 @@ export const TileLinks = memo(function TileLinks({ tiles, liveLinks, containers,
     if (routes.length === 0) return null
 
     const cables = routes.filter(route => route.link.variant === 'cable')
+    const traces = routes.filter(route => route.link.variant === 'trace' || route.link.variant === 'belt')
 
     return (
         <>
@@ -248,6 +269,48 @@ export const TileLinks = memo(function TileLinks({ tiles, liveLinks, containers,
                     // vit dans le plan du sol, donc une pastille posée au bout dépasse sous la silhouette
                     // du bloc dès que le lien arrive sur une face tournée vers la caméra. La comète de
                     // courant vit dans le calque HTML ci-dessous.
+                    if (link.variant === 'trace' || link.variant === 'belt') {
+                        const { period, travelRatio, phase } = traceTiming(link.id)
+                        const at = (travelRatio * 100).toFixed(1)
+                        const timing = {
+                            animationDuration: `${period.toFixed(2)}s`,
+                            animationDelay: `-${phase.toFixed(2)}s`,
+                            animationTimingFunction: `linear(0 0%, 1 ${at}%, 1 100%), linear(0 0%, 0 ${at}%, 1 ${at}%, 1 100%)`,
+                        }
+                        return (
+                            <g key={link.key} style={{ opacity: dim ? ISO_DIM_OPACITY : undefined, transition: `opacity ${ISO_DIM_MS}ms ease` }}>
+                                {link.variant === 'belt' ? (
+                                    <>
+                                        {/* Edge glow in the link's colour, the belt's body over it, then its running slats. */}
+                                        <path d={d} fill="none" stroke={color} strokeWidth={BELT_WIDTH + 2.4} strokeLinejoin="round" opacity={0.55} />
+                                        <path d={d} fill="none" stroke="#0d1122" strokeWidth={BELT_WIDTH} strokeLinejoin="round" />
+                                        <path d={d} className="iso-belt-slats" fill="none" stroke="rgb(var(--iso-glint) / 0.09)" strokeWidth={BELT_WIDTH - 3} strokeDasharray={BELT_SLATS} />
+                                    </>
+                                ) : (
+                                    <path d={d} fill="none" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" style={{ stroke: 'rgb(var(--iso-glint) / 0.14)' }} />
+                                )}
+                                {TRACE_TRAIL.map(layer => {
+                                    const lit = Math.max(6, length * layer.share)
+                                    return (
+                                        <path
+                                            key={layer.share}
+                                            d={d}
+                                            className="iso-trace-trail"
+                                            fill="none"
+                                            stroke={color}
+                                            strokeWidth={layer.width}
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeDasharray={`${lit} ${length + lit}`}
+                                            strokeOpacity={layer.opacity}
+                                            style={{ ['--iso-trace-from' as string]: `${lit}`, ['--iso-trace-to' as string]: `${lit - length}`, ...timing }}
+                                        />
+                                    )
+                                })}
+                            </g>
+                        )
+                    }
+
                     if (link.variant === 'cable') {
                         return (
                             <path
@@ -348,6 +411,34 @@ export const TileLinks = memo(function TileLinks({ tiles, liveLinks, containers,
                                         }}
                                     />
                                 </div>
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
+            {/* The head of each trace: a glowing point riding the visible line itself, on the same clock
+                as its trail, so the lit line ends right under it. */}
+            {traces.length > 0 && (
+                <div className="absolute pointer-events-none" style={{ left: -svgHalfW, top: -svgHalfH }}>
+                    {traces.map(({ link, points }) => {
+                        const { period, travelRatio, phase } = traceTiming(link.id)
+                        const at = (travelRatio * 100).toFixed(1)
+                        const color = link.color ?? (link.source.containerId ? containerColorById.get(link.source.containerId) : undefined) ?? DEFAULT_COLOR
+                        const dim = link.source.dimmed || link.target.dimmed
+                        // The head's own opacity belongs to its rest animation: dimming goes on a wrapper,
+                        // as it does for the cable comet.
+                        return (
+                            <div key={link.key} style={{ opacity: dim ? ISO_DIM_OPACITY : undefined, transition: `opacity ${ISO_DIM_MS}ms ease` }}>
+                            <div
+                                className="iso-trace-head"
+                                style={{
+                                    ['--iso-trace-color' as string]: color,
+                                    offsetPath: `path("${points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')}")`,
+                                    animationDuration: `${period.toFixed(2)}s`,
+                                    animationDelay: `-${phase.toFixed(2)}s`,
+                                    animationTimingFunction: `linear(0 0%, 1 ${at}%, 1 100%), linear(0 0%, 0 ${at}%, 1 ${at}%, 1 100%)`,
+                                }}
+                            />
                             </div>
                         )
                     })}

@@ -12,6 +12,7 @@ import cutshape
 import holds
 import pools
 import renewal
+import snapshot
 import store as ledger_store
 import waits
 
@@ -165,12 +166,12 @@ def fix_brief(j, pr, review):
 
 def make_account(url, key, opener=urllib.request.urlopen):
     """account(tool, args) -> the tool's JSON result, over the account tool server. The key goes only in the header."""
-    def call(tool, args):
+    def call(tool, args, timeout=30):
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}).encode()
         req = urllib.request.Request(url, data=body, method="POST", headers={"Authorization": "Bearer " + key,
                                      "Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
         try:
-            with opener(req, timeout=30) as r:
+            with opener(req, timeout=timeout) as r:
                 text = r.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as e:
             e.close()  # left open, Python's clean-up warning repeats the server's status text
@@ -250,6 +251,7 @@ class Dispatcher:
         self.store.import_json(cfg["json_state_file"])  # once; a second run finds it done
         self.beats = 0
         self.renewal_unreadable = False
+        self.report_logged = set()
         self.names = pools.names(cfg)
 
     def fill_ids(self):
@@ -776,6 +778,20 @@ class Dispatcher:
                 self.save(j, "pass failed")
                 if j["errors"] >= 20 and j["state"] not in END:
                     self.end(j, "failed", "20 passes in a row failed in state %s" % j["state"])
+        self.report_line()
+
+    def report_line(self):
+        """Each beat: the whole line to the app, once. Never raises: a failed report must not stop the beat."""
+        try:
+            now = self.now()
+            snap = snapshot.build_snapshot(self.store, self.cfg, now, holds.active(self.store, now), beat=self.beats)
+            self.account("factory_report", {"snapshot": snap}, timeout=10)
+            self.report_logged.clear()
+        except Exception as e:  # noqa: BLE001 - the report only, never the beat
+            text = str(e) if isinstance(e, Error) else type(e).__name__
+            if text not in self.report_logged:
+                self.report_logged.add(text)
+                log("-", "factory_report: %s" % text)
 
 
 def read_secret(path):

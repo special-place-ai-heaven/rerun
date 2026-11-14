@@ -477,6 +477,12 @@ class Dispatcher:
             self.save(j, "failed attempt, held: %s" % why[:160])
             log(j["issue"], "failed attempt, back to %s; sending held: %s" % (j["state"], why[:160]))
             return None
+        if j["agent"] in self.unresolved():
+            # Its coworker has a send not yet resolved: no further send to it in this beat; step sends this one later.
+            j.update(state=BACK[j["state"]], retry_attempt=2, sending=None)
+            self.save(j, "failed attempt, waits for an unresolved send: %s" % why[:160])
+            log(j["issue"], "failed attempt, back to %s; its coworker has an unresolved send: %s" % (j["state"], why[:160]))
+            return None
         log(j["issue"], why + "; sending again")
         j["attempt"] = 2
         self.send(j, j["agent"], j["sending_step"] + " again", self.message(j), j["state"], j.get("copy", 1))

@@ -13,7 +13,7 @@ class Briefs(unittest.TestCase):
             for s in ("rerun #7", "Note x", "(#7)", "Closes #7",
                       "one pull request into dev", "special-place-administrator",
                       "call no other coworker", "BLOCKED: plan:",
-                      "issue number in its name",
+                      "issue number in its name", "goes into `/tmp`", "the folder above it",
                       "/data/tools/bin/pr-open --template"):
                 self.assertIn(s, b)
             self.assertNotIn("Final state", b)

@@ -54,6 +54,14 @@ class Copies(unittest.TestCase):
         self.assertIn(LINE, D.build_brief(j))
         self.assertIn(LINE, D.fix_brief(j, 3, "no"))
 
+    def test_the_briefs_say_where_a_file_outside_the_change_goes(self):
+        j = {"issue": 1, "title": "t", "round": 1}
+        for b in (D.build_brief(j), D.fix_brief(j, 3, "no")):
+            for s in ("goes into `/tmp`", "carries the issue number in its name",
+                      "removed once it is used",
+                      "Never put one in your worktree or in the folder above it"):
+                self.assertIn(s, b)
+
     def test_a_coworker_with_an_unresolved_send_gets_no_further_send(self):
         self.make(3, [issue(n) for n in (1, 2, 3)], extra=[{"id": "b2", "name": "B2", "runs": 1}])
         real, state = self.w.account, {"first": True}

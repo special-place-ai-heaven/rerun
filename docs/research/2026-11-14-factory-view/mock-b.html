@@ -1,0 +1,73 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Factory - the floor: workers, coworkers, runs in flight (sample data, #312)</title><style>:root{--background:oklch(1 0 0);--foreground:oklch(.145 0 0);--card:oklch(1 0 0);--muted:oklch(.97 0 0);--muted-foreground:oklch(.45 0 0);--border:oklch(.922 0 0);--brand:#4d34f7;--brand-text:#4d34f7;--frame:oklch(.925 0 0);--ok:#0f7a3d;--warn:#8a5a00;--bad:#b42318;--warn-bg:#fff4d6;--bad-bg:#fde8e6;--ok-bg:#e3f5e9}
+.dark{--background:oklch(.145 0 0);--foreground:oklch(.985 0 0);--card:oklch(.205 0 0);--muted:oklch(.269 0 0);--muted-foreground:oklch(.78 0 0);--border:oklch(1 0 0/12%);--brand-text:#b7a8ff;--frame:#000;--ok:#5fd08a;--warn:#f0c15a;--bad:#ff8f84;--warn-bg:#3a2d0c;--bad-bg:#3d1714;--ok-bg:#12301e}
+*{box-sizing:border-box}body{margin:0;background:var(--frame);color:var(--foreground);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;padding:8px;height:100vh}
+.mono,.num{font-family:ui-monospace,"Geist Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+.shell{background:var(--background);border:1px solid var(--border);border-radius:12px;height:calc(100vh - 16px);display:flex;flex-direction:column;overflow:hidden}
+header.top{display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+h1{font-size:16px;margin:0;font-weight:600}h2{font-size:13px;margin:0 0 8px;font-weight:600}
+.seg{display:inline-flex;background:var(--muted);border-radius:8px;padding:2px}.seg button{border:0;background:none;color:var(--muted-foreground);padding:4px 12px;border-radius:6px;font:inherit;cursor:pointer}.seg button[aria-pressed=true]{background:var(--background);color:var(--foreground);box-shadow:0 0 0 1px var(--border)}
+button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--brand-text);outline-offset:2px}
+.sp{flex:1}.sub{color:var(--muted-foreground);font-size:12px}
+.gauges{display:flex;gap:16px;align-items:center;flex-wrap:wrap}.gauge{display:flex;flex-direction:column;gap:2px;min-width:150px}.gauge .row{display:flex;justify-content:space-between;font-size:12px}
+.meter{height:6px;background:var(--muted);border-radius:3px;overflow:hidden}.meter i{display:block;height:100%;background:var(--brand-text)}
+.hold{display:none;align-items:center;gap:12px;padding:8px 16px;background:var(--warn-bg);color:var(--warn);border-bottom:1px solid var(--border);font-weight:500}.held .hold{display:flex}
+.beat{padding:6px 16px;border-top:1px solid var(--border);color:var(--muted-foreground);font-size:12px;white-space:nowrap;overflow:auto}
+.st{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500}.st:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--muted-foreground)}
+.st.building:before,.st.fixing:before{background:var(--brand-text);border-radius:2px}.st.reviewing:before,.st.checks:before{background:var(--brand-text)}
+.st.review_wait:before,.st.fix_wait:before,.st.queued:before{background:none;border:2px solid var(--muted-foreground)}.st.waiting:before{background:none;border:2px dashed var(--muted-foreground)}
+.st.merged{color:var(--ok)}.st.merged:before{background:var(--ok)}.st.blocked,.st.failed{color:var(--bad)}.st.blocked:before,.st.failed:before{background:var(--bad);border-radius:0;transform:rotate(45deg)}
+.chip{display:inline-block;border:1px solid var(--border);border-radius:6px;padding:0 6px;font-size:12px;background:var(--muted)}
+a{color:var(--brand-text)}.job{border:1px solid var(--border);background:var(--card);border-radius:8px;padding:8px 10px;cursor:pointer;display:block;text-align:left;width:100%;font:inherit;color:inherit}.job:hover{border-color:var(--muted-foreground)}
+.job .t{font-weight:500;margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wait{color:var(--muted-foreground);font-size:12px}.held .wait.h{color:var(--warn)}
+.main{flex:1;min-height:0;overflow:auto;padding:12px 16px}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);font-weight:400;vertical-align:top}th{color:var(--muted-foreground);font-size:12px}
+.detail{display:none;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:24px;max-width:1200px}.v-detail .detail{display:grid}.v-detail .live{display:none}
+.live{display:block}.back{margin-bottom:8px;border:0;background:none;color:var(--brand-text);font:inherit;cursor:pointer;padding:0}
+.tl{list-style:none;margin:0;padding:0 0 0 14px;border-left:2px solid var(--border)}.tl li{margin:0 0 8px;position:relative}.tl li:before{content:"";position:absolute;left:-19px;top:6px;width:8px;height:8px;border-radius:50%;background:var(--muted-foreground)}
+.verdict{border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--ok-bg);color:var(--ok);font-weight:500}
+@media(max-width:700px){.detail{grid-template-columns:1fr}.gauge{min-width:120px}}
+@media(prefers-reduced-motion:no-preference){.job{transition:border-color .15s}}
+.floor{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:16px;align-items:start}#floor{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}
+.wt{border:1px solid var(--border);border-radius:12px;padding:12px}.cw{border-top:1px solid var(--border);padding:8px 0;display:flex;flex-direction:column;gap:6px}.cw:first-of-type{border-top:0}.cwh{display:flex;justify-content:space-between;align-items:center}
+.run{border-left:3px solid var(--brand-text)}.belt{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);display:flex;flex-direction:column;gap:6px}#side{display:flex;flex-direction:column;gap:6px}
+@media(max-width:900px){.floor,#floor{grid-template-columns:1fr}}
+</style></head><body><div class="shell"><header class="top"><h1>Factory</h1><span class="sub">the floor: workers, coworkers, runs in flight</span><div class="sp"></div><div class="gauges" id="gauges"></div><div class="seg" role="group" aria-label="View"><button data-v="main" aria-pressed="true">Building</button><button data-v="held" aria-pressed="false">Held</button><button data-v="detail" aria-pressed="false">Job</button></div><div class="seg" role="group" aria-label="Theme"><button data-theme="light" aria-pressed="true">Light</button><button data-theme="dark" aria-pressed="false">Dark</button></div></header><div class="hold" id="hold" role="status"></div><div class="main"><div class="live floor"><div id="floor"></div><aside id="side"></aside></div><div class="detail" id="detail"></div></div><div class="beat" id="beat" aria-live="off"></div></div><script>const D={now:"02:24:10",nowHeld:"02:31:20",
+jobs:[
+{n:306,pr:null,title:"Docs: what the line looks like to the owner (sample)",kind:"code",state:"building",since:"02:21:20",copy:1,steps:14,run:"r-7f21"},
+{n:307,pr:null,title:"Engine: a run read carries its goal (sample)",kind:"code",state:"building",since:"02:21:22",copy:2,steps:22,run:"r-7f22"},
+{n:308,pr:null,title:"Tools: status says when sending is held (sample)",kind:"code",state:"building",since:"02:21:25",copy:3,steps:9,run:"r-7f23"},
+{n:309,pr:null,title:"Web app: the run list shows cached share (sample)",kind:"code",state:"waiting",since:"02:21:05",on:"#306",why:"its plan reads the file #306 writes"},
+{n:304,pr:296,title:"Factory tools: wt names stray entries (sample)",kind:"code",state:"merged",since:"02:12:40",end:"02:12:40"},
+{n:305,pr:297,title:"Briefs: temp files go to /tmp (sample)",kind:"code",state:"merged",since:"02:18:02",end:"02:18:02"}],
+heldOver:{306:{state:"review_wait",since:"02:23:27",pr:310,on:"a reviewer",why:"sending is held: sign-in renewal"},307:{state:"building",since:"02:21:22",steps:61},308:{state:"review_wait",since:"02:22:34",pr:311,on:"a reviewer",why:"sending is held: sign-in renewal"}},
+hold:{kind:"sign-in renewal",until:"02:34:40"},
+workers:[{type:"coder",pool:[{name:"code",max:3},{name:"hopper",max:1}]},{type:"reviewer",pool:[{name:"linus",max:1},{name:"bruce",max:1}]},{type:"researcher",pool:[{name:"search",max:1}]},{type:"designer",pool:[{name:"dieter",max:1}]}],
+gauges:{week:54,reset:"Thu 18:00 UTC",signin:479,signinHeld:4},
+detail:{n:306,states:[["waiting","02:21:05"],["queued","02:21:06"],["building","02:21:20"],["review_wait","02:23:27"]],
+runs:[{id:"r-7f21",role:"build · copy 1",start:"02:21:20",end:"02:23:27",steps:31,tin:330900,cached:262300,tout:17202,goal:"met"}]},
+flows:["waiting","queued","building","review_wait","reviewing","fix_wait","fixing","checks"]};
+const $=s=>document.querySelector(s),H=(s,x)=>{$(s).innerHTML=x};
+const view=()=>({held:document.body.classList.contains("held"),det:document.body.classList.contains("v-detail")});
+function J(){const h=view().held;return D.jobs.map(j=>Object.assign({},j,h&&D.heldOver[j.n]?D.heldOver[j.n]:{}))}
+const now=()=>view().held?D.nowHeld:D.now;
+const secs=t=>{const[a,b,c]=t.split(":").map(Number);return a*3600+b*60+c};
+const age=t=>{let d=secs(now())-secs(t);const m=Math.floor(d/60),s=d%60;return m?m+"m "+String(s).padStart(2,"0")+"s":s+"s"};
+const nf=x=>x.toLocaleString("en-US");
+const stl=s=>'<span class="st '+s+'">'+s.replace("_"," ")+'</span>';
+function chrome(){const h=view().held,g=D.gauges,J_=J(),c={};J_.forEach(j=>c[j.state]=(c[j.state]||0)+1);
+H("#gauges",'<div class="gauge"><div class="row"><span>Plan, weekly window</span><b class="num">'+g.week+'%</b></div><div class="meter" role="meter" aria-valuenow="'+g.week+'" aria-valuemin="0" aria-valuemax="100" aria-label="Plan weekly window used"><i style="width:'+g.week+'%"></i></div><span class="sub">resets '+g.reset+'</span></div><div class="gauge"><div class="row"><span>Sign-in left</span><b class="num">'+(h?g.signinHeld+" min":g.signin+" min")+'</b></div><div class="meter" role="meter" aria-valuenow="'+(h?g.signinHeld:g.signin)+'" aria-valuemin="0" aria-valuemax="600" aria-label="Sign-in minutes left"><i style="width:'+((h?g.signinHeld:g.signin)/6)+'%;'+(h?"background:var(--warn)":"")+'"></i></div><span class="sub">'+(h?"renews at hold end":"renews on next start")+'</span></div>');
+H("#hold",'<b>Line held: '+D.hold.kind+'</b><span>No job is sent until <b class="num">'+D.hold.until+' UTC</b> ('+(h?"3m 20s":"")+' left). Running builds finish.</span>');
+H("#beat",'<span class="mono">'+now()+' beat '+(h?843:841)+' | '+D.flows.map(s=>s.replace("_"," ")+" "+(c[s]||0)).join(", ")+' | ended today: merged 2, blocked 0, failed 0, returned 0</span>')}
+function setView(v){const b=document.body;b.classList.toggle("held",v==="held");b.classList.toggle("v-detail",v==="detail"||v==="detailheld");if(v==="detailheld")b.classList.add("held");document.querySelectorAll(".seg [data-v]").forEach(x=>x.setAttribute("aria-pressed",String(x.dataset.v===v)));location.hash=v;draw()}
+function detailHtml(){const d=D.detail,r=d.runs[0],ch=Math.round(r.cached/r.tin*100);
+return '<div><button class="back" onclick="setView(\'main\')">&larr; Back to the factory</button><h2>#'+d.n+' &middot; Docs: what the line looks like to the owner (sample)</h2><p><a href="#issue-306">Issue #306</a> &middot; <a href="#pr-310">Pull request #310</a></p><h2>States</h2><ol class="tl">'+d.states.map((s,i)=>'<li>'+stl(s[0])+' <span class="num sub">'+s[1]+' UTC &middot; '+(i<d.states.length-1?"lasted "+(secs(d.states[i+1][1])-secs(s[1]))+"s":(view().held?"now, held":"now")+": "+age(s[1]))+'</span></li>').join("")+'</ol></div><div><h2>Runs</h2><table><tr><th>Run</th><th>Window</th><th>Steps</th><th>In</th><th>Cached</th><th>Out</th></tr><tr><td><span class="mono">'+r.id+'</span><br><span class="sub">'+r.role+'</span></td><td class="num">'+r.start+" to "+r.end+'</td><td class="num">'+r.steps+'</td><td class="num">'+nf(r.tin)+'</td><td class="num">'+nf(r.cached)+' ('+ch+'%)</td><td class="num">'+nf(r.tout)+'</td></tr></table><h2 style="margin-top:16px">Goal verdict</h2><div class="verdict">Met &middot; run '+r.id+'. When not met, the reason shows here in the same box in the red role.</div></div>'}
+function boot(){document.querySelectorAll("[data-theme]").forEach(b=>b.onclick=()=>{document.documentElement.classList.toggle("dark",b.dataset.theme==="dark");document.querySelectorAll("[data-theme]").forEach(x=>x.setAttribute("aria-pressed",String(x===b)))});
+document.querySelectorAll(".seg [data-v]").forEach(b=>b.onclick=()=>setView(b.dataset.v));const v=location.hash.slice(1);setView(["held","detail","detailheld"].includes(v)?v:"main")}
+function draw(){chrome();const j=J(),h=view().held;
+const open=x=>'onclick="setView(\''+(h?"detailheld":"detail")+'\')"';
+H("#floor",D.workers.map(w=>'<section class="wt"><h2>'+w.type+' <span class="sub">'+w.pool.length+' coworker'+(w.pool.length>1?"s":"")+'</span></h2>'+w.pool.map(p=>{const runs=w.type==="coder"&&p.name==="code"?j.filter(x=>x.copy&&["building","fixing"].includes(x.state)):[];const waiting=w.type==="reviewer"?j.filter(x=>x.state==="review_wait"):[];
+return '<div class="cw"><div class="cwh"><b>'+p.name+'</b><span class="chip num">'+runs.length+' of '+p.max+' runs</span></div>'+(runs.length?runs.map(x=>'<button class="job run" '+open(x)+'><span class="num"><b>copy '+x.copy+'</b> &middot; #'+x.n+'</span> '+stl(x.state)+'<div class="t">'+x.title+'</div><span class="wait num">started '+x.since+' &middot; '+age(x.since)+' &middot; '+x.steps+' steps</span></button>').join(""):'<div class="sub">idle</div>')+'</div>'}).join("")+(w.type==="reviewer"&&j.some(x=>x.state==="review_wait")?'<div class="belt"><h2>Waiting for a reviewer</h2>'+j.filter(x=>x.state==="review_wait").map(x=>'<button class="job" '+open(x)+'><span class="num"><b>#'+x.n+'</b> PR #'+x.pr+'</span> '+stl(x.state)+'<div class="wait h">'+x.why+'</div></button>').join("")+'</div>':'')+'</section>').join(""));
+H("#side",'<h2>Not on a worker</h2>'+j.filter(x=>x.state==="waiting").map(x=>'<button class="job" '+open(x)+'><span class="num"><b>#'+x.n+'</b></span> '+stl(x.state)+'<div class="t">'+x.title+'</div><div class="wait h">waits on '+x.on+': '+x.why+'</div></button>').join("")+'<h2 style="margin-top:16px">Ended today</h2>'+j.filter(x=>x.end).map(x=>'<button class="job" '+open(x)+'><span class="num"><b>#'+x.n+'</b> PR #'+x.pr+'</span> '+stl(x.state)+' <span class="wait num">'+x.end+'</span></button>').join(""));
+H("#detail",detailHtml())}
+boot()</script></body></html>

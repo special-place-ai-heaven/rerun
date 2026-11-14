@@ -1,6 +1,7 @@
 """timeline.py tests: ledgers are made by store.Store on a temp folder, read through the read-only reader."""
 import os, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import holds
 import store
 import timeline as T
 
@@ -59,6 +60,19 @@ class Timeline(unittest.TestCase):
             "#171 building for 10 min | pr - | no waits",
             "#172 queued for 5 min | pr - | waits on #171 for 5 min | reason: dependency",
             "#173 review_wait for 5 min | pr - | no waits | reason: plan limit"])
+
+    def test_status_says_when_sending_is_held(self):
+        self.st.put_job("172", "queued", {}, at=at("18:05"))
+        holds.arm(self.st, "plan limit", T.parse(at("18:40")))
+        rows = T.read_rows(self.path)
+        job = "#172 queued for 5 min | pr - | no waits"
+        self.assertEqual(T.status_lines(rows, T.parse(at("18:10"))),
+                         ["sending held: plan limit until 18:40 UTC", job])
+        self.assertEqual(T.status_lines(rows, T.parse(at("18:41"))), ["#172 queued for 36 min | pr - | no waits"])
+        holds.clear(self.st, "plan limit")
+        self.assertEqual(T.status_lines(T.read_rows(self.path), T.parse(at("18:10"))), [job])
+        bare = {"jobs": rows["jobs"], "transitions": rows["transitions"]}
+        self.assertEqual(T.status_lines(bare, T.parse(at("18:10"))), [job])
 
     def test_end_states_listed_for_24_hours_and_crit_bars(self):
         self.st.put_job("1", "blocked", {}, reason="old", at="2026-11-10T10:00:00Z")

@@ -23,9 +23,16 @@ def read_rows(path):
     try:
         jobs = [dict(r) for r in db.execute("SELECT * FROM jobs")]
         trs = [dict(r) for r in db.execute("SELECT * FROM transitions ORDER BY id")]
+        holds = []
+        for r in db.execute("SELECT k, v FROM kv WHERE job='-' AND k LIKE 'hold:%' ORDER BY k"):
+            try:
+                until = json.loads(r["v"])["until"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            holds.append({"kind": r["k"][len("hold:"):], "until": until})
     finally:
         db.close()
-    return {"jobs": jobs, "transitions": trs}
+    return {"jobs": jobs, "transitions": trs, "holds": holds}
 
 
 def _key(job):
@@ -42,6 +49,11 @@ def _by_job(rows):
 def status_lines(rows, now):
     trs = _by_job(rows)
     live, done = [], []
+    held = []
+    for h in rows.get("holds") or []:
+        u = h.get("until")
+        if isinstance(u, (int, float)) and not isinstance(u, bool) and u > now:
+            held.append("sending held: %s until %s UTC" % (h["kind"], _hm(u)))
     for j in sorted(rows["jobs"], key=lambda j: _key(j["job"])):
         mine = trs.get(j["job"], [])
         last = mine[-1] if mine else None
@@ -61,7 +73,7 @@ def status_lines(rows, now):
         waits = "waits on %s for %d min" % (", ".join("#%s" % n for n in w), max(0, now - end) // 60) if w else "no waits"
         reason = " | reason: %s" % data["wait_reason"] if data.get("wait_reason") else ""
         live.append("#%s %s for %d min | %s | %s%s" % (j["job"], j["state"], max(0, now - start) // 60, pr, waits, reason))
-    return live + done
+    return held + live + done
 
 
 def _hm(t):

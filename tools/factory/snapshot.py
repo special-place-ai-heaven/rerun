@@ -1,0 +1,93 @@
+"""The line as one picture for the app (rerun#319): build_snapshot() returns a dict valid against factorySnapshotSchema
+(packages/contracts/src/factory-snapshot.ts). Read-only on the ledger. No import of dispatch at module level."""
+import datetime
+
+import cutshape
+import pools
+import store as ledger_store
+
+RUNNING = ("building", "reviewing", "fixing")
+END = ("merged", "rejected", "blocked", "failed", "returned")
+WAIT_STATES = ("waiting", "queued", "review_wait", "fix_wait")
+TYPES = ("coder", "reviewer", "researcher", "designer")
+MAX_JOBS = 300
+
+
+def iso(t):
+    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _cut(text, n):
+    return None if text is None else str(text)[:n]
+
+
+def _clamp(v, lo, hi):
+    return max(lo, min(hi, int(v)))
+
+
+def _entered(store, j):
+    rows = store.transitions_of(str(j["issue"]))
+    changed = [r for r in rows if r["from_state"] != r["to_state"]]
+    if changed:
+        return changed[-1]["at"]
+    return rows[0]["at"] if rows else (j.get("updated_at") or ledger_store.now())
+
+
+def _reason(j):
+    state = j["state"]
+    if state in END:
+        text = j.get("reason")
+    elif state == "waiting":
+        text = "waits on " + ", ".join("#%d" % d for d in j["waiting"]) if j.get("waiting") else j.get("wait_reason")
+    elif state in WAIT_STATES:
+        text = j.get("wait_reason")
+    else:
+        text = None
+    return _cut(text or None, 300)
+
+
+def _job(store, cfg, names, j):
+    running = j["state"] in RUNNING
+    parsed = cutshape.parse({"number": j["issue"], "body": j.get("body") or ""})
+    steps = None
+    if running and j.get("fire_id") is not None:
+        row = store.db.execute("SELECT steps FROM fires WHERE id=?", (j["fire_id"],)).fetchone()
+        steps = row[0] if row else None
+    rnd = j.get("round")
+    return {
+        "issue": j["issue"], "title": str(j.get("title") or "")[:256], "state": j["state"],
+        "enteredAt": _entered(store, j), "pr": j.get("pr"),
+        "round": rnd if isinstance(rnd, int) and 1 <= rnd <= 9 else None,
+        "coworker": names.get(j.get("agent")) if running else None,
+        "copy": j.get("copy") if running else None,
+        "steps": steps, "tokensIn": None, "tokensOut": None,
+        "parent": parsed.get("parent"), "dependsOn": list(parsed.get("deps") or [])[:20],
+        "reason": _reason(j),
+    }
+
+
+def build_snapshot(store, cfg, now, holds_active, beat=0):
+    names = pools.names(cfg)
+    all_jobs = store.jobs()
+    live = [j for j in all_jobs if j["state"] not in END]
+    ended = sorted((j for j in all_jobs if j["state"] in END), key=lambda j: str(j.get("updated_at") or ""), reverse=True)
+    kept = sorted(live + ended[:max(0, MAX_JOBS - len(live))], key=lambda j: int(j["issue"]))[:MAX_JOBS]
+    out = {}
+    for j in all_jobs:
+        if j["state"] in RUNNING and j.get("agent"):
+            out[j["agent"]] = out.get(j["agent"], 0) + 1
+    pool_list = []
+    for t, v in pools.types(cfg).items():
+        if t in TYPES and len(pool_list) < 8:
+            pool_list.append({"type": t, "coworkers": [
+                {"name": c["name"][:64], "runs": _clamp(c["runs"], 1, 32), "out": _clamp(out.get(c["id"], 0), 0, 32)}
+                for c in v["coworkers"][:20]]})
+    today = ledger_store.now()[:10]
+    ended_today = {s: 0 for s in ("merged", "rejected", "blocked", "failed", "returned")}
+    for j in all_jobs:
+        if j["state"] in ended_today and str(j.get("updated_at") or "").startswith(today):
+            ended_today[j["state"]] += 1
+    holds_list = [{"kind": holds_active["kind"][:40], "until": iso(holds_active["until"])}] if holds_active else []
+    return {"version": 1, "madeAt": iso(now), "beat": beat, "repo": cfg["repo"],
+            "jobs": [_job(store, cfg, names, j) for j in kept], "holds": holds_list, "pools": pool_list,
+            "endedToday": ended_today}

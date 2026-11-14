@@ -1,0 +1,86 @@
+import contextlib, io, json, os, sys, tempfile, unittest
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dispatch as D
+
+
+class Reply:
+    def __init__(self, body):
+        self.body = body
+
+    def read(self):
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class Report(unittest.TestCase):
+    def make(self, fail=None):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.calls = []
+        self.fail = fail
+
+        def account(tool, args, timeout=30):
+            self.calls.append((tool, args, timeout))
+            if tool == "factory_report" and self.fail:
+                raise self.fail
+            return {}
+
+        cfg = {"repo": "o/r", "label": "factory", "max_jobs": 8, "auto_plan_marker": True,
+               "ledger_file": os.path.join(tmp.name, "ledger.db"), "json_state_file": os.path.join(tmp.name, "d.json"),
+               "heartbeat_file": os.path.join(tmp.name, "hb"),
+               "builders": [{"id": "b1", "name": "B1"}], "reviewers": [{"id": "r1", "name": "R1"}]}
+        gh = lambda args: "[]"
+        self.d = D.Dispatcher(cfg, account, gh, now=lambda: 1794000000.0)
+        self.addCleanup(self.d.close)
+
+    def once(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.d.once()
+        return out.getvalue()
+
+    def reports(self):
+        return [c for c in self.calls if c[0] == "factory_report"]
+
+    def test_each_beat_sends_one_factory_report_with_a_10_second_timeout(self):
+        self.make()
+        self.once()
+        self.once()
+        r = self.reports()
+        self.assertEqual(len(r), 2)
+        self.assertEqual({c[2] for c in r}, {10})
+        self.assertEqual(r[1][1]["snapshot"]["beat"], 2)
+        self.assertEqual(r[0][1]["snapshot"]["repo"], "o/r")
+
+    def test_a_failed_or_unknown_tool_answer_is_logged_once_and_the_beat_goes_on(self):
+        self.make(D.Error("account factory_report failed: HTTP 404"))
+        text = self.once() + self.once()
+        self.assertEqual(text.count("factory_report: account factory_report failed: HTTP 404"), 1)
+        self.assertEqual(len(self.reports()), 2)
+        self.fail = KeyError("x")
+        self.assertEqual(self.once().count("factory_report: KeyError"), 1)
+        self.fail = None
+        self.once()  # a good report clears the log set
+        self.fail = KeyError("x")
+        self.assertEqual(self.once().count("factory_report: KeyError"), 1)
+
+    def test_make_account_passes_the_timeout_and_keeps_30_by_default(self):
+        seen = []
+
+        def opener(req, timeout):
+            seen.append(timeout)
+            return Reply(json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "{}"}]}}).encode())
+
+        call = D.make_account("http://x/mcp", "k", opener=opener)
+        call("a", {})
+        call("b", {}, timeout=10)
+        self.assertEqual(seen, [30, 10])
+
+
+if __name__ == "__main__":
+    unittest.main()

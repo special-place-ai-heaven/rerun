@@ -88,7 +88,8 @@ runRoutes.get('/', async c => {
     if (job !== undefined && !JOB_REF_RE.test(job)) return c.json({ error: 'job must be repo#<number>' }, 400)
     const branch = c.req.query('branch') || undefined
     if (branch !== undefined && branch.length > 200) return c.json({ error: 'branch must be at most 200 characters' }, 400)
-    return c.json({ runs: await listRunsByAgent(agentId, { limit, sessionId, status, job, branch }) })
+    const rows = await listRunsByAgent(agentId, { limit, sessionId, status, job, branch })
+    return c.json({ runs: rows.map(({ goalJson, goalState, goalTurns: _turns, goalVerdictsJson, ...rest }) => ({ ...rest, goal: goalRecord(goalJson, goalState, goalVerdictsJson) })) })
 })
 
 runRoutes.get('/:rid/steps', async c => {

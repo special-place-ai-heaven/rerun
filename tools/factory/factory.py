@@ -519,8 +519,11 @@ def cmd_wt(a):
                    "run": os.environ.get("FACTORY_RUN") or "unknown"}, f)
     install_deps(path)
     ex = os.path.join(p, ".git", "info", "exclude")
-    if ".symforge" not in open(ex).read():
-        open(ex, "a").write("\n.symforge/\n.symforge-knowledge.toml\n")
+    with open(ex) as f:
+        seen = ".symforge" in f.read()
+    if not seen:
+        with open(ex, "a") as f:
+            f.write("\n.symforge/\n.symforge-knowledge.toml\n")
     notes = [f for f in ("AGENTS.md", "CLAUDE.md") if os.path.isfile(os.path.join(path, f))]
     print("WORKTREE %s\nbranch %s (from origin/%s, fresh)\nrepo %s | job issue #%s | chunk %s" % (path, branch, base, full, issue, chunk))
     print("build and test notes: %s" % (", ".join(notes) or "none in repo"))

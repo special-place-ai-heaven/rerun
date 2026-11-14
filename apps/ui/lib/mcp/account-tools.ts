@@ -643,6 +643,15 @@ const AGENT_TOOL_DEFS = [
 // The sharing and template halves are declared next door: same server, same key, and this file was
 // already long enough. Sharing sits between the two because it acts on the agents of any account,
 // where the template tools need an expert sandbox.
-export const ACCOUNT_TOOL_DEFS = [...AGENT_TOOL_DEFS, ...SHARE_TOOL_DEFS, ...TEMPLATE_TOOL_DEFS]
+// The factory delegator pushes its picture of the line here, one call per beat.
+export const FACTORY_TOOL_DEFS = [
+    {
+        name: 'factory_report',
+        description: 'Called by the factory delegator on each beat: replaces the workspace\'s last picture of the factory line with the snapshot given. Answers { kept }, false when a newer picture is already held.',
+        inputSchema: { type: 'object', properties: { snapshot: { type: 'object' } }, required: ['snapshot'] },
+    },
+] as const
+
+export const ACCOUNT_TOOL_DEFS = [...AGENT_TOOL_DEFS, ...SHARE_TOOL_DEFS, ...TEMPLATE_TOOL_DEFS, ...FACTORY_TOOL_DEFS]
 
 export const ACCOUNT_TOOL_NAMES = ACCOUNT_TOOL_DEFS.map(t => t.name)

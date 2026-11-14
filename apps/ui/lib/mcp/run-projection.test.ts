@@ -14,3 +14,12 @@ describe('projectRun goal', () => {
         expect(projectRun({ ...base, goal: null }).goal).toBeNull()
     })
 })
+
+describe('projectRun cached tokens', () => {
+    it('carries the cached input tokens of a run', () => {
+        expect(projectRun({ ...base, inputTokens: 1000, cachedInputTokens: 800 }).cachedInputTokens).toBe(800)
+        expect(projectRun({ ...base, cachedInputTokens: null }).cachedInputTokens).toBeNull()
+        expect(projectRun(base).cachedInputTokens).toBeNull()
+        expect(Object.keys(projectRun(base))).toEqual(['runId', 'status', 'sessionId', 'provider', 'model', 'trigger', 'steps', 'inputTokens', 'cachedInputTokens', 'outputTokens', 'totalTokens', 'costUsd', 'startedAt', 'finishedAt', 'error', 'goal'])
+    })
+})

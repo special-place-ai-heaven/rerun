@@ -67,6 +67,28 @@ class CutShape(unittest.TestCase):
         b = FORM.replace("**Test file**: `tools/factory/test_cutshape.py`", "**Test file**: `other.py`")
         self.assertTrue(cutshape.parse({"number": 1, "body": b})["errors"])
 
+    def test_part_of_line_gives_the_parent(self):
+        for line in ("**Part of**: #312", "**Part of:** #312"):
+            p = cutshape.parse({"number": 9, "body": line + "\n" + FORM})
+            self.assertEqual(p["parent"], 312)
+            self.assertEqual(p["errors"], [])
+
+    def test_no_part_of_line_gives_none_and_no_error(self):
+        p = cutshape.parse({"number": 206, "body": FORM})
+        self.assertIsNone(p["parent"])
+        self.assertEqual(p["errors"], [])
+
+    def test_two_part_of_lines_is_an_error(self):
+        p = cutshape.parse({"number": 9, "body": "**Part of**: #1\n**Part of**: #2\n" + FORM})
+        self.assertIsNone(p["parent"])
+        self.assertTrue(any(e.startswith("part of line") for e in p["errors"]))
+
+    def test_part_of_self_or_without_number_is_none(self):
+        for line in ("**Part of**: #9", "**Part of**: nothing"):
+            p = cutshape.parse({"number": 9, "body": line + "\n" + FORM})
+            self.assertIsNone(p["parent"])
+            self.assertEqual(p["errors"], [])
+
     def test_comment(self):
         c = cutshape.comment(["a", "b"])
         self.assertEqual(c.splitlines()[0], "The factory delegator cannot read this issue, so it is not started:")

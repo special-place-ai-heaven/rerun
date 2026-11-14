@@ -11,7 +11,7 @@ def issue(n):
 
 
 class Copies(unittest.TestCase):
-    def make(self, runs, issues):
+    def make(self, runs, issues, extra=()):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.w = World(issues)
@@ -19,7 +19,7 @@ class Copies(unittest.TestCase):
                     "ledger_file": os.path.join(tmp.name, "ledger.db"),
                     "json_state_file": os.path.join(tmp.name, "dispatch.json"),
                     "heartbeat_file": os.path.join(tmp.name, "heartbeat"),
-                    "types": {"coder": {"max_jobs": 8, "coworkers": [{"id": "c1", "name": "C1", "runs": runs}]},
+                    "types": {"coder": {"max_jobs": 8, "coworkers": [{"id": "c1", "name": "C1", "runs": runs}, *extra]},
                               "reviewer": {"coworkers": [{"id": "r1", "name": "R1", "runs": 1}]}}}
         self.w.ledger = self.cfg["ledger_file"]
         self.d = D.Dispatcher(self.cfg, self.w.account, self.w.gh, now=lambda: self.w.clock)
@@ -53,6 +53,35 @@ class Copies(unittest.TestCase):
         j = {"issue": 1, "title": "t", "round": 1}
         self.assertIn(LINE, D.build_brief(j))
         self.assertIn(LINE, D.fix_brief(j, 3, "no"))
+
+    def test_a_coworker_with_an_unresolved_send_gets_no_further_send(self):
+        self.make(3, [issue(n) for n in (1, 2, 3)], extra=[{"id": "b2", "name": "B2", "runs": 1}])
+        real, state = self.w.account, {"first": True}
+
+        def account(tool, args):
+            if tool == "send_message" and state["first"]:
+                state["first"] = False
+                raise D.Error("account send_message failed: TimeoutError")  # never arrived
+            return real(tool, args)
+        self.d.account = account
+        self.beat()
+        j1 = self.d.store.get_job("1")
+        self.assertEqual((j1["state"], j1["agent"]), ("building", "c1"))
+        self.assertTrue(j1["sending"])
+        self.assertFalse(j1.get("run"))
+        self.assertEqual([(s[0], "rerun #2" in s[1]) for s in self.w.sends], [("b2", True)])
+        self.assertEqual(self.d.store.get_job("2")["agent"], "b2")
+        self.assertEqual(self.d.store.get_job("3")["state"], "queued")
+        for n in ("1", "2", "3"):
+            run = self.d.store.get_job(n).get("run")
+            if run:
+                self.assertIn("rerun #%s" % n, [s[1] for s in self.w.sends if s[0] and self.w.order[self.w.sends.index(s)][0] == run][0])
+        self.beat(D.LOST_BEATS)
+        self.assertEqual(self.d.store.get_job("1")["state"], "queued")
+        before = len(self.w.sends)
+        self.w.clock += 3600  # past the transient backoff
+        self.beat()
+        self.assertTrue(any(s[0] == "c1" for s in self.w.sends[before:]))
 
 
 if __name__ == "__main__":

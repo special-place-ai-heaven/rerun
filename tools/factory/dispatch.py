@@ -295,14 +295,23 @@ class Dispatcher:
         """(coworker id, copy) of every job whose run is out."""
         return [(j["agent"], j.get("copy")) for j in self.jobs() if j["state"] in RUNNING and j.get("agent")]
 
+    def unresolved(self):
+        """Ids of coworkers with a send not yet resolved (sending set, no run id): they get no further send."""
+        return {j["agent"] for j in self.jobs() if j["state"] not in END and j.get("agent") and j.get("sending") and not j.get("run")}
+
     def free(self, worker):
-        """(id, copy) of the first coworker of the type with a free run, or None."""
-        return pools.pick_copy(self.cfg, worker, self.running())
+        """(id, copy) of the first coworker of the type with a free run, or None; passes over one with an unresolved send."""
+        skip = self.unresolved()
+        t = pools.types(self.cfg).get(worker)
+        if t is None:
+            return None
+        cfg = {"types": {worker: dict(t, coworkers=[c for c in t["coworkers"] if c["id"] not in skip])}}
+        return pools.pick_copy(cfg, worker, self.running())
 
     def free_copy_of(self, agent):
         """A free copy number of this one coworker, or None when all its runs are out."""
         mine = [c for t in pools.types(self.cfg).values() for c in t["coworkers"] if c["id"] == agent]
-        if not mine:
+        if not mine or agent in self.unresolved():
             return None
         got = pools.pick_copy({"types": {"x": {"coworkers": mine}}}, "x", self.running())
         return got[1] if got else None

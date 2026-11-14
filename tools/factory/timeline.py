@@ -30,9 +30,10 @@ def read_rows(path):
             except (ValueError, KeyError, TypeError):
                 continue
             holds.append({"kind": r["k"][len("hold:"):], "until": until})
+        fires = {r["job"]: r["coworker"] for r in db.execute("SELECT job, coworker FROM fires ORDER BY id")}
     finally:
         db.close()
-    return {"jobs": jobs, "transitions": trs, "holds": holds}
+    return {"jobs": jobs, "transitions": trs, "holds": holds, "fires": fires}
 
 
 def _key(job):
@@ -72,7 +73,11 @@ def status_lines(rows, now):
         w = data.get("waiting") or []
         waits = "waits on %s for %d min" % (", ".join("#%s" % n for n in w), max(0, now - end) // 60) if w else "no waits"
         reason = " | reason: %s" % data["wait_reason"] if data.get("wait_reason") else ""
-        live.append("#%s %s for %d min | %s | %s%s" % (j["job"], j["state"], max(0, now - start) // 60, pr, waits, reason))
+        who = ""
+        cw = (rows.get("fires") or {}).get(j["job"])
+        if j["state"] in ("building", "reviewing", "fixing") and cw:
+            who = " | run on %s, copy %s" % (cw, data.get("copy") or 1)
+        live.append("#%s %s for %d min | %s | %s%s%s" % (j["job"], j["state"], max(0, now - start) // 60, pr, waits, reason, who))
     return held + live + done
 
 

@@ -74,6 +74,26 @@ class Timeline(unittest.TestCase):
         bare = {"jobs": rows["jobs"], "transitions": rows["transitions"]}
         self.assertEqual(T.status_lines(bare, T.parse(at("18:10"))), [job])
 
+    def test_status_names_who_runs_a_job(self):
+        self.st.intent("171", "", "build", coworker="code", at=at("18:00"))
+        self.st.put_job("171", "building", {"agent": "a1", "copy": 2}, at=at("18:00"))
+        self.st.intent("172", "", "build", coworker="LARRY", at=at("17:50"))
+        self.st.put_job("172", "review_wait", {}, at=at("18:05"))
+        self.st.intent("173", "", "build", coworker="code", at=at("17:40"))
+        self.st.intent("173", "", "review", coworker="LINUS", at=at("18:02"))
+        self.st.put_job("173", "reviewing", {"agent": "a3"}, at=at("18:02"))
+        rows = T.read_rows(self.path)
+        now = T.parse(at("18:10"))
+        self.assertEqual(T.status_lines(rows, now), [
+            "#171 building for 10 min | pr - | no waits | run on code, copy 2",
+            "#172 review_wait for 5 min | pr - | no waits",
+            "#173 reviewing for 8 min | pr - | no waits | run on LINUS, copy 1"])
+        del rows["fires"]
+        self.assertEqual(T.status_lines(rows, now), [
+            "#171 building for 10 min | pr - | no waits",
+            "#172 review_wait for 5 min | pr - | no waits",
+            "#173 reviewing for 8 min | pr - | no waits"])
+
     def test_end_states_listed_for_24_hours_and_crit_bars(self):
         self.st.put_job("1", "blocked", {}, reason="old", at="2026-11-10T10:00:00Z")
         self.st.put_job("2", "failed", {}, reason="boom", at=at("10:00"))

@@ -23,7 +23,7 @@ const { agentConfigSchema } = await import('../../agents/types.js')
 const { writeAgentConfig } = await import('../../agents/config-write.js')
 const { agentDir } = await import('../../config/paths.js')
 const { createSession } = await import('../../db/repos/sessions.js')
-const { getRun, startRun } = await import('../../db/repos/runs.js')
+const { getRun, startRun, setRunGoal, recordGoalVerdict } = await import('../../db/repos/runs.js')
 const { appendMessage } = await import('../../db/repos/messages.js')
 const { insertRunStep, insertToolCall } = await import('../../db/repos/telemetry.js')
 const { getSystemDb } = await import('../../db/systemDb.js')
@@ -163,6 +163,22 @@ describe('GET /agents/:id/runs', () => {
         expect(await listed('?session=buried-session')).toEqual(['buried'])
         expect(await listed('?session=buried-session&status=done')).toEqual([])
         expect(await listed('?status=running')).toEqual(['buried'])
+    })
+
+    it('answers each run\'s goal as the single read does', async () => {
+        const agent = 'goalagent'
+        const session = await createSession(agent)
+        const withGoal = (await startRun(agent, session.id)).id
+        const without = (await startRun(agent, session.id)).id
+        await setRunGoal(agent, withGoal, JSON.stringify({ lastLineForms: [{ prefix: 'PR:', rest: 'pull-url' }], turnLimit: 2 }))
+        await recordGoalVerdict(agent, withGoal, { turn: 1, met: false, reason: 'no last line' })
+        const list = (await (await app.request(`/agents/${agent}/runs`)).json()) as { runs: Record<string, unknown>[] }
+        const single = (await (await app.request(`/agents/${agent}/runs/${withGoal}`)).json()) as { goal: unknown }
+        const row = list.runs.find(r => r.id === withGoal)!
+        expect(single.goal).not.toBeNull()
+        expect(row.goal).toEqual(single.goal)
+        for (const key of ['goalJson', 'goalState', 'goalTurns', 'goalVerdictsJson']) expect(row).not.toHaveProperty(key)
+        expect(list.runs.find(r => r.id === without)!.goal).toBeNull()
     })
 
     describe('job and branch filters', () => {

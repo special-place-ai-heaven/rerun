@@ -8,6 +8,7 @@ import { FACTORY_SNAPSHOT_MAX_BYTES, factoryJobStateSchema, factorySnapshotSchem
 const ROOT = path.resolve(import.meta.dirname, '../../../..')
 const SAMPLE = path.join(ROOT, 'packages/contracts/fixtures/factory-snapshot.sample.json')
 const sample = () => JSON.parse(readFileSync(SAMPLE, 'utf8'))
+type Sample = ReturnType<typeof sample>
 
 describe('factorySnapshotSchema', () => {
     it('accepts the shared sample and keeps it under the byte cap', () => {
@@ -33,10 +34,10 @@ describe('factorySnapshotSchema', () => {
     it('refuses fields it does not know, at every level', () => {
         expect(factorySnapshotSchema.safeParse({ ...sample(), extra: 1 }).success).toBe(false)
         for (const poke of [
-            (s: any) => { s.jobs[0].secret = 'x' },
-            (s: any) => { s.holds[0].x = 1 },
-            (s: any) => { s.pools[0].coworkers[0].x = 1 },
-            (s: any) => { s.endedToday.x = 1 },
+            (s: Sample) => { s.jobs[0].secret = 'x' },
+            (s: Sample) => { s.holds[0].x = 1 },
+            (s: Sample) => { s.pools[0].coworkers[0].x = 1 },
+            (s: Sample) => { s.endedToday.x = 1 },
         ]) {
             const s = sample()
             poke(s)

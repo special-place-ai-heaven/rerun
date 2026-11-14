@@ -105,6 +105,7 @@ export function ControlCenter() {
     const assistantOpen = useForemanStore(selectForemanOpen)
     const hasChangelog = useChangelogStore(selectHasEntries)
     const { resolvedTheme, setTheme } = useTheme()
+    const router = useRouter()
     const mod = useModKeyLabel()
     const [pages, setPages] = useState<Page[]>([ROOT])
     const [query, setQuery] = useState('')
@@ -220,7 +221,6 @@ export function ControlCenter() {
         return rows.length > 0 || loading ? [{ id: section, heading, rows, loading }] : []
     }
 
-    const router = useRouter()
     const commandActions: Record<ControlCommandId, () => void> = {
         new_agent: () => useBuilderDialogsStore.getState().openNewAgent(),
         browse_templates: () => useBuilderDialogsStore.getState().openLibrary(),

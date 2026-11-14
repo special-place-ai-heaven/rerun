@@ -52,7 +52,7 @@ const LINUS_COPIES = REVIEW.slice(1, 3), BRUCE = REVIEW[3]
 const REJECT_BIN: Cell = { col: B('review').col_start + 4, row: B('review').row_start + 3 }
 const SEARCH = STUDIO[0], SEARCH_COPY = STUDIO[1], DIETER = STUDIO[2]
 
-// Features and their cabinets: one slot per task of the feature, known from the cut.
+// Features and their spheres: one share per task of the feature, the count known from the cut.
 export type Feature = { issue: number; title: string; tasks: number[]; at: Cell }
 export const FEATURES: Feature[] = [
     { issue: 320, title: 'Factory world', tasks: [330, 331, 332, 333, 334, 335, 336], at: { col: B('stock').col_start + 1, row: B('stock').row_start + 3 } },
@@ -125,12 +125,12 @@ export const JOBS = plan()
 
 // A task sphere rides the belts on the floor, from tile to tile: `path` is the tile ids it passes,
 // `travel` how far along it is. A queued sphere waits on the loader's belt at `queue`.
-export type DieBand = 'build' | 'review' | 'checks' | 'merge'
+export type Band = 'build' | 'review' | 'checks' | 'merge'
 export type PodView = {
     id: string; issue: number; title: string
     path: string[]; travel: number; queue: number
     level: number // 0..1, how full the task's sphere is
-    band: DieBand // who is lighting them now
+    band: Band // the stage colouring the sphere now
     state: 'queued' | 'held' | 'working' | 'fixing' | 'checks' | 'complete' | 'rejected'
     verdict?: 'pass' | 'fail' // set while the scanner shows it, at the end of a review
     scan: number // 0..1 through a review, for the scanner's sweep
@@ -197,7 +197,7 @@ export function factoryScene(t: number, now: number): FactoryFrame {
         const level = leg.level[0] + (leg.level[1] - leg.level[0]) * k
         const prev = job.legs[legIndex - 1]
         const ride = (t - leg.from) / (TRANSIT_MS * 1.6)
-        const pod = (path: string[], travel: number, band: DieBand, state: PodView['state'], extra: Partial<PodView> = {}) =>
+        const pod = (path: string[], travel: number, band: Band, state: PodView['state'], extra: Partial<PodView> = {}) =>
             pods.push({ id: `pod-${job.issue}`, issue: job.issue, title: job.title, path, travel: ease(clamp(travel)), queue: 0, level, band, state, scan: 0, ...extra })
         counts.runs += leg.kind === 'queued' ? 0 : 1
 

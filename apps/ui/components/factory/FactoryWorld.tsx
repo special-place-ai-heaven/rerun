@@ -9,7 +9,7 @@ import { METRICS, type MetricDef, type MetricKey, type MetricValues } from './fa
 import { FactoryOverlay } from './FactoryOverlay'
 import { LOOP_MS, factoryScene } from './factory-scene'
 
-// The rails and cabinets stand above the floor, so the camera frames the Boxes with headroom above them.
+// The feature spheres and scanner gates stand above the floor, so the camera frames the Boxes with headroom above them.
 const OVERHEAD_PX = 120
 const BAR_PX = 110
 
@@ -56,7 +56,7 @@ export function FactoryWorld({ theme = 'dark' }: { theme?: 'light' | 'dark' }) {
     const onToastExpire = useCallback((id: string) => setExpired(prev => new Set(prev).add(id)), [])
     const worldOverlay = useCallback(() => <LiveOverlay start={clock.start} tiles={tiles} />, [clock.start, tiles])
 
-    // A feature whose cabinet fills throws the app's own confetti; a single merge has its own shake.
+    // A feature whose sphere fills throws the app's own confetti; a single merge has its own shake.
     const fullCabinets = frame.cabinets.filter(c => c.slots.every(s => s.state !== 'empty')).length
     const full = useRef(fullCabinets)
     useEffect(() => {
@@ -115,7 +115,7 @@ export function FactoryWorld({ theme = 'dark' }: { theme?: 'light' | 'dark' }) {
             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-5">
                 <div className="pointer-events-auto flex items-stretch gap-4 rounded-2xl border border-border/60 bg-background/75 px-5 py-3 shadow-[0_8px_40px_rgba(0,0,0,0.12)] backdrop-blur-xl">
                     <div className="flex items-center gap-2 pr-1">
-                        <span className={`size-2 rounded-full ${frame.held ? 'bg-red-500' : 'animate-pulse bg-emerald-500'}`} />
+                        <span className={`size-2 rounded-full ${frame.held ? 'bg-red-500' : 'animate-pulse bg-emerald-500 motion-reduce:animate-none'}`} />
                         <span className="text-sm font-semibold tracking-tight">Factory</span>
                         <span className="text-[10px] text-muted-foreground">sample</span>
                     </div>
@@ -128,7 +128,7 @@ export function FactoryWorld({ theme = 'dark' }: { theme?: 'light' | 'dark' }) {
             </div>
 
             <div
-                className="pointer-events-none absolute inset-x-0 top-6 flex justify-center transition-all duration-500"
+                className="pointer-events-none absolute inset-x-0 top-6 flex justify-center transition-all duration-500 motion-reduce:transition-none"
                 style={{ opacity: frame.held ? 1 : 0, transform: frame.held ? 'translateY(0)' : 'translateY(-12px)' }}
             >
                 <div className="flex items-center gap-3 rounded-full border border-red-500/40 bg-red-500/15 px-4 py-1.5 text-sm text-red-600 shadow-[0_0_24px_rgba(239,68,68,0.35)] backdrop-blur-xl dark:text-red-300">

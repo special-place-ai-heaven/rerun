@@ -9,7 +9,7 @@ projects that show AI agents as characters can be rebuilt in `packages/ui/src/is
 ## How this was gathered
 
 - Repositories were found with web search, then read with the GitHub API (`gh api .../contents`, trees) or a
-  shallow sparse clone under `C:\temp\factory-inspo` (since deleted). Nothing was run or installed. Every snippet below
+  shallow sparse clone (since deleted). Nothing was run or installed. Every snippet below
   was copied from a file that was read, at the commit named for its project.
 - **No motion was watched.** Timings are what the code says.
 - Health figures: GitHub API, 2026-11-14. "Dormant" means no push for more than a year.

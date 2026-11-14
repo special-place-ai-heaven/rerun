@@ -31,12 +31,14 @@ class Types(unittest.TestCase):
         for k in ("builders", "reviewers", "max_jobs"):
             self.assertNotIn(k, cfg)
         coder, rev = cfg["types"]["coder"], cfg["types"]["reviewer"]
-        self.assertEqual([c["name"] for c in coder["coworkers"]], ["LARRY", "HOPPER", "code", "MARTIN", "BRENDAN"])
+        # Pilot of 2026-11-14 (#198): the general builder comes first with three runs; the others follow at one.
+        self.assertEqual([c["name"] for c in coder["coworkers"]], ["code", "LARRY", "HOPPER", "MARTIN", "BRENDAN"])
         self.assertEqual([c["name"] for c in rev["coworkers"]], ["LINUS", "BRUCE", "KENT", "FRED", "BARBARA"])
         ids = [c["id"] for c in coder["coworkers"] + rev["coworkers"]]
         self.assertTrue(all(ids))
         self.assertEqual(len(set(ids)), 10)
-        self.assertTrue(all(c["runs"] == 1 for c in coder["coworkers"] + rev["coworkers"]))
+        self.assertEqual({c["name"]: c["runs"] for c in coder["coworkers"]}, {"code": 3, "LARRY": 1, "HOPPER": 1, "MARTIN": 1, "BRENDAN": 1})
+        self.assertTrue(all(c["runs"] == 1 for c in rev["coworkers"]))
         self.assertEqual(coder["max_jobs"], 8)
 
     def test_a_types_map_sends_the_build_and_the_review_to_the_first_free_coworker_of_the_type(self):

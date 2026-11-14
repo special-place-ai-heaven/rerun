@@ -1,0 +1,62 @@
+import { z } from 'zod'
+
+// What the factory's delegator (tools/factory/dispatch.py) pushes to the app on every beat: one whole
+// picture of the line, replacing the last. The app keeps the newest per workspace and the factory page
+// draws from it; a picture older than two beats reads as "the delegator is not answering".
+// Spec: docs/research/2026-11-14-factory-world/SPEC.md, section 6.
+
+// A job's state as the delegator's ledger records it (tools/factory/store.py JOB_STATES).
+export const factoryJobStateSchema = z.enum([
+    'waiting', 'queued', 'building', 'review_wait', 'reviewing', 'fix_wait', 'fixing', 'checks',
+    'merged', 'rejected', 'blocked', 'failed', 'returned',
+])
+
+export const factoryWorkerTypeSchema = z.enum(['coder', 'reviewer', 'researcher', 'designer'])
+
+const isoTime = z.string().datetime({ offset: true })
+const count = z.number().int().min(0)
+
+export const factoryJobSchema = z.object({
+    issue: z.number().int().positive(),
+    title: z.string().max(200),
+    state: factoryJobStateSchema,
+    enteredAt: isoTime, // when the job entered its state
+    pr: z.number().int().positive().nullable(),
+    round: z.number().int().min(0).max(9), // fix rounds so far
+    coworker: z.string().max(64).nullable(), // who holds it now
+    copy: z.number().int().min(1).max(32).nullable(), // which run of that coworker
+    steps: count.nullable(), // steps of the current run
+    tokensIn: count.nullable(),
+    tokensOut: count.nullable(),
+    parent: z.number().int().positive().nullable(), // the feature it was cut from, when the cut names one
+    dependsOn: z.array(z.number().int().positive()).max(20),
+    reason: z.string().max(300).nullable(), // why it waits, or why it ended blocked, failed or returned
+}).strict()
+
+export const factoryHoldSchema = z.object({ kind: z.string().max(40), until: isoTime }).strict()
+
+export const factoryPoolSchema = z.object({
+    type: factoryWorkerTypeSchema,
+    coworkers: z.array(z.object({ name: z.string().max(64), runs: z.number().int().min(1).max(32), out: z.number().int().min(0).max(32) }).strict()).max(20),
+}).strict()
+
+export const factorySnapshotSchema = z.object({
+    version: z.literal(1),
+    madeAt: isoTime,
+    beat: count,
+    repo: z.string().max(200),
+    jobs: z.array(factoryJobSchema).max(300),
+    holds: z.array(factoryHoldSchema).max(10),
+    pools: z.array(factoryPoolSchema).max(8),
+    endedToday: z.object({ merged: count, rejected: count, blocked: count, failed: count, returned: count }).strict(),
+}).strict()
+
+// The largest picture the app accepts, as JSON text: about 300 jobs with room to spare.
+export const FACTORY_SNAPSHOT_MAX_BYTES = 256 * 1024
+
+export type FactoryJobState = z.infer<typeof factoryJobStateSchema>
+export type FactoryWorkerType = z.infer<typeof factoryWorkerTypeSchema>
+export type FactoryJob = z.infer<typeof factoryJobSchema>
+export type FactoryHold = z.infer<typeof factoryHoldSchema>
+export type FactoryPool = z.infer<typeof factoryPoolSchema>
+export type FactorySnapshot = z.infer<typeof factorySnapshotSchema>

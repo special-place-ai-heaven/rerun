@@ -219,9 +219,25 @@ def wt_dirs():
     out = []
     if os.path.isdir(WT):
         for r in sorted(os.listdir(WT)):
+            if not os.path.isdir(os.path.join(WT, r)):
+                continue
             for d in sorted(os.listdir(os.path.join(WT, r))):
-                out.append((r, d, os.path.join(WT, r, d)))
+                if os.path.isdir(os.path.join(WT, r, d)):
+                    out.append((r, d, os.path.join(WT, r, d)))
     return out
+
+
+def wt_strays():
+    """Entries of WT and of WT/<repo> that are not folders: not worktrees, and not ours to remove."""
+    out = []
+    if os.path.isdir(WT):
+        for r in os.listdir(WT):
+            p = os.path.join(WT, r)
+            if not os.path.isdir(p):
+                out.append(p)
+                continue
+            out.extend(os.path.join(p, d) for d in os.listdir(p) if not os.path.isdir(os.path.join(p, d)))
+    return sorted(out)
 
 
 def marker(repo, branch):
@@ -418,6 +434,8 @@ def cmd_wt(a):
             h = age_h(rec)
             print("%s/%s  branch %s  %.2f GB  owner %s  age %s  %s" % (r, d, br, du_gb(p), rec.get("owner", "unknown"),
                                                                      "?" if h is None else "%dh" % h, "CI green, waits for merge" if g else "ACTIVE builder"))
+        for p in wt_strays():
+            print("stray, not a worktree: " + p)
         st = shutil.disk_usage("/data")
         print("active builders: %d of %d | /data/work %.1f of %d GB | /data free %.0f GB (floor %d)" % (act, max_builders(), du_gb(WORK), MAX_WORK_GB, st.free / 2**30, MIN_FREE_GB))
         return

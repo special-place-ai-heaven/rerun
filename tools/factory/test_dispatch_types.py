@@ -26,19 +26,22 @@ def run(extra):
 
 
 class Types(unittest.TestCase):
-    def test_the_shipped_settings_carry_the_same_coworkers_as_types_with_one_run_each(self):
+    def test_the_shipped_settings_carry_one_main_per_type_with_one_coworker_behind_it(self):
         cfg = D.settings()
         for k in ("builders", "reviewers", "max_jobs"):
             self.assertNotIn(k, cfg)
         coder, rev = cfg["types"]["coder"], cfg["types"]["reviewer"]
-        # Pilot of 2026-11-14 (#198): the general builder comes first with three runs; the others follow at one.
-        self.assertEqual([c["name"] for c in coder["coworkers"]], ["code", "LARRY", "HOPPER", "MARTIN", "BRENDAN"])
-        self.assertEqual([c["name"] for c in rev["coworkers"]], ["LINUS", "BRUCE", "KENT", "FRED", "BARBARA"])
+        # The fold of 2026-11-14 (#198): one main per type with several runs; the coworker behind it takes over
+        # while the main has an unresolved send (#292).
+        self.assertEqual({c["name"]: c["runs"] for c in coder["coworkers"]}, {"code": 6, "LARRY": 1})
+        self.assertEqual({c["name"]: c["runs"] for c in rev["coworkers"]}, {"LINUS": 3, "BRUCE": 1})
+        self.assertEqual([c["name"] for c in coder["coworkers"]], ["code", "LARRY"])
+        self.assertEqual([c["name"] for c in rev["coworkers"]], ["LINUS", "BRUCE"])
         ids = [c["id"] for c in coder["coworkers"] + rev["coworkers"]]
         self.assertTrue(all(ids))
-        self.assertEqual(len(set(ids)), 10)
-        self.assertEqual({c["name"]: c["runs"] for c in coder["coworkers"]}, {"code": 3, "LARRY": 1, "HOPPER": 1, "MARTIN": 1, "BRENDAN": 1})
-        self.assertTrue(all(c["runs"] == 1 for c in rev["coworkers"]))
+        self.assertEqual(len(set(ids)), 4)
+        self.assertEqual({c["name"]: c["runs"] for c in cfg["types"]["researcher"]["coworkers"]}, {"search": 3})
+        self.assertEqual({c["name"]: c["runs"] for c in cfg["types"]["designer"]["coworkers"]}, {"DIETER": 1})
         self.assertEqual(coder["max_jobs"], 8)
 
     def test_a_types_map_sends_the_build_and_the_review_to_the_first_free_coworker_of_the_type(self):
@@ -103,9 +106,9 @@ class Types(unittest.TestCase):
         cfg = D.settings()
         self.assertEqual([c["name"] for c in cfg["types"]["researcher"]["coworkers"]], ["search"])
         self.assertEqual([c["name"] for c in cfg["types"]["designer"]["coworkers"]], ["DIETER"])
-        for t in ("researcher", "designer"):
+        for t, runs in (("researcher", 3), ("designer", 1)):  # the fold of 2026-11-14 gives the researcher three runs
             c = cfg["types"][t]["coworkers"][0]
-            self.assertEqual(c["runs"], 1)
+            self.assertEqual(c["runs"], runs)
             self.assertNotIn("id", c)
             self.assertEqual(cfg["types"][t]["max_jobs"], 8)
 

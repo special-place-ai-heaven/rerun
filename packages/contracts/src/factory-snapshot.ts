@@ -6,8 +6,8 @@ import { z } from 'zod'
 // from it; a picture older than two beats reads as "the delegator is not answering".
 // Spec: docs/research/2026-11-14-factory-world/SPEC.md, section 6.
 //
-// The receiving tool checks the raw body against FACTORY_SNAPSHOT_MAX_BYTES before it parses it: a
-// picture can pass every field limit and still be larger than that.
+// The receiving tool checks the snapshot it receives against FACTORY_SNAPSHOT_MAX_BYTES before
+// validating it: a picture can pass every field limit and still be larger than that.
 //
 // How the producer fills a job (from the ledger, tools/factory/store.py and dispatch.py):
 // - enteredAt: the latest `transitions` row that changed state, not `jobs.updated_at`, which moves on

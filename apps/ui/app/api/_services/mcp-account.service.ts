@@ -1,7 +1,8 @@
 import type { RunGoal } from '@rerun/contracts'
-import { connectorSkillReadOnlyError, isSetupAnswered, MAX_TEXT_WRITE_CHARS, providerSchema, runGoalSchema, sleep, triggerMethodSchema, verbositySchema } from '@rerun/contracts'
+import { connectorSkillReadOnlyError, FACTORY_SNAPSHOT_MAX_BYTES, factorySnapshotSchema, isSetupAnswered, MAX_TEXT_WRITE_CHARS, providerSchema, runGoalSchema, sleep, triggerMethodSchema, verbositySchema } from '@rerun/contracts'
 import { AccessDeniedError, assertAgentInWorkspace, callableEngineAgentIds, isAdminActor, keepVisible, manageableSpaceIds, spaceAccessMap, visibleAgentIds, visibleSpaceIds, type Actor } from '@/app/api/_auth/access'
 import type { Database } from '@/app/api/database.types'
+import { putFactorySnapshot } from '@/lib/factory/snapshot-store'
 import {
     chat as engineChat,
     createSchedule as engineCreateSchedule,
@@ -1032,6 +1033,16 @@ export async function dispatchAccountTool(actor: Actor, name: string, args: Reco
             if (!key) throw new Error('Pass key (from list_agent_connectors) or slug.')
             await uninstallService(agentId, key, actor)
             return { key, detached: true }
+        }
+
+        case 'factory_report': {
+            // The cap is on the snapshot as received, before validation.
+            const text = JSON.stringify(args.snapshot ?? null)
+            const size = Buffer.byteLength(text, 'utf8')
+            if (size > FACTORY_SNAPSHOT_MAX_BYTES) throw new Error(`factory_report: the snapshot is over ${FACTORY_SNAPSHOT_MAX_BYTES} bytes`)
+            const parsed = factorySnapshotSchema.safeParse(args.snapshot)
+            if (!parsed.success) throw new Error('factory_report: the snapshot does not match the schema')
+            return { kept: putFactorySnapshot(workspaceId, parsed.data) }
         }
 
         default:

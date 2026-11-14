@@ -1,4 +1,4 @@
-import contextlib, io, os, sys, tempfile, unittest
+import contextlib, io, json, os, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dispatch as D
 import holds
@@ -50,7 +50,7 @@ class Renewal(unittest.TestCase):
     def hold(self):
         return holds.active(self.d.store, self.w.clock)
 
-    def test_a_sign_in_about_to_run_out_holds_new_sends_and_lets_the_runs_out_end(self):
+    def test_a_sign_in_about_to_run_out_holds_new_sends_only_while_a_run_is_out(self):
         self.make([issue(5)])
         self.beat()
         self.assertEqual((self.state(5), len(self.w.sends)), ("building", 1))
@@ -65,15 +65,53 @@ class Renewal(unittest.TestCase):
         self.assertEqual(len(self.w.sends), 1)
         self.assertEqual(self.hold()["kind"], "sign-in renewal")
         self.assertEqual(self.out.getvalue().count("sign-in has 50 min left"), 1)
-        self.w.sign_in = {"minutesLeft": 480, "renewalDue": False}
         self.w.clock += 30
         self.beat()
         self.assertIsNone(self.hold())
         self.assertEqual(len(self.w.sends), 3)
         self.assertEqual(self.state(6), "building")
 
-    def test_a_failed_read_leaves_the_hold_as_it_is(self):
+    def test_an_idle_line_sends_although_the_sign_in_is_about_to_run_out(self):
+        for left in (40, 0):
+            self.make([issue(5)])
+            self.w.sign_in = {"minutesLeft": left, "renewalDue": True}
+            self.beat()
+            self.assertEqual((self.state(5), len(self.w.sends)), ("building", 1))
+            self.assertIsNone(self.hold())
+
+    def test_the_ledger_is_written_only_when_the_hold_changes(self):
         self.make([])
+        key = "hold:sign-in renewal"
+        writes = []
+        real = self.d.store.set
+        self.d.store.set = lambda job, k, v: (writes.append(k), real(job, k, v))[1]
+        self.w.sign_in = {"minutesLeft": 300, "renewalDue": False}
+        for _ in range(5):
+            self.beat()
+        self.assertNotIn(key, self.d.store.get_all("-"))
+        self.assertEqual(writes.count(key), 0)
+        self.w.issues.append(issue(5))
+        self.beat()
+        self.assertEqual(self.state(5), "building")
+        self.w.sign_in = {"minutesLeft": 40, "renewalDue": True}
+        self.w.clock += 30
+        self.beat()
+        self.assertEqual(self.hold()["kind"], "sign-in renewal")
+        self.assertEqual(writes.count(key), 1)
+        self.w.sign_in = {"minutesLeft": 300, "renewalDue": False}
+        self.w.clock += 30
+        self.beat()
+        self.assertEqual(writes.count(key), 2)
+        self.assertEqual(json.loads(self.d.store.get_all("-")[key])["until"], 0)
+        for _ in range(3):
+            self.w.clock += 30
+            self.beat()
+        self.assertEqual(writes.count(key), 2)
+
+    def test_a_failed_read_leaves_the_hold_as_it_is(self):
+        self.make([issue(5)])
+        self.beat()
+        self.assertEqual(self.state(5), "building")
         self.w.sign_in = {"minutesLeft": 50}
         self.beat()
         t0 = self.w.clock

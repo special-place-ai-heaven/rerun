@@ -723,15 +723,17 @@ class Dispatcher:
             return
         self.renewal_unreadable = False
         now = self.now()
-        if is_due:
-            try:
-                was = json.loads(self.store.get_all("-").get("hold:sign-in renewal") or "{}").get("until", 0) > now
-            except (ValueError, AttributeError, TypeError):
-                was = False
+        try:
+            until = json.loads(self.store.get_all("-").get("hold:sign-in renewal") or "{}").get("until", 0)
+            was, kept = until > now, until > 0
+        except (ValueError, AttributeError, TypeError):
+            was = kept = False
+        # The engine renews a sign-in only when a run starts or the last one ends: with nothing out, a hold would stop the renewal.
+        if is_due and self.running():
             if not was:
                 log("-", "sign-in has %s min left: holding new sends until it is renewed" % renewal.left(answer))
             holds.arm(self.store, "sign-in renewal", now + 2 * self.cfg.get("poll_s", 30))
-        else:
+        elif kept:
             holds.clear(self.store, "sign-in renewal")
 
     def once(self):

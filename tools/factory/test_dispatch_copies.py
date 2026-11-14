@@ -54,6 +54,12 @@ class Copies(unittest.TestCase):
         self.assertIn(LINE, D.build_brief(j))
         self.assertIn(LINE, D.fix_brief(j, 3, "no"))
 
+    def test_the_build_brief_gives_lint_and_type_check_calls_of_their_own(self):
+        b = D.build_brief({"issue": 1, "title": "t", "round": 1})
+        self.assertIn("a shell call of their own", b)
+        self.assertIn("`timeoutMs` set above the default of 120000", b)
+        self.assertIn("never chain them with the commit or `pr-open`", b)
+
     def test_the_briefs_say_where_a_file_outside_the_change_goes(self):
         j = {"issue": 1, "title": "t", "round": 1}
         for b in (D.build_brief(j), D.fix_brief(j, 3, "no")):

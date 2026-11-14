@@ -83,6 +83,40 @@ class Copies(unittest.TestCase):
         self.beat()
         self.assertTrue(any(s[0] == "c1" for s in self.w.sends[before:]))
 
+    def test_the_resend_of_a_failed_attempt_waits_while_its_coworker_has_an_unresolved_send(self):
+        self.make(3, [issue(2)])
+        self.beat()
+        self.assertTrue(self.d.store.get_job("2").get("run"))
+        self.w.issues.append(issue(1))
+        real, state = self.w.account, {"first": True}
+
+        def account(tool, args):
+            if tool == "send_message" and state["first"]:
+                state["first"] = False
+                raise D.Error("account send_message failed: TimeoutError")  # never arrived
+            return real(tool, args)
+        self.d.account = account
+        self.beat()
+        j1 = self.d.store.get_job("1")
+        self.assertEqual(j1["state"], "building")
+        self.assertTrue(j1["sending"])
+        self.assertFalse(j1.get("run"))
+        self.w.runs[self.d.store.get_job("2")["run"]] = {"status": "error", "output": None, "error": "boom"}
+        sent = len(self.w.sends)
+        self.beat()
+        self.assertEqual(len(self.w.sends), sent)
+        self.assertEqual(self.d.store.get_job("2")["state"], "queued")
+        self.assertTrue(self.d.store.get_job("1")["sending"])
+        self.beat(D.LOST_BEATS)
+        self.w.clock += 3600
+        self.beat(3)
+        self.assertEqual(sorted(s[0] for s in self.w.sends[sent:]), ["c1", "c1"])
+        for n in ("1", "2"):
+            run = self.d.store.get_job(n).get("run")
+            self.assertTrue(run)
+            msg = [s[1] for s, (r, _) in zip(self.w.sends, self.w.order) if r == run][0]
+            self.assertIn("rerun #%s" % n, msg)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,21 +2,23 @@
 
 
 def left(answer):
-    """Smallest minutesLeft among connections with a signIn, else None."""
+    """minutesLeft of the default connection's signIn, else None."""
     if not isinstance(answer, dict):
         return None
     connections = answer.get("connections")
     if not isinstance(connections, list):
         return None
-    values = []
     for c in connections:
-        sign_in = c.get("signIn") if isinstance(c, dict) else None
-        if not isinstance(sign_in, dict):
+        if not isinstance(c, dict) or c.get("isDefault") is not True:
             continue
+        sign_in = c.get("signIn")
+        if not isinstance(sign_in, dict):
+            return None
         m = sign_in.get("minutesLeft")
         if isinstance(m, (int, float)) and not isinstance(m, bool):
-            values.append(m)
-    return min(values) if values else None
+            return m
+        return None
+    return None
 
 
 def due(answer, limit):

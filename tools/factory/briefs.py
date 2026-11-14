@@ -14,7 +14,7 @@ def _brief(j, tag, work, commit_what):
         '',
         '1. Open your worktree with one shell call: `/data/tools/bin/packet rerun %s; /data/tools/bin/wt new rerun %s %s`. Work only in the worktree it prints.' % (n, n, tag),
         '2. Write into the files the issue names and nowhere else. Change no code. %s' % work,
-        '3. A file you write that is not part of the change carries the issue number in its name.',
+        '3. A file you write that is not part of the change goes into `/tmp`, carries the issue number in its name, and is removed once it is used. Never put one in your worktree or in the folder above it.',
         '4. Commit, then open one pull request into dev: `cd <worktree> && /data/tools/bin/pr-open --title \'%s (#%s)\' --body-file <file>`. The body is the %s with the headings `/data/tools/bin/pr-open --template` prints, and the line "Closes #%s".' % (j["title"], n, commit_what, n),
         '5. Leave the worktree open.',
         '',

@@ -52,6 +52,17 @@ describe('buildControlCommands', () => {
     })
 })
 
+describe('factory command', () => {
+    it('offers a Factory command in the actions group, never disabled', () => {
+        expect(find({ isSandbox: true, workspaceAdmin: false, needsMachineReason: 'Subscribe first' }, 'factory')).toMatchObject({ group: 'actions', disabledReason: null, paid: false })
+    })
+
+    it('keeps every command id unique', () => {
+        const ids = buildControlCommands(OPEN).map(command => command.id)
+        expect(new Set(ids).size).toBe(ids.length)
+    })
+})
+
 describe('pushRecentAgent', () => {
     it('puts the latest first without repeating it', () => {
         expect(pushRecentAgent(['a', 'b', 'c'], 'b')).toEqual(['b', 'a', 'c'])

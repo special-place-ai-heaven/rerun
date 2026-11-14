@@ -7,7 +7,7 @@ import { fireRerunConfetti } from '@/lib/confetti'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { METRICS, type MetricDef, type MetricKey, type MetricValues } from './factory-metrics'
 import { FactoryOverlay } from './FactoryOverlay'
-import { LOOP_MS, factoryScene } from './factory-scene'
+import { LOOP_MS, factoryScene, type FactoryFrame } from './factory-scene'
 
 // The feature spheres and scanner gates stand above the floor, so the camera frames the Boxes with headroom above them.
 const OVERHEAD_PX = 120
@@ -25,19 +25,21 @@ function useStable<T>(value: T): T {
 }
 
 // The moving parts keep a clock of their own, so the spheres glide while the board stays still.
-function LiveOverlay({ start, tiles }: { start: number; tiles: Tile[] }) {
+type SceneFn = (t: number, now: number) => FactoryFrame
+
+function LiveOverlay({ start, tiles, scene }: { start: number; tiles: Tile[]; scene: SceneFn }) {
     const [now, setNow] = useState(() => Date.now())
     useEffect(() => {
         const id = setInterval(() => setNow(Date.now()), TICK_MS)
         return () => clearInterval(id)
     }, [])
-    const frame = factoryScene((now - start) % LOOP_MS, now)
+    const frame = scene((now - start) % LOOP_MS, now)
     return <FactoryOverlay tiles={tiles} pods={frame.pods} cabinets={frame.cabinets} rejects={frame.rejects} held={frame.held} />
 }
 
 // The factory, drawn by the board's own world. The world takes the whole stage; a thin glass bar
 // carries the gauges and the counts, and a band drops in while sending is held.
-export function FactoryWorld({ theme = 'dark' }: { theme?: 'light' | 'dark' }) {
+export function FactoryWorld({ theme = 'dark', scene = factoryScene }: { theme?: 'light' | 'dark'; scene?: SceneFn }) {
     const [clock, setClock] = useState(() => ({ start: Date.now(), now: Date.now() }))
     const [expired, setExpired] = useState<Set<string>>(() => new Set())
     useEffect(() => {
@@ -46,7 +48,7 @@ export function FactoryWorld({ theme = 'dark' }: { theme?: 'light' | 'dark' }) {
     }, [])
 
     const t = (clock.now - clock.start) % LOOP_MS
-    const frame = useMemo(() => factoryScene(t, clock.now), [t, clock.now])
+    const frame = useMemo(() => scene(t, clock.now), [scene, t, clock.now])
     // Two bubbles at most, the newest: more read as noise.
     // A toast's id carries the loop's number, so the same moment in the next loop is a new toast.
     const loop = Math.floor((clock.now - clock.start) / LOOP_MS)
@@ -54,7 +56,7 @@ export function FactoryWorld({ theme = 'dark' }: { theme?: 'light' | 'dark' }) {
     const tiles = useStable(frame.tiles)
     const links = useStable(frame.links)
     const onToastExpire = useCallback((id: string) => setExpired(prev => new Set(prev).add(id)), [])
-    const worldOverlay = useCallback(() => <LiveOverlay start={clock.start} tiles={tiles} />, [clock.start, tiles])
+    const worldOverlay = useCallback(() => <LiveOverlay start={clock.start} tiles={tiles} scene={scene} />, [clock.start, tiles, scene])
 
     // A feature whose sphere fills throws the app's own confetti; a single merge has its own shake.
     const fullCabinets = frame.cabinets.filter(c => c.slots.every(s => s.state !== 'empty')).length

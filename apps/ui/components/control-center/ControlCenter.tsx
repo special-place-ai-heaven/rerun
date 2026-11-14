@@ -26,6 +26,7 @@ import { useShortcutsStore } from '@/stores/shortcuts.store'
 import { useWorkspaceSettingsStore } from '@/stores/workspace-settings.store'
 import { useIsWorkspaceAdmin, useSession } from '@/supabase/session/SessionProvider'
 import type { BadgeTone } from '@rerun/ui/primitives'
+import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { useTheme } from 'next-themes'
 import { useEffect, useState, type ComponentType } from 'react'
@@ -49,6 +50,7 @@ const COMMAND_ICONS: Record<ControlCommandId, ComponentType<{ className?: string
     ask_assistant: MessageCircleQuestionIcon,
     contact_support: HeadsetIcon,
     recenter_board: FocusCenterIcon,
+    factory: GridIcon,
     toggle_theme: SunIcon,
     workspace: SettingsIcon,
     members: UsersIcon,
@@ -218,6 +220,7 @@ export function ControlCenter() {
         return rows.length > 0 || loading ? [{ id: section, heading, rows, loading }] : []
     }
 
+    const router = useRouter()
     const commandActions: Record<ControlCommandId, () => void> = {
         new_agent: () => useBuilderDialogsStore.getState().openNewAgent(),
         browse_templates: () => useBuilderDialogsStore.getState().openLibrary(),
@@ -225,6 +228,7 @@ export function ControlCenter() {
         ask_assistant: () => (text ? useForemanStore.getState().askForeman(query.trim()) : useForemanStore.getState().toggle()),
         contact_support: () => openCrisp(session?.user?.email),
         recenter_board: () => useBoardStore.getState().recenterBoard(),
+        factory: () => router.push('/factory'),
         toggle_theme: () => setTheme(darkTheme ? 'light' : 'dark'),
         workspace: () => useWorkspaceSettingsStore.getState().openWorkspacePanel('workspace'),
         members: () => useWorkspaceSettingsStore.getState().openWorkspacePanel('members'),

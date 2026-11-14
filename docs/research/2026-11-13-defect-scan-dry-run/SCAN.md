@@ -95,6 +95,26 @@ engine renewed the Claude sign-in under it, and two runs refused at the provider
 during minutes in which a session on another machine and network was refused too. Both texts become class
 `transient` in #241. Only texts seen on real runs were added.
 
+## Third run: the phase B code, before its restart
+
+2026-11-13, 23:50 UTC. Scope: `tools/factory` between the commit running on the server (5a9851f) and dev
+(3fc43f1): 18 files, 891 added lines, merged within one hour by fifteen jobs, six of them editing `dispatch.py`
+one after another, each reviewed alone.
+
+| Finding | Checked how | Outcome |
+|---|---|---|
+| While sending is held for a spent plan, a step that failed for an ordinary reason is still sent again at once: the resend in `failed_attempt` did not look at the hold | a test of the orchestrator's own on dev: two builds, one ends on a spent plan, the other on an ordinary error; a third send goes out in the same beat | real, low to medium: no job lost, but the job spends its one retry on a refusal. Fixed as #278 before the restart |
+
+One finding, one survived. 4.5 minutes, 2,580,000 tokens. It also checked and cleared: a job left running by the
+older code keeps its coworker and is not sent twice; the team list has the shape the new start-up code expects;
+the three text patterns equal the contract's. The run broke one of its own rules: it kept probe scripts outside
+its temp folder, said so, and removed them.
+
+What this run could not find, because it was not there yet or not in its scope:
+- A plan that contradicted a pinned test (#262). The builder found it and ended blocked, as it should.
+- A rule that reads every AI connection where it should read one (#284). It came from reading two jobs that
+  merged after the scan, before their restart.
+
 ## What this does not show
 
 - One graded sample and one live sample. The fault it missed needed knowledge of how another program joins
@@ -105,4 +125,5 @@ during minutes in which a session on another machine and network was refused too
 ## Before it may file issues itself
 
 Three more dry runs with every finding checked, and at least four findings in five surviving the check. Until
-then its cards go to the orchestrator, who files.
+then its cards go to the orchestrator, who files. Count on 2026-11-14: one of the three done (the third run
+above), one finding, one survived.

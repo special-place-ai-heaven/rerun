@@ -303,6 +303,21 @@ timeline is wired; `measures.py` is used by `status_report.py` alone. Nothing is
 "Deleted as this lands" still have the users named there, and the JSON state file stays beside the ledger as
 `.imported`. The rest of this section is the page as written before phase A.
 
+**State after phase B (as_of 2026-11-14, 00:08 UTC: the delegator restarted on dev bd7eb36).** Live: the
+settings by worker type (`pools.py`, a `types` map in `dispatch.json`); the researcher's and the designer's
+queue with their own first brief (`briefs.py`); runs per coworker with the copy number on the job row, every
+coworker still at one run; a reason on every waiting job (`waits.py`, shown by `timeline.py status`); a hold on
+all sending, kept in the ledger (`holds.py`) and armed for thirty minutes by a spent plan; the provider
+patterns taken from the contract. Merged and waiting for the next restart: the hold before a sign-in runs out
+(#261, #262, #284). Seen on real work: a research job (#281) went from label to merge in eight minutes, with
+the researcher's own pull request. Not yet: more than one run of a coworker (the pilot), the fold into one
+main per type, ceilings.
+
+Measured on the cut itself: of the seventeen jobs of phase B, a read by someone who did not cut them corrected
+three before any was started and held two back; one more plan fault surfaced only when its builder ended
+blocked. About one job in four carried a plan fault, which is the case for making that read a step of the
+line (phase E) and not a habit of the orchestrator.
+
 The repository holds two halves of this machine that do not know each other.
 
 - **Live:** `tools/factory/dispatch.py` (519 lines). It runs on the server, carried 30 jobs to a merge on
@@ -371,7 +386,8 @@ Each phase is one cut of a few tasks, ends in something a person can see, and na
 | **F. Deliver and learn** | an update verifies itself; the line changes one thing and measures it | check after an update; defects linked to their job for 7 days; proposals with keep or remove (#115) | escaped defects |
 
 A comes before B on purpose: ghosts on a delegator that loses work would lose it faster. A is merged
-(#205 to #215, with #235 and #238) and live since 2026-11-13, 22:00 UTC.
+(#205 to #215, with #235 and #238) and live since 2026-11-13, 22:00 UTC. B is merged (#246 to #262, with #278
+and #284) and live since 2026-11-14, 00:08 UTC, but for its last three jobs; its pilot and the fold are open.
 
 ## Sources
 

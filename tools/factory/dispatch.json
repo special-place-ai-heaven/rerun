@@ -20,26 +20,11 @@
         {
           "id": "b5e4deb4-fd07-427a-88cf-fba69fde503b",
           "name": "code",
-          "runs": 3
+          "runs": 6
         },
         {
           "id": "53dbe014-5b95-4cf9-853f-de3a3507030a",
           "name": "LARRY",
-          "runs": 1
-        },
-        {
-          "id": "adb3e7b0-7535-4a4f-bfff-101838197532",
-          "name": "HOPPER",
-          "runs": 1
-        },
-        {
-          "id": "3af6462e-a040-453f-aa04-c4bdbdee5418",
-          "name": "MARTIN",
-          "runs": 1
-        },
-        {
-          "id": "942af558-1343-47b2-956a-f543af167ca8",
-          "name": "BRENDAN",
           "runs": 1
         }
       ]
@@ -49,26 +34,11 @@
         {
           "id": "0d0e33bb-171a-4625-bc13-80de03eb0475",
           "name": "LINUS",
-          "runs": 1
+          "runs": 3
         },
         {
           "id": "71dfdea8-3482-4f3f-b091-ed4b16a69b99",
           "name": "BRUCE",
-          "runs": 1
-        },
-        {
-          "id": "29c37c8b-45cf-43bd-b8a0-bdb92d282dd6",
-          "name": "KENT",
-          "runs": 1
-        },
-        {
-          "id": "b87181fb-f337-427c-8a00-280b4699f518",
-          "name": "FRED",
-          "runs": 1
-        },
-        {
-          "id": "b0e5b39f-74e3-4dfd-9d16-8cf53934ad05",
-          "name": "BARBARA",
           "runs": 1
         }
       ]
@@ -78,7 +48,7 @@
       "coworkers": [
         {
           "name": "search",
-          "runs": 1
+          "runs": 3
         }
       ]
     },

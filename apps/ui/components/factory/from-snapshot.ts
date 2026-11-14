@@ -1,0 +1,177 @@
+// Adapter from the delegator's snapshot (packages/contracts, FactorySnapshot) to the Factory scene.
+// Boxes, coworker tiles and belts come from `factoryScene(0, now)`; pods, cabinets, counts and the hold
+// come from the jobs. `FactoryFrame` has no field for blocked jobs, cracked jobs or a silent delegator,
+// so they ride as extra fields. FactoryOverlay.tsx does not draw those three yet.
+
+import { agentTileStyle, type Tile, type TileLink } from '@rerun/ui/iso-grid'
+import type { FactoryJob, FactorySnapshot } from '@rerun/contracts'
+import { type CabinetView, type Cell, type FactoryFrame, type PodView, type SlotView, STATUS_COLOR, factoryScene } from './factory-scene'
+
+export type SnapshotFrame = FactoryFrame & { blocked: { issue: number; reason: string }[]; cracked: number[]; notAnswering: boolean; lastBeatMs: number }
+
+const BEAT_MS = 30_000
+const PITCH = 5
+const KEEP = ['Delegator', 'code', 'LARRY', 'LINUS', 'BRUCE', 'search', 'DIETER', 'rejects']
+const QUIET = '#8ea2ff'
+const clamp = (x: number) => Math.max(0, Math.min(1, x))
+const dedupe = (xs: string[]) => xs.filter((x, i) => i === 0 || x !== xs[i - 1])
+
+type Box = { col_start: number; row_start: number }
+// The same three-line formula as `places()` in factory-scene.ts, which is not exported.
+const places = (b: Box, perRow: number, n: number): Cell[] =>
+    Array.from({ length: n }, (_, i) => ({ col: b.col_start + 1 + PITCH * (i % perRow), row: b.row_start + 1 + PITCH * Math.floor(i / perRow) }))
+
+export function sceneFromSnapshot(snapshot: FactorySnapshot, now: number): SnapshotFrame {
+    const base = factoryScene(0, now)
+    const box = (id: string) => base.containers.find(c => c.id === id)!
+    const tileOf = (id: string) => base.tiles.find(t => t.id === id)!
+
+    // Cells for copies, by coworker: the cells of its box after its own.
+    const copyCells: Record<string, { room: string; cells: Cell[] }> = {
+        code: { room: 'build', cells: places(box('build'), 4, 8).slice(1, 7) },
+        LINUS: { room: 'review', cells: places(box('review'), 2, 4).slice(1, 3) },
+        search: { room: 'studio', cells: places(box('studio'), 2, 4).slice(1, 2) },
+    }
+
+    const live = snapshot.holds.filter(h => Date.parse(h.until) > now)
+    const held = live.length > 0
+    const holdLeftMs = held ? Math.max(...live.map(h => Date.parse(h.until) - now)) : 0
+    const lastBeatMs = now - Date.parse(snapshot.madeAt)
+    const notAnswering = lastBeatMs > 2 * BEAT_MS
+
+    const jobs = snapshot.jobs
+    const blocked: { issue: number; reason: string }[] = []
+    const cracked: number[] = []
+    const copyTiles: Tile[] = []
+    const copyLinks: TileLink[] = []
+    const pods: PodView[] = []
+    const counts = { queued: 0, building: 0, review: 0, checks: 0, merged: 0, runs: 0 }
+    let rejects = 0
+
+    // The tile a job draws on: a copy tile when copy > 1 and it has a cell, else the coworker's own.
+    const holderOf = (job: FactoryJob, who: string): string => {
+        const slots = copyCells[who]
+        const cell = slots && job.copy && job.copy >= 2 ? slots.cells[job.copy - 2] : undefined
+        if (!slots || !cell) return who
+        const id = `${who}-copy-${job.issue}`
+        const own = tileOf(who)
+        copyTiles.push({
+            id, position: cell, span: 2, containerId: slots.room, selectable: false, draggable: false, justPlaced: true,
+            style: { ...own.style, ...agentTileStyle('working', who), buddy: own.style.buddy, opacity: 0.55 }, ariaLabel: `${who}, a copy`,
+        })
+        copyLinks.push({ source: who, target: id, variant: 'trace', color: who === 'LINUS' ? STATUS_COLOR.review : who === 'code' ? STATUS_COLOR.build : '#f472b6' })
+        return id
+    }
+
+    let queue = 0
+    for (const job of jobs) {
+        const since = now - Date.parse(job.enteredAt)
+        const steps = job.steps ?? 0
+        const pod = (path: string[], travel: number, band: PodView['band'], state: PodView['state'], level: number, extra: Partial<PodView> = {}) =>
+            pods.push({ id: `pod-${job.issue}`, issue: job.issue, title: job.title, path, travel, queue: 0, level, band, state, scan: 0, ...extra })
+        switch (job.state) {
+            case 'waiting':
+            case 'queued':
+                counts.queued++
+                pod(['Delegator', 'code'], 0, 'build', held ? 'held' : 'queued', 0, { queue: queue++ })
+                break
+            case 'building':
+                counts.building++
+                counts.runs++
+                pod(dedupe(['Delegator', 'code', job.coworker === 'LARRY' ? 'LARRY' : holderOf(job, 'code')]), clamp(since / 2_240), 'build', 'working', 0.4)
+                break
+            case 'review_wait':
+                counts.review++
+                pod(['code', 'LINUS'], 0.5, 'review', 'queued', 0.4)
+                break
+            case 'reviewing':
+                counts.review++
+                counts.runs++
+                pod(dedupe(['code', 'LINUS', job.coworker === 'BRUCE' ? 'BRUCE' : holderOf(job, 'LINUS')]), clamp(since / 2_240), 'review', 'working', Math.min(0.7, 0.4 + 0.05 * steps), { scan: clamp(since / 3_000) % 1 })
+                break
+            case 'fix_wait':
+                counts.building++
+                pod(['LINUS', 'code'], 0.5, 'build', 'queued', 0.5)
+                break
+            case 'fixing':
+                counts.building++
+                counts.runs++
+                pod(['LINUS', 'code'], clamp(since / 2_240), 'build', 'fixing', Math.min(0.6, 0.5 + 0.02 * steps))
+                break
+            case 'checks':
+                counts.checks++
+                counts.runs++
+                pod(['LINUS', 'Delegator'], clamp(since / 2_240), 'checks', 'checks', 0.8)
+                break
+            case 'blocked': {
+                blocked.push({ issue: job.issue, reason: job.reason ?? '' })
+                const at = job.coworker && KEEP.includes(job.coworker) ? job.coworker : null
+                pod(at ? dedupe(['Delegator', at]) : ['Delegator', 'code'], at ? 1 : 0, 'build', 'queued', 0)
+                break
+            }
+            case 'merged':
+                counts.merged++
+                break
+            case 'rejected':
+                rejects++
+                break
+            case 'failed':
+            case 'returned':
+                cracked.push(job.issue)
+                break
+        }
+    }
+
+    // Cabinets: "No feature" first when a job has no parent, then one per parent; the stock box holds two.
+    const stock = box('stock')
+    const cabCells: Cell[] = [{ col: stock.col_start + 1, row: stock.row_start + 3 }, { col: stock.col_start + 6, row: stock.row_start + 3 }]
+    const parents = [...new Set(jobs.map(j => j.parent).filter((p): p is number => p !== null))].sort((a, b) => a - b)
+    const keys: (number | null)[] = [...(jobs.some(j => j.parent === null) ? [null] : []), ...parents].slice(0, cabCells.length)
+    const slotOf = (j: FactoryJob): SlotView => {
+        const done = j.state === 'merged' || j.state === 'rejected'
+        return { issue: j.issue, state: j.state === 'merged' ? 'merged' : j.state === 'rejected' ? 'rejected' : 'empty', arriving: done ? 1 : 0 }
+    }
+    const cabinets: CabinetView[] = keys.map((p, i) => {
+        const mine = jobs.filter(j => j.parent === p)
+        return { issue: p ?? 0, title: p === null ? 'No feature' : `#${p}`, tasks: mine.map(j => j.issue), at: cabCells[i], slots: mine.map(slotOf) }
+    })
+    const cabTiles: Tile[] = cabinets.map(c => ({
+        id: `cab-${c.issue}`, position: c.at, span: 2, containerId: 'stock', selectable: false, draggable: false,
+        style: { color: '#1b2140', sheen: true, depth: 2 }, ariaLabel: `Feature #${c.issue} ${c.title}: ${c.slots.filter(s => s.state !== 'empty').length} of ${c.slots.length}`,
+    }))
+
+    // Coworker tiles: working when the pool has a run out, else idle.
+    const out = new Map<string, number>()
+    for (const pool of snapshot.pools) for (const c of pool.coworkers) out.set(c.name, c.out)
+    const mergedItems = jobs.filter(j => j.state === 'merged').slice(-6).reverse().map(j => ({ label: `#${j.issue} ${j.title}`, count: 1, at: Date.parse(j.enteredAt) }))
+    const tiles: Tile[] = base.tiles.filter(t => KEEP.includes(t.id)).map(tile => {
+        if (tile.id === 'rejects') return { ...tile, ariaLabel: `Reject bin: ${rejects}` }
+        if (tile.id === 'Delegator') {
+            const state = held ? 'waiting_human' : counts.queued + counts.checks > 0 ? 'working' : 'idle'
+            return { ...tile, style: { ...tile.style, ...agentTileStyle(state, 'Delegator'), buddy: tile.style.buddy, label: 'Loader', ...(held ? { badge: 'lock' as const } : {}), ...(mergedItems.length && !held ? { results: { count: mergedItems.length, items: mergedItems } } : {}) } }
+        }
+        const working = (out.get(tile.id) ?? 0) > 0
+        return { ...tile, style: { ...tile.style, ...agentTileStyle(working ? 'working' : 'idle', tile.id), buddy: tile.style.buddy, opacity: working ? 1 : tile.style.opacity } }
+    })
+
+    // Belts: the base ones between kept tiles, then one to each cabinet. Red when held, else the colour of what runs on it.
+    const lineColor = new Map<string, string>()
+    for (const p of pods) {
+        const color = p.state === 'checks' ? STATUS_COLOR.checks : p.state === 'fixing' ? STATUS_COLOR.fixing : p.state === 'working' ? STATUS_COLOR[p.band === 'review' ? 'review' : 'build'] : null
+        if (!color) continue
+        for (let i = 1; i < p.path.length; i++) { lineColor.set(`${p.path[i - 1]}>${p.path[i]}`, color); lineColor.set(`${p.path[i]}>${p.path[i - 1]}`, color) }
+    }
+    const belts: TileLink[] = [
+        ...base.links.filter(l => KEEP.includes(l.source) && KEEP.includes(l.target) && l.variant === 'belt'),
+        ...cabinets.map(c => ({ source: 'Delegator', target: `cab-${c.issue}`, variant: 'belt' as const, color: QUIET })),
+    ].map(l => ({ ...l, color: held ? STATUS_COLOR.held : lineColor.get(`${l.source}>${l.target}`) ?? QUIET }))
+
+    return {
+        containers: base.containers,
+        tiles: [...tiles, ...copyTiles, ...cabTiles],
+        links: [...belts, ...copyLinks],
+        toasts: [],
+        pods, cabinets, rejects, held, holdLeftMs, counts,
+        blocked, cracked, notAnswering, lastBeatMs,
+    }
+}

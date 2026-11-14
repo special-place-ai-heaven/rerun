@@ -6,6 +6,7 @@ import re
 
 WORKERS = ("coder", "reviewer", "researcher", "designer")
 _DEP = re.compile(r"^\s*\*\*Depends on(?:\*\*\s*:|\s*:\s*\*\*)(.*)$", re.I)
+_PART = re.compile(r"^\s*\*\*Part of(?:\*\*\s*:|\s*:\s*\*\*)(.*)$", re.I)
 _WORKER = re.compile(r"^\s*\*\*Worker(?:\*\*\s*:|\s*:\s*\*\*)(.*)$", re.I)
 _TEST = re.compile(r"^\s*\*\*Test file(?:\*\*\s*:|\s*:\s*\*\*)(.*)$", re.I)
 _FILES = re.compile(r"^\s*\*\*Files\*\*")
@@ -36,6 +37,15 @@ def parse(issue):
             deps = sorted(set(nums) - {number})
         elif not re.search(r"\bnone\b", rest, re.I):
             errors.append("dependency line: carries neither an issue number nor 'none' on that line")
+
+    parent = None
+    pl = [m.group(1) for m in (_PART.match(l) for l in lines) if m]
+    if len(pl) > 1:
+        errors.append("part of line: more than one **Part of** line")
+    elif pl:
+        pn = _NUM.search(pl[0])
+        if pn and int(pn.group(1)) != number:
+            parent = int(pn.group(1))
 
     worker = "coder"
     wl = [m.group(1).strip() for m in (_WORKER.match(l) for l in lines) if m]
@@ -82,7 +92,7 @@ def parse(issue):
             if test not in paths:
                 errors.append("test file: '%s' is not one of the Files paths" % test)
 
-    return {"number": number, "deps": deps, "worker": worker, "paths": paths, "test": test, "errors": errors}
+    return {"number": number, "deps": deps, "worker": worker, "paths": paths, "test": test, "parent": parent, "errors": errors}
 
 
 def cycles(parsed):

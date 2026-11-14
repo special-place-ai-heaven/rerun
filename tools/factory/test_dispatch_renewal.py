@@ -18,7 +18,8 @@ class Account(World):
         if tool == "list_ai_connections":
             if self.broken:
                 raise KeyError("list_ai_connections")
-            return {"connections": [{"provider": "claude", "signIn": self.sign_in}]}
+            return {"connections": [{"id": "c1", "provider": "claude", "isDefault": True,
+                                 "signIn": self.sign_in}]}
         return super().account(tool, args)
 
 

@@ -1,6 +1,9 @@
 # Design: a Factory view in the web app
 as_of 2026-11-14
 
+**SUPERSEDED** by `docs/research/2026-11-14-factory-world/SPEC.md` (the production line the owner
+approved). Only section 5, what the app could read, still holds; both flat options below were rejected.
+
 Issue #312. Status: DRAFT. VISUALLY UNVERIFIED: no browser here may open a file on disk, so the two mocks were
 checked by running their scripts against a stub (all four views build, no `undefined`), not by eye. A person
 should open `mock-a.html` and `mock-b.html` in light and dark at 1280x800 and 1920x1080 before the build.

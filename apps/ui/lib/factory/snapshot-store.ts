@@ -1,3 +1,5 @@
+import 'server-only'
+
 import type { FactorySnapshot } from '@rerun/contracts'
 
 // The newest picture of the factory line per workspace, as the delegator pushes it each beat

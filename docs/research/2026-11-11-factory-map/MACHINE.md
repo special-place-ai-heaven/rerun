@@ -318,6 +318,16 @@ three before any was started and held two back; one more plan fault surfaced onl
 blocked. About one job in four carried a plan fault, which is the case for making that read a step of the
 line (phase E) and not a habit of the orchestrator.
 
+**State after the pilot (as_of 2026-11-14, 03:00 UTC: the delegator restarted on dev 913e4fb at about 02:20
+UTC).** Live: the hold before a sign-in runs out, applied only while a run of the delegator is out (#291); no
+further send to a coworker whose send is unresolved (#292); `code` first in the coder list with three runs
+(#287). The pilot ran at 02:21 UTC: three builds side by side on `code`, all merged within eleven minutes, none
+crossed. One build left a file that stopped the next job, which copies did not cause; the record is
+`docs/research/2026-11-14-copies-pilot/PILOT.md`. Live in the installed tools since 02:50 UTC: `wt` passes over
+entries that are not folders (#301). Merged and waiting for the next restart: the resend of a failed attempt
+follows the unresolved-send rule (#296), and the briefs name `/tmp` as the place of a file outside the change
+(#302). Not yet: the fold into one main per type, ceilings.
+
 The repository holds two halves of this machine that do not know each other.
 
 - **Live:** `tools/factory/dispatch.py` (519 lines). It runs on the server, carried 30 jobs to a merge on
@@ -364,6 +374,9 @@ not checked.
    *Settled:* the tools key everything by job and lock the count of builders; the one file not keyed is the
    pull request body a builder writes, which the brief now names by issue number. A pilot of three builds on one
    coworker is the check.
+   *Pilot, 2026-11-14:* the name was not enough. One build put that file into the folder that holds the
+   worktrees, and the worktree tool crashed on it for the next job. The tool now passes such entries over (#301)
+   and the brief names the place (#302).
 2. The worker types and the main coworker of each. `roster.json` already has areas with an owner and a builder.
    *Settled:* one main per type (coder `code`, reviewer LINUS, researcher `search`, designer DIETER), folded in
    only after the pilot; the specialists become types of their own when a cut names them.
@@ -387,7 +400,8 @@ Each phase is one cut of a few tasks, ends in something a person can see, and na
 
 A comes before B on purpose: ghosts on a delegator that loses work would lose it faster. A is merged
 (#205 to #215, with #235 and #238) and live since 2026-11-13, 22:00 UTC. B is merged (#246 to #262, with #278
-and #284) and live since 2026-11-14, 00:08 UTC, but for its last three jobs; its pilot and the fold are open.
+and #284) and live since 2026-11-14, 00:08 UTC, but for its last three jobs. Its pilot ran on 2026-11-14: points
+1 to 4 of its bar passed, the fifth did not hold as worded. The fold is open.
 
 ## Sources
 

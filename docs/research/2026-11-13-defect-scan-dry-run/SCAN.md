@@ -115,6 +115,27 @@ What this run could not find, because it was not there yet or not in its scope:
 - A rule that reads every AI connection where it should read one (#284). It came from reading two jobs that
   merged after the scan, before their restart.
 
+## Fourth run: the hold and the copies setting, before their restart
+
+2026-11-14, shortly after 01:00 UTC. Scope: `tools/factory` between the commit running on the server (bd7eb36)
+and the head of the pilot's settings branch (fe8159a): six files, 193 added lines. Two things were new: a hold
+on sending before a sign-in runs out, and the first setting that gives one coworker more than one run.
+
+| Finding | Checked how | Outcome |
+|---|---|---|
+| The hold stops every send once the sign-in has 50 minutes left, but the engine renews a sign-in only when a run starts or the last one ends. On an idle line the hold stops the one thing that would end it | a test of the orchestrator's own: one labelled issue, nothing out, 40 minutes left: nothing is sent after four beats | real: the line would have stood still until someone started a run by hand. Fixed as #291 before the restart: the hold applies only while a run of the delegator is out |
+| With more than one run on a coworker, a send that was cut off can adopt the run of a sibling job from the run list | a test: one coder with three runs, three issues, the first send raises; job 1 follows the build of issue 2, issue 2 is sent twice, issue 1 is never built | real, and in the path of the pilot. Fixed as #292 before the restart: a coworker with an unresolved send gets no further send |
+
+Two findings, two survived. 638,000 tokens.
+
+What this run could not find:
+- A hole in the fix of its own second finding. The rule went into the two places that pick a coworker; the
+  resend of a failed attempt sends without passing through either. It came from a read of the merged change of
+  #292 before its restart, was confirmed with a test, and was fixed as #296.
+- The stray file of the pilot (`docs/research/2026-11-14-copies-pilot/PILOT.md`). The worktree tool had not
+  changed, so it was outside the difference under scan, and the fault needed a build to leave a file in the
+  wrong folder.
+
 ## What this does not show
 
 - One graded sample and one live sample. The fault it missed needed knowledge of how another program joins
@@ -125,5 +146,5 @@ What this run could not find, because it was not there yet or not in its scope:
 ## Before it may file issues itself
 
 Three more dry runs with every finding checked, and at least four findings in five surviving the check. Until
-then its cards go to the orchestrator, who files. Count on 2026-11-14: one of the three done (the third run
-above), one finding, one survived.
+then its cards go to the orchestrator, who files. Count on 2026-11-14: two of the three done (the third and
+the fourth run above), three findings, three survived.

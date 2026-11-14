@@ -312,6 +312,9 @@ function readMemoryEntries(value: unknown): MemoryEntry[] {
 // `actor` is whose access the call runs with: the workspace for an API key, the member a foreman
 // turn speaks for. `actorUserId` is the member recorded as the author of what the call starts (an
 // API key's creator, the foreman's member).
+// A picture dated further ahead than this is refused: a forged far-future madeAt would freeze every later real beat.
+const FACTORY_SNAPSHOT_MAX_SKEW_MS = 120_000
+
 export async function dispatchAccountTool(actor: Actor, name: string, args: Record<string, unknown>, { actorUserId = null }: { actorUserId?: string | null } = {}): Promise<unknown> {
     const workspaceId = actor.workspaceId
     // Every tool that takes a `model` pins it, on a coworker, a scheduled task, a trigger or the
@@ -1036,12 +1039,14 @@ export async function dispatchAccountTool(actor: Actor, name: string, args: Reco
         }
 
         case 'factory_report': {
+            if (!isAdminActor(actor)) throw new AccessDeniedError('adminOnly')
             // The cap is on the snapshot as received, before validation.
             const text = JSON.stringify(args.snapshot ?? null)
             const size = Buffer.byteLength(text, 'utf8')
             if (size > FACTORY_SNAPSHOT_MAX_BYTES) throw new Error(`factory_report: the snapshot is over ${FACTORY_SNAPSHOT_MAX_BYTES} bytes`)
             const parsed = factorySnapshotSchema.safeParse(args.snapshot)
             if (!parsed.success) throw new Error('factory_report: the snapshot does not match the schema')
+            if (Date.parse(parsed.data.madeAt) > Date.now() + FACTORY_SNAPSHOT_MAX_SKEW_MS) throw new Error('factory_report: the snapshot is dated in the future')
             return { kept: putFactorySnapshot(workspaceId, parsed.data) }
         }
 

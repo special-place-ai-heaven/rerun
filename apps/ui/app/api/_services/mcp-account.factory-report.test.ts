@@ -1,4 +1,4 @@
-import { workspaceActor } from '@/app/api/_auth/access'
+import { workspaceActor, type Actor } from '@/app/api/_auth/access'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getFactorySnapshot } from '@/lib/factory/snapshot-store'
@@ -56,5 +56,26 @@ describe('factory_report account tool', () => {
         expect((err as Error).message).toBe('factory_report: the snapshot does not match the schema')
         await expect(dispatchAccountTool(workspaceActor(105), 'factory_report', {})).rejects.toThrow(/does not match the schema/)
         expect(getFactorySnapshot(105)).toBeNull()
+    })
+
+    it('refuses a non-admin account and stores nothing', async () => {
+        const member: Actor = { kind: 'user', userId: 'u1', workspaceId: 106, role: 'member', boxScope: 'all' } as Actor
+        const err = await dispatchAccountTool(member, 'factory_report', { snapshot: snap('2026-11-14T06:00:00Z') }).catch(e => e as Error)
+        expect(err).toBeInstanceOf(Error)
+        expect((err as { code?: string }).code).toBe('adminOnly')
+        expect(getFactorySnapshot(106)).toBeNull()
+    })
+
+    it('refuses a madeAt 10 minutes ahead of the clock without echoing it, and stores nothing', async () => {
+        const madeAt = new Date(Date.now() + 10 * 60_000).toISOString()
+        const err = await dispatchAccountTool(workspaceActor(107), 'factory_report', { snapshot: snap(madeAt) }).catch(e => e as Error)
+        expect((err as Error).message).toBe('factory_report: the snapshot is dated in the future')
+        expect(getFactorySnapshot(107)).toBeNull()
+    })
+
+    it('keeps a madeAt 60 seconds ahead', async () => {
+        const madeAt = new Date(Date.now() + 60_000).toISOString()
+        expect(await dispatchAccountTool(workspaceActor(108), 'factory_report', { snapshot: snap(madeAt) })).toEqual({ kept: true })
+        expect(getFactorySnapshot(108)).not.toBeNull()
     })
 })
